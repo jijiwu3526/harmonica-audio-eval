@@ -21,3 +21,12 @@ data/user/*
 
 # macOS
 .DS_Store
+
+# 大体积 vendor 资产：SoundFont 走脚本按需下载，不入库
+vendor/soundfonts/*.sf2
+vendor/soundfonts/*.sf3
+vendor/VCSL/
+
+# 生成的数据集产物（可通过 build_dataset.py 复现，不入库）
+harmonica_mvp_dataset/*/
+!harmonica_mvp_dataset/README.md
