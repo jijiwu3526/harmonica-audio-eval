@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 数据产物（音频与结果不入库）
+data/outputs/*
+!data/outputs/.gitkeep
+data/reference/*
+!data/reference/.gitkeep
+data/user/*
+!data/user/.gitkeep
+*.wav
+*.mp3
+*.m4a
+*.flac
+
+# macOS
+.DS_Store
