@@ -56,7 +56,22 @@ Mutopia 搜索页：`https://www.mutopiaproject.org/cgibin/make-table.cgi?search
 
 ## 4. 实测踩坑（务必避免）
 
-1. **Amazing Grace 原始 MIDI 全曲仅 72.0 s，但抽出的单声部主旋律只有 38.5 s** —— **低于 45 s 下限**。必须按 §十 从完整小节边界重复 verse，不得 crossfade。多数曲目都会遇到同类问题，**长度必须在抽完旋律后再校验**。
+1. ~~**Amazing Grace 原始 MIDI 全曲仅 72.0 s，但抽出的单声部主旋律只有 38.5 s** —— **低于 45 s 下限**。必须按 §十 从完整小节边界重复 verse，不得 crossfade。多数曲目都会遇到同类问题，**长度必须在抽完旋律后再校验**。~~
+
+   > **⚠ 更正（v2）**：上条结论**错误**，已实测推翻。真实数据：
+   > - 源 MIDI `length = 72.000 s`；melody 115 个音符，`melody.mid length = 72.401 s`。
+   > - 抽出的主旋律**跨度 69.0 s**（首音 tick 154 → 末音 tick 26650；60 BPM / 384 ppq
+   >   ⇒ 26650 tick = 69.40 s），**远高于 45 s 下限**，无需重复 verse。
+   > - 交付音频实测 **72.802 s**（含 0.4 s 前导与 0.4 s 尾部静音 + 末音时值）。
+   >
+   > **错误根因**：把 `mido` 的 `msg.time` 当作**秒**读取，但它实际是 **ticks**。
+   > 26496 tick ÷ 384 ppq = 69.0 拍，在 60 BPM 下即 69.0 s，不是 26 496 s 也不是 38.5 s。
+   > **教训**：任何来自 MIDI 的时长数字，必须先确认单位（tick ↔ 秒）再下结论；
+   > 且必须在**抽完旋律后**用 `MidiFile.length` 与「末音 tick × 拍长」双重校验。
+   >
+   > **对全局的影响**：§4 中依赖「多数曲目都会遇到同类问题」的推论**不再成立**。
+   > 每首曲子的长度必须独立实测，不得套用此条。
+
 2. **Mutopia 的 `lower` / `pianoLH` / `down:VoiceI` 是伴奏低音，`upper` / `pianoRH` 常是钢琴右手（含和弦）**。正确主旋律往往在名为 `mel` / `voice` / `Tema` / `:mel` 的轨，或需要从上层轨中做单声部化。
 3. **FluidSynth 默认输出立体声**；必须用 `-F out.wav -r 44100` 后经 ffmpeg 转 `-ac 1`，或用 `-o audio.file.name` 配合后续转换。最终交付前一律 ffmpeg 归一为 `44100 Hz / mono / pcm_s16le`。
 4. **GM Harmonica 的 program number 是 22**（0-based）；GM Acoustic Grand Piano 是 0。实测渲染成功。
@@ -91,7 +106,13 @@ fluidsynth -ni -F out.wav -r 44100 -g 0.6 "$SF" input.mid
 ffmpeg -y -i out.wav -ac 1 -ar 44100 -c:a pcm_s16le final.wav
 ```
 
-实测：`reference_full.wav` 74.5 s、`practice_harmonica.wav` 38.5 s，均为 `pcm_s16le / 44100 / stereo`（**故仍需转 mono**）。
+> **⚠ 更正（v2）**：上述渲染链路（FluidSynth + GM SoundFont）**已整体废弃**。
+> GM 的音色 22（Harmonica）实测听感过于电子化，负责人已否决。
+> 现行走的是 **VCSL 真采样渲染器**（`harmonica_sampler.py`），见 §5。
+
+实测（旧链路遗留数据，仅作历史记录）：`reference_full.wav` 74.5 s、`practice_harmonica.wav` 38.5 s。
+其中 **38.5 s 系上述 tick/秒 单位误读所致，非真实时长**（真实为 72.802 s，见 §4）。
+
 
 ## 7. 主智能体已完成 / 未完成
 
