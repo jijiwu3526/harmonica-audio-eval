@@ -285,6 +285,57 @@ def check_forbidden_on_host(r: Report) -> None:
         print("     （模块级内部函数不计入 —— 它们不是 C1 能看到的面）")
 
 
+def check_no_shadowing(r: Report) -> None:
+    """⑦ 同名重复定义检测。
+
+    ★ 这条检查是被一次**真实事故**逼出来的：
+    我在修 §20 盲审缺陷时，给 contract.py 追加了一段代码，
+    末尾误留了一个 `class SessionState(str, Enum):` 头。
+    Python **不报错** —— 后一个定义静默**遮蔽**了前一个（真）定义，
+    import 照常成功，而 `SessionState` 变成了一个空枚举。
+
+    这正是本项目反复出现的同一类缺陷：**不报错，只静默算错**。
+    与 FIELD_LAYOUTS、hop_length、端口对称性属于同一族，
+    故用机械检查兜住。
+
+    检查范围：同一文件内，模块级 class / def 名是否重复。
+    """
+    print()
+    print("─" * 72)
+    print("⑦ 重复定义（静默遮蔽检测）")
+    print("─" * 72)
+
+    hits: list[str] = []
+    checked = 0
+
+    for rel in EXPECTED:
+        path = REPO / rel
+        if not path.exists():
+            continue
+        checked += 1
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+        seen: dict[str, int] = {}
+        for node in tree.body:  # 只看模块级
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name in seen:
+                    hits.append(
+                        f"{rel}: '{node.name}' 在第 {seen[node.name]} 行与 "
+                        f"第 {node.lineno} 行重复定义"
+                        "（后者会静默遮蔽前者，import 不报错）"
+                    )
+                else:
+                    seen[node.name] = node.lineno
+
+    for h in hits:
+        print(f"  ❌ {h}")
+        r.err(h)
+
+    print(f"  检查了 {checked} 个文件的模块级定义")
+    if not hits:
+        print("  ✅ 无重复定义（不存在静默遮蔽）")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -296,6 +347,7 @@ def main() -> int:
     check_shell_purity(r)
     check_layer_direction(r)
     check_forbidden_on_host(r)
+    check_no_shadowing(r)
 
     print()
     print("=" * 72)

@@ -46,7 +46,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from .contract import CORE_REQUIRED_PORTS, FIELD_LAYOUTS, TimelineBasis
+from .contract import (
+    CORE_REQUIRED_PORTS,
+    FIELD_LAYOUTS,
+    UNITS_VOCABULARY,
+    TimelineBasis,
+)
 
 PROFILE_VERSION = "CORE_PROFILE_V0.1"
 """数据面身份的一部分。数据面内容 = f(reference, practice, PROFILE_VERSION)。"""
@@ -133,6 +138,17 @@ class MaterializeSpec:
     """音高估计窗长。与 frame_length 分开声明，因为二者语义不同：
     音高要求窗内有稳定周期，能量只要求统计意义。"""
 
+    pitch_hop_length: int = 2048
+    """★ 音高帧移。G5 修正新增 —— 第一版**根本没有这个数字**。
+
+    第一版只声明了窗长（pitch_frame_length），实现者只能猜帧移：
+    猜 2048（= ALIGN.hop_length）与猜 256（= rms_hop_length）都不报错，
+    但产出的 pitch 曲线时间刻度会差 8×。
+
+    取 2048（≈46 ms）的理由：音准现在**按音聚合**（用 notes.* 索引），
+    不做逐帧精细时间定位，故不需要 RMS 那样密的时间分辨率。
+    """
+
     rms_frame_length: int = 1024
     """RMS 包络窗长。比音高窗短，以保留起音的瞬态。"""
 
@@ -201,6 +217,28 @@ class PortSpec:
     **必须**与 `contract.FIELD_LAYOUTS[类别前缀]` 一致 ——
     这是防止「f0_hz 与 voiced 静默错位」的唯一手段。"""
 
+    hop_length: int = 0
+    """★ 该端口的**帧移**（采样点）。帧类端口必须声明，非帧类填 0。
+    （G5 修正：盲审发现的静默分叉点。）
+
+    为什么必须有这个字段：`read(port_id, (t0,t1))` 的单位是**秒**，
+    而帧类端口的第二维是**帧**。秒→帧的换算必须有唯一依据，
+    否则两个实现者会算出不同的时间偏移 —— **而且不会报错**。
+
+    第一版的实际情况：
+        ALIGN.hop_length      = 2048   ← 这是**对齐用 chroma** 的帧移
+        MATERIALIZE.frame_length = 2048  ← 这是**窗长**，不是帧移
+        MATERIALIZE.rms_hop_length = 256 ← RMS 的帧移
+        pitch.* / chroma.lowres.* 的帧移：**根本没有声明**
+
+    `frame_length` 与 `hop_length` 数值恰好都是 2048，是**巧合**，不是约定。
+    实现者若顺手用 ALIGN.hop_length 去换算 pitch 的帧号，会得到错误时刻；
+    若用 rms_hop_length（256），则差 8×。两种都不会报错。
+
+    该字段同时让 `assert_profile_integrity()` 能检查：
+        - 含 'frame' 维度的端口必须声明 hop_length > 0
+        - 不含 'frame' 维度的端口必须留 0""".rstrip()
+
 
 PORTS: tuple[PortSpec, ...] = (
     # ── 对齐结果（真正必须物化的东西）────────────────────────────
@@ -211,7 +249,8 @@ PORTS: tuple[PortSpec, ...] = (
         field_names=("reference_frame", "practice_frame"),
         element_type="int32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.align",
+                hop_length=0,
+produced_by="core.align",
         rationale=(
             "对齐的唯一产物。实测仅 165 KB（120 s），"
             "却是其余全部端口的生成依据 —— 相对 DTW 代价矩阵是 1/5300。"
@@ -225,7 +264,8 @@ PORTS: tuple[PortSpec, ...] = (
         dimensions=("sample",),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.surface",
+                hop_length=0,
+produced_by="core.surface",
         rationale=(
             "逃生口甲：算法永远能拿到参考 PCM 自行做特有预处理，"
             "因此 profile 只决定「快不快」，不决定「能不能」。"
@@ -237,7 +277,8 @@ PORTS: tuple[PortSpec, ...] = (
         dimensions=("sample",),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.surface",
+                hop_length=0,
+produced_by="core.surface",
         rationale=(
             "逃生口乙：练习演奏保留源时间。"
             "节奏类指标**只能**在这条轴上算 —— "
@@ -250,7 +291,8 @@ PORTS: tuple[PortSpec, ...] = (
         dimensions=("sample",),
         element_type="float32",
         timeline_basis=TimelineBasis.WARPED,
-        produced_by="core.surface",
+                hop_length=0,
+produced_by="core.surface",
         rationale=(
             "时间归一化后的练习演奏，与参考等长。"
             "供音高/力度类指标使用 —— 它们关心「弹了什么」，不关心「何时弹」。"
@@ -265,7 +307,8 @@ PORTS: tuple[PortSpec, ...] = (
         field_names=("f0_hz", "voiced", "confidence"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=MATERIALIZE.pitch_hop_length,
+produced_by="core.features",
         rationale=(
             "逐帧 f0 + voiced 标志 + 置信度（field 维）。"
             "预生成是因为它是音准算法的**直接**输入，现算不划算。"
@@ -278,7 +321,8 @@ PORTS: tuple[PortSpec, ...] = (
         field_names=("f0_hz", "voiced", "confidence"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=MATERIALIZE.pitch_hop_length,
+produced_by="core.features",
         rationale=(
             "练习侧音高曲线，与参考同轴（REFERENCE），"
             "从而两条曲线可以逐帧直接相减得到音分误差。"
@@ -292,7 +336,8 @@ PORTS: tuple[PortSpec, ...] = (
         dimensions=("frame",),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=MATERIALIZE.rms_hop_length,
+produced_by="core.features",
         rationale="逐帧 RMS。力度对比需要它，且真值来自 MIDI velocity。",
     ),
     PortSpec(
@@ -301,7 +346,8 @@ PORTS: tuple[PortSpec, ...] = (
         dimensions=("frame",),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=MATERIALIZE.rms_hop_length,
+produced_by="core.features",
         rationale="同上。与参考同轴以便逐帧比较。",
     ),
 
@@ -313,7 +359,8 @@ PORTS: tuple[PortSpec, ...] = (
         field_names=("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=ALIGN.hop_length,
+produced_by="core.features",
         rationale=(
             "对齐的输入。保留在数据面里是为了**可复现**："
             "审查者能用它重跑对齐，验证 warp_path 不是凭空来的。"
@@ -327,11 +374,24 @@ PORTS: tuple[PortSpec, ...] = (
         field_names=("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=ALIGN.hop_length,
+produced_by="core.features",
         rationale="同上，练习侧。",
     ),
 
     # ── 逐音摘要（算法的索引层）──────────────────────────────────
+    # ★★ MOLD BREAK 修正（§20 盲审情况 A）★★
+    #
+    # 这里原先是**不对称**的：只有 notes.reference，没有 notes.practice。
+    # 而 pitch / timing / dynamics **三者都声称**"可定位到第几个音"。
+    #
+    # 这是端口表的结构性缺陷，不是某个算法少声明了一个端口：
+    #   pitch.py    "产出逐音误差（音分，可定位到第几个音）" ← 凭什么知道第几个？
+    #   timing.py   声明了 notes.reference（唯一声明者）✓
+    #   dynamics.py "逐音能量差"                          ← 练习侧无索引可用
+    #
+    # 两个独立盲审模型各自复现了后果（dynamics 的轴自相矛盾），
+    # 但根因在这里 —— **"按音比较"这个能力原先只有一半。**
     PortSpec(
         port_id="notes.reference",
         units="index",
@@ -339,11 +399,30 @@ PORTS: tuple[PortSpec, ...] = (
         field_names=("onset_sec", "f0_hz", "rms"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
-        produced_by="core.features",
+                hop_length=0,
+produced_by="core.features",
         rationale=(
             "参考侧逐音摘要（起音时刻/音高/能量）。"
             "它让算法能按**音**而不是按**帧**组织结果，"
             "从而输出「第 7 个音偏低 40 音分」这种可定位的结论。"
+        ),
+    ),
+    PortSpec(
+        port_id="notes.practice",
+        units="index",
+        dimensions=("note", "field"),
+        field_names=("onset_sec", "f0_hz", "rms"),
+        element_type="float32",
+        timeline_basis=TimelineBasis.REFERENCE,
+                hop_length=0,
+produced_by="core.features",
+        rationale=(
+            "★ 盲审补齐的对称项。练习侧逐音摘要，与 notes.reference **同轴**"
+            "（都在源时间网格上）。"
+            "没有它，「按音对齐」在练习侧**无索引可用** —— "
+            "dynamics 只能退而用「WARPED 轴」当代理，"
+            "而那是一个无法满足的约束（数据面里没有 WARPED 轴的 rms）。"
+            "正确机制是**按音配对**，不是按轴配对。"
         ),
     ),
 )
@@ -355,11 +434,17 @@ PORT_INDEX: dict[str, PortSpec] = {p.port_id: p for p in PORTS}
 def assert_profile_integrity() -> None:
     """profile 自检。**在 import 时即执行**，让配置错误立刻暴露。
 
-    检查四件事：
+    检查六件事：
       1. 端口清单是**封闭**的：无重复 port_id
       2. 逃生口存在：CORE_REQUIRED_PORTS 全部被声明
       3. 每个端口都有非空 rationale（答不出「为什么需要」就该删）
       4. 多维度端口的字段顺序与契约 FIELD_LAYOUTS 一致
+      5. ★ 帧类端口必须声明 hop_length，非帧类必须留 0
+      6. ★ 端口对称性：X.reference 与 X.practice 要么都有、要么都没有
+
+    第 5、6 条是 `MOLD BREAK` 后新增的（§20 盲审情况 A）。
+    二者都属于「不报错、只静默算错/静默无法实现」的缺陷类别 ——
+    与第 4 条同一个教训，只是我第一版没把它推广到帧栅格与端口对称性。
 
     失败即抛，不返回布尔值 —— 配置错误不该被忽略。
     """
@@ -407,6 +492,62 @@ def assert_profile_integrity() -> None:
             raise ValueError(
                 f"端口 {spec.port_id} 的 field_names={tuple(spec.field_names)} "
                 f"与契约定义的 {tuple(expected)} 不一致。"
+            )
+
+    # 检查 5：帧类端口必须声明帧移，非帧类必须留 0。
+    # G5 修正 —— 盲审发现的静默分叉点：read() 的单位是秒，而帧类端口的
+    # 第二维是帧，秒→帧换算必须有唯一依据。第一版 pitch.*/chroma.* 的
+    # 帧移**根本没有声明**，两个实现者会算出差 8× 的时刻且不报错。
+    for spec in PORTS:
+        is_frame_based = "frame" in spec.dimensions
+        if is_frame_based and spec.hop_length <= 0:
+            raise ValueError(
+                f"端口 {spec.port_id} 含 'frame' 维度，但未声明 hop_length。"
+                "read(time_range) 的单位是秒，没有帧移就无法唯一换算出帧号 —— "
+                "实现者只能猜，而猜错不会报错，只会静默返回错误时间窗的数据。"
+            )
+        if not is_frame_based and spec.hop_length != 0:
+            raise ValueError(
+                f"端口 {spec.port_id} 不含 'frame' 维度，"
+                f"但声明了 hop_length={spec.hop_length}。"
+                "非帧类端口声明帧移会产生误导（读的人会以为它也有帧结构）。"
+            )
+
+    # 检查 7：units 必须在受控词表内（G10 修正）。
+    # 开放式字符串会让两个实现者写出 "hz"/"Hz"/"hertz" 三种，
+    # 而下游按 == "hz" 判断时静默不匹配。
+    for spec in PORTS:
+        if spec.units not in UNITS_VOCABULARY:
+            raise ValueError(
+                f"端口 {spec.port_id} 的 units='{spec.units}' "
+                f"不在 contract.UNITS_VOCABULARY 内。\n"
+                f"合法取值：{sorted(UNITS_VOCABULARY)}\n"
+                "若确实需要新单位，先加进词表 —— "
+                "否则下游按字符串相等判断端口语义时会静默漏配。"
+            )
+
+    # 检查 8：端口对称性。
+    # §20 盲审情况 A 的根因 —— 第一版 notes.* 只有 reference 侧，
+    # 导致 dynamics 写出无法满足的 MUST（要求一个不存在的端口轴）。
+    # 对称性破裂是可机械检查的，故在此设卡。
+    ids_set = set(ids)
+    for pid in ids:
+        if pid.endswith(".reference"):
+            twin = pid[: -len(".reference")] + ".practice"
+        elif pid.endswith(".practice"):
+            twin = pid[: -len(".practice")] + ".reference"
+        else:
+            continue
+        # 例外：pcm.warped.* 刻意只有练习侧 —— 参考无需被拉伸到自己。
+        if pid.startswith("pcm.warped.") or twin.startswith("pcm.warped."):
+            continue
+        if twin not in ids_set:
+            raise ValueError(
+                f"端口对称性破裂：{pid} 存在但 {twin} 不存在。\n"
+                "参考侧与练习侧要么都有、要么都没有 —— "
+                "只有一侧会让「按音/逐帧比较」在另一侧无索引可用，"
+                "而算法会因此写出无法满足的约束（这正是盲审发现的那个缺陷）。\n"
+                "唯一例外：pcm.warped.* 刻意只有练习侧（参考无需被拉伸）。"
             )
 
 

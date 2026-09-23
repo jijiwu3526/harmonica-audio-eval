@@ -85,16 +85,58 @@ class SessionState(str, Enum):
 class TimelineBasis(str, Enum):
     """一个量挂在哪条时间轴上。**每个端口都必须声明**。
 
-    依据 SPEC.md §5.5「两轴分离」。
+    依据 SPEC.md §5.5「两轴分离」原文：
+
+    > 时间轴必须同时提供**保留源时间**与**时间归一化**两种表示
+    > （对应 Core 数据面的 mapped / warped）。
+    > **段级节奏指标必须在保留源时间的表示上计算**，
+    > 否则归一化会静默抹掉抢拍拖拍。
+
+    ★★ `MOLD BREAK` 修正（§20 盲审情况 A）★★
+
+    本枚举第一版把 REFERENCE 定义成「保留源时间。对齐后重采样到参考演奏的时间轴」——
+    **这两句话互相矛盾**：既保留源时间，又重采样到别人的时间轴，是两条不同的网格。
+    该含糊定义向下游传播，直接导致 `algorithms/dynamics.py` 写出一条
+    **无法满足的 MUST**（要求读 WARPED 轴的 `rms.*`，而数据面里不存在该端口）。
+    两个独立盲审模型各自复现了这个冲突。
+
+    修正要点：**两条轴描述的是「哪条时间网格」，不是「什么物理量」。**
+    同一个物理量（如练习的 PCM、练习的能量）在两套网格上**各有一份端口**，
+    这才是 SPEC §5.5 说的"同时提供两种表示"。
+
+    命名也一并澄清（第一版的名字暗示"参考侧/练习侧"，是误导）：
+        REFERENCE 网格 = **源时间网格**，以参考演奏的时钟为刻度
+        WARPED    网格 = **归一化网格**，把练习拉伸到与参考等长
     """
 
     REFERENCE = "REFERENCE"
-    """保留源时间。对齐后重采样到**参考演奏**的时间轴。
-    抢拍拖拍在此轴上**可见**。→ 节奏类指标必须用它。"""
+    """**源时间网格**：以参考演奏的时钟为刻度，保留原始时间关系。
+
+    练习侧的音在**参考时钟**上的位置 = 它实际被吹出的时刻。
+    因此「练习比参考早/晚多少」在这条网格上**可见** —— 抢拍拖拍在此。
+
+    关键性质：**距离与时刻都有绝对意义。**
+    第 10 秒就是第 10 秒，音与音之间的间隔是真实间隔。
+
+    → 节奏类指标必须在它上面算（SPEC §5.5 的强制）。
+    → **不要**把它读成"参考演奏专属的轴"：练习侧的 `pcm.mapped.practice`
+      和 `rms.practice` 也在它上面，它们描述的是**练习在参考时钟上的样子**。
+    """
 
     WARPED = "WARPED"
-    """时间归一化。练习被拉伸到与参考等长。
-    抢拍拖拍在此轴上**被抹掉**。→ 拿它报节奏错误是构造性错误。"""
+    """**归一化网格**：把练习线性/非线性拉伸到与参考等长后的网格。
+
+    练习的第 n 个音被搬到参考第 n 个音的位置上。
+    于是「练习比参考早/晚多少」在这条网格上**不存在** —— 它已被抹掉。
+
+    关键性质：**只有"第几个音"有意义，绝对时刻没有意义。**
+    第 10 秒在这里只是一个位置标记，不代表真实时间。
+
+    → **适合**音准、力度这类"关心吹了什么、不关心何时吹"的比较。
+    → **禁止**拿它报节奏错误（那是构造性错误，结果恒为 0 且不报错）。
+    → **不要**以为它只存在于练习侧：任何"想按音对齐比较"的物理量，
+      都可以在它上面再放一份端口（见下方 WAIT-AND-SEE）。
+    """
 
 
 class AlignmentRepresentation(str, Enum):
@@ -159,8 +201,52 @@ chroma 的音级起点同样有歧义（bin 0 是 C 还是 A？），故一并�
 **bin 0 = C**，依次半音上行。
 
 `profile.assert_profile_integrity()` 会检查：凡 `len(dimensions) > 1`
-的端口，其前缀必须在这张表里，且字段数必须等于 `dimensions[-1]` 声明的大小。
+的端口，其前缀必须在这张表里，且字段数必须等于 `len(field_names)`。
+
+★ G6 修正（§20 盲审发现）：原文写的是「字段数必须等于 `dimensions[-1]` 声明的
+大小」——**这句话按字面无法实现**，因为 `dimensions` 里放的是**语义名字符串**
+（`'frame'` / `'bin'` / `'field'`），**不含尺寸**。真正的尺寸在
+`PortDescriptor.shape` 里，而那要到运行期才填。
+故校验对象改为 `len(field_names)`（profile 侧可静态检查）。
 """
+
+
+CONTENT_HASH_MAGIC: bytes = b"harmonica-eval/surface/v1\x00"
+"""`content_hash` 的域分隔前缀（G12）。
+
+作用：让本 hash 的输入空间与任何其他用途的 sha256 **不重叠**。
+若将来有人复用同一个 sha256 做别的事（例如文件校验），
+前缀保证两者不会算出相同结果而被误认为等价。
+末尾的 `\\x00` 是长度分隔：防止 `"a" + "bc"` 与 `"ab" + "c"` 碰撞。
+"""
+
+
+UNITS_VOCABULARY: frozenset[str] = frozenset({    "amplitude",
+    "chroma",
+    "hz",
+    "index",
+    "rms",
+    "cents",
+    "seconds",
+    "db",
+})
+"""端口的合法 `units` 取值（G10 修正）。
+
+为什么需要受控词表：`units` 是给算法判断"这个端口是不是我要的量"用的。
+开放式字符串意味着两个实现者可以写出 `"hz"` / `"Hz"` / `"hertz"` 三种，
+而下游按 `== "hz"` 判断时会静默不匹配。
+
+当前实际使用：
+    amplitude  pcm.mapped.* / pcm.warped.*
+    chroma     chroma.lowres.*      ← 第一版的举例里没有它，故补入
+    hz         pitch.*
+    index      warp_path / notes.*
+    rms        rms.*
+
+预留但当前未用：`cents`（音分，来自算法 payload）、`db`（同上）、
+`seconds`（时刻，来自 payload）。
+**预留项必须由某个未来的 profile 真正使用，否则应删** ——
+本词表不收集"以后可能有用"的值。"""
 
 
 @dataclass(frozen=True)
@@ -185,7 +271,13 @@ class PortDescriptor:
 
     shape: Sequence[int]
     units: str
-    """'amplitude' / 'hz' / 'rms' / 'cents' / 'seconds' / 'index' …"""
+    """物理单位。★ 取值见 `UNITS_VOCABULARY`（受控词表，G10 修正）。
+
+    第一版这里是开放式举例（`'amplitude' / 'hz' / 'rms' / 'cents' /
+    'seconds' / 'index' …`），带省略号 —— 而 profile 实际用了 `'chroma'`，
+    **不在举例里**。算法若按 `units` 判断端口语义，会因举例不全而误判。
+    现改为受控词表，且由 `assert_profile_integrity()` 检查取值合法。
+    """
 
     field_names: Sequence[str] = ()
     """第二维的字段名，顺序即内存布局顺序。
@@ -197,12 +289,52 @@ class PortDescriptor:
     timeline_basis: TimelineBasis = TimelineBasis.REFERENCE
     """**必填语义**。忘记声明会导致节奏指标算错（见 TimelineBasis）。"""
 
+    hop_length: int = 0
+    """★ 该端口的**帧移**（采样点）。帧类端口必填，非帧类为 0。
+
+    G5 修正（§20 盲审发现）：`read(port_id, time_range)` 的 `time_range`
+    单位是**秒**，而帧类端口的第二维是**帧**。秒→帧的换算必须唯一，
+    否则两个实现者会算出不同时刻的数据 —— **且不会报错**。
+
+    第一版 `PortDescriptor` 没有这个字段，而 `profile` 里
+    `pitch.*` / `chroma.*` 的帧移也**根本没有声明**：
+    `ALIGN.hop_length`(=2048) 是齐套的 chroma 帧移，
+    `MATERIALIZE.rms_hop_length`(=256) 是 RMS 的帧移，
+    两者相差 8×，实现者猜哪个都不报错。
+
+    与 `field_names` 同理：**这是防止静默算错的唯一手段**，
+    必须由 profile 声明并由 `assert_profile_integrity()` 检查。
+    """
+
     sample_rate: int = 0
     """**必填语义**。采样率是算法结果的成因，不是元数据。
     0 表示该端口与采样率无关（如 chroma / index 类）。"""
 
     content_hash: str = ""
-    """Seal 时计算的内容指纹，用于同 build 回归断言。"""
+    """Seal 时计算的内容指纹。★ 算法已冻结（G12 修正）。
+
+    第一版只说"内容指纹"，未定哈希函数与输入字节序列 ——
+    于是跨实现的 `content_hash` **不可比**，而它的用途恰恰是
+    「同一对输入 + 同一 profile_version ⇒ hash 一致」这条回归断言。
+
+    冻结算法（实现必须逐字节照做）：
+
+        h = hashlib.sha256()
+        h.update(CONTENT_HASH_MAGIC)          # 域分隔，防跨用途复用
+        h.update(port_id.encode("utf-8"))
+        h.update(element_type.encode("utf-8"))
+        h.update(np.asarray(shape, dtype="<i8").tobytes())   # 小端
+        h.update(data.tobytes(order="C"))     # C 序，原始 dtype
+        content_hash = h.hexdigest()
+
+    三条必须遵守的性质：
+        1. **包含 shape 与 dtype** —— 否则 (2,3) 与 (3,2) 同 hash
+        2. **固定字节序**（小端）—— 否则跨架构不可比
+        3. **C 序展平** —— 否则同数据的非连续视图会算出不同 hash
+
+    注意：本 hash 用于**同一实现内的回归**与**跨实现的对照**，
+    **不**用于安全用途（不是抗碰撞承诺）。
+    """
 
 
 @dataclass(frozen=True)
@@ -606,6 +738,45 @@ COMMAND_LEGALITY: Mapping[UiCommandKind, frozenset[SessionState]] = {
 """
 
 
+COMMAND_EFFECTS: Mapping[UiCommandKind, str] = {
+    UiCommandKind.SET_REFERENCE: "登记参考演奏路径；成功 → INPUT_READY",
+    UiCommandKind.SET_PRACTICE: "登记练习演奏路径；成功 → INPUT_READY",
+    UiCommandKind.BUILD_SURFACE: "开始构建数据面；进入 BUILDING，成功 → DATA_READY",
+    UiCommandKind.RUN_ALGORITHMS: "运行全部已注册算法；**状态不变**（仍在 DATA_READY）",
+    UiCommandKind.CANCEL: "中止进行中的操作 → **回到操作前的稳定态**",
+    UiCommandKind.RESET: "丢弃数据面与已登记输入 → **CREATED**，会话本身保留",
+}
+"""每条命令的**状态效果**。★ G11 修正（§20 盲审发现）。
+
+第一版只冻结了"什么状态下**可以**发这条命令"（`COMMAND_LEGALITY`），
+**没说发完之后状态变成什么**。审查者指出 CANCEL / RESET 的语义"零定义"：
+
+    - CANCEL 后状态去哪？（BUILDING 中取消 → 回 INPUT_READY 还是 FAILED？）
+    - 已 Seal 的数据面在 CANCEL 后是否销毁？
+    - RESET 重置到哪个状态？是否保留已登记的输入 URI？
+
+这些不定义，两个实现者会写出行为不同的会话机，而**界面看起来都正常**。
+
+冻结语义如下（`CANCEL` 的关键性质：**回到操作前的稳定态**）：
+
+    CANCEL 在 INPUT_READY  → 无进行中操作，状态不变（幂等）
+    CANCEL 在 BUILDING     → 中止构建，**销毁未完成的数据面**，回 INPUT_READY
+    CANCEL 在 DATA_READY   → 只中止正在运行的算法，**数据面保持有效**，
+                             回 DATA_READY（已 Seal 的数据面不因取消而销毁）
+
+    RESET 在任意状态       → 销毁数据面、清空已登记输入，回 CREATED
+                             （会话对象本身保留，可继续登记新输入）
+
+★ 关于 `BUILDING` 期间的取消：`build_surface` 是**同步阻塞**调用，
+中途没有天然中断点。契约**要求**实现者提供检查点 ——
+至少在每个端口物化完成时检查一次取消标志。
+**不得**用"构建太快所以不用管"来回避（120 s 音频的构建是可感知的）。
+
+★ `CANCEL` 与 `RESET` 都**不是错误**：不得产生 `ErrorCode`，
+新状态不是 `FAILED`。用户主动中止 ≠ 系统失败。
+"""
+
+
 @dataclass(frozen=True)
 class UiCommand:
     """一条用户意图。C1 是唯一执行者与校验者。
@@ -616,6 +787,45 @@ class UiCommand:
 
     kind: UiCommandKind
     payload: dict = field(default_factory=dict)
+    """★ 载荷。键名已冻结（G7 修正，§20 盲审发现）。
+
+    第一版只有 `payload: dict`，没有任何键名定义 ——
+    于是 C4 构造命令与 C1 消费命令必须**各自猜**同一个键名，
+    猜错则无头链路在第一次命令下发时断掉，且契约里无处校验。
+    （审查者原话：「这是缺口 1，端到端直接断」。）
+
+    冻结的键名（**唯一权威，即本表**）：
+
+        SET_REFERENCE   {"path": str}   绝对路径，音频文件
+        SET_PRACTICE    {"path": str}   绝对路径，音频文件
+        BUILD_SURFACE   {}              无载荷
+        RUN_ALGORITHMS  {}              无载荷（运行全部已注册算法）
+        CANCEL          {}              无载荷
+        RESET           {}              无载荷
+
+    规则：
+        - 键名**不得**增删。需要新载荷时改契约并升 `CONTRACT-UI-v1` 版本。
+        - 未列出的 `kind` 用空 dict。
+        - C1 **必须**校验：未知键、缺必需键、值类型不符 → 拒绝命令
+          （拒绝而非忽略：忽略会让 C4 以为命令生效了）。
+    """
+
+
+UI_PAYLOAD_KEYS: Mapping[UiCommandKind, tuple[str, ...]] = {
+    UiCommandKind.SET_REFERENCE: ("path",),
+    UiCommandKind.SET_PRACTICE: ("path",),
+    UiCommandKind.BUILD_SURFACE: (),
+    UiCommandKind.RUN_ALGORITHMS: (),
+    UiCommandKind.CANCEL: (),
+    UiCommandKind.RESET: (),
+}
+"""★ `UiCommand.payload` 的键名冻结表（G7）。
+
+与 `FIELD_LAYOUTS` 同一个教训：`dict` 类型本身不携带任何键名信息，
+产出方与消费方之间必须有**共同事实来源**，否则静默错位。
+
+    - C4 构造命令时**必须**用这里的键名
+    - C1 校验命令时**必须**比对本表（缺失/多余/类型不符 → 拒绝）"""
 
 
 class UiProjectionPort(Protocol):
@@ -647,4 +857,8 @@ __all__ = [
     # UI
     "UiScalar", "UiSeries", "UiView", "UiCommand", "UiCommandKind", "UiProjectionPort",
     "COMMAND_LEGALITY",
+    "COMMAND_EFFECTS",
+    "UI_PAYLOAD_KEYS",
+    "CONTENT_HASH_MAGIC",
+    "UNITS_VOCABULARY",
 ]

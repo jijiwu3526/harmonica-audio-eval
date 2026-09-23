@@ -37,9 +37,9 @@ BUILD-INSTRUCTION:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
-from ..contract import AlgorithmResultEnvelope
+from ..contract import AlgorithmDataContract, AlgorithmResultEnvelope
 from . import dynamics, pitch, timing
 
 
@@ -59,10 +59,36 @@ class AlgorithmSpec:
     用途是**单向**的：C1 用它判断「数据面里有没有这些端口」，
     没有就跳过本算法（INCOMPATIBLE）。
     **绝不**因为某个算法缺端口就去让 C2 生成数据 —— 那是核心禁令。
+
+    ★ 这是 `required_ports` 的**唯一权威**（G13 修正）。
+
+    `AlgorithmResultEnvelope.required_ports` 是同一份事实的**运行时副本** ——
+    它由 C1 从本字段填入信封，用于事后追溯"这次判定依据的是哪些端口"。
+    二者**必须相等**，且该相等关系由 `assert_registry_integrity()` 检查。
+    第一版没说二者关系，实现者可能各自维护一份并逐渐分叉。
     """
 
-    entry: Callable[..., AlgorithmResultEnvelope]
-    """算法入口。实际签名由 Build Instruction 冻结。"""
+    entry: Callable[[AlgorithmDataContract], AlgorithmResultEnvelope]
+    """算法入口。★ 签名已冻结（G3 修正）。
+
+    第一版写的是 "Callable[..., AlgorithmResultEnvelope]" 并注明
+    "实际签名由 Build Instruction 冻结" —— 但 Build Instruction 在
+    `.spec/build/` 里，**盲审者与实现者都读不到**（那是冻结后才写的）。
+
+    于是 C1 无法知道该传什么、怎么接 INCOMPATIBLE 判定。
+    现已冻结为唯一形式：
+
+        entry(surface: AlgorithmDataContract) -> AlgorithmResultEnvelope
+
+    三个算法的 `run()` 本来就是这个签名 —— 契约只是追认了既成事实，
+    并把它从"约定"提升为"可机械检查的约束"。
+
+    实现约定：
+        - **同步、纯函数**：不修改 surface，不持有跨会话状态
+        - **不抛异常**：失败也返回信封（status='FAILED' + error_code）
+          异常穿透会破坏 C1 的故障隔离（见 contract.AlgorithmError）
+        - 返回的信封中 `algorithm_id` / `version` 必须与注册条目一致
+    """
 
     label: str
     """给人看的中文短名。"""
@@ -92,6 +118,18 @@ def assert_registry_integrity() -> None:
     用一条看似严谨的规则毁掉两个设计保证。
     （实测：3 个端口属于 b/c 类。）
 
+     ★ `MOLD BREAK` 后新增检查（§20 盲审情况 A）：
+
+       5. `entry` 必须可调用，且签名与冻结形式一致
+          （第一版只说"由 Build Instruction 冻结"，而那对实现者不可见）
+       6. 每个算法必须声明**成对**的端口 ——
+          `X.reference` 与 `X.practice` 要么都有、要么都没有。
+          为什么：第一版 notes.* 只有 reference 侧，
+          导致 dynamics 写出无法满足的 MUST。对称性是可机械检查的。
+       7. 每个算法的 payload 键必须恰为 PAYLOAD_SCHEMAS 中列出的那些
+          （"恰为"而非"包含" —— 多出的键会让 C1 校验器与 UI 投影
+          对不上，且不会报错）
+
     失败即抛，不返回布尔值。
     """
     raise NotImplementedError("SHELL: FILE-200 待注入实现")
@@ -101,7 +139,12 @@ ALGORITHMS: tuple[AlgorithmSpec, ...] = (
     AlgorithmSpec(
         algorithm_id=pitch.ALGORITHM_ID,
         version=pitch.ALGORITHM_VERSION,
-        required_ports=("pitch.reference", "pitch.practice"),
+        required_ports=(
+            "pitch.reference",
+            "pitch.practice",
+            "notes.reference",
+            "notes.practice",
+        ),
         entry=pitch.run,
         label="音准",
     ),
@@ -112,6 +155,7 @@ ALGORITHMS: tuple[AlgorithmSpec, ...] = (
             "pcm.mapped.reference",
             "pcm.mapped.practice",
             "notes.reference",
+            "notes.practice",
             "warp_path",
         ),
         entry=timing.run,
@@ -120,7 +164,12 @@ ALGORITHMS: tuple[AlgorithmSpec, ...] = (
     AlgorithmSpec(
         algorithm_id=dynamics.ALGORITHM_ID,
         version=dynamics.ALGORITHM_VERSION,
-        required_ports=("rms.reference", "rms.practice"),
+        required_ports=(
+            "rms.reference",
+            "rms.practice",
+            "notes.reference",
+            "notes.practice",
+        ),
         entry=dynamics.run,
         label="力度",
     ),
@@ -130,6 +179,75 @@ ALGORITHMS: tuple[AlgorithmSpec, ...] = (
 `algorithm_id` / `version` 从各模块**导入**而非重抄 ——
 两处写同一份事实迟早会不一致（这与 FIELD_LAYOUTS 是同一个教训）。
 
-注意 `timing` 需要 `pcm.mapped.*`（**保留源时间**的轴），
-而 `pitch` / `dynamics` 只用逐帧特征。
-这个差异不是偶然 —— 节奏必须在源时间轴上算，否则抢拍拖拍会被抹掉。"""
+★★ MOLD BREAK 修正（§20 盲审情况 A）★★
+
+第一版三个算法的 `required_ports` 是：
+    pitch    → pitch.reference / pitch.practice
+    timing   → pcm.mapped.* / notes.reference / warp_path
+    dynamics → rms.reference / rms.practice
+
+**但三者都声称"输出可定位到第几个音的结果"**，而只有 timing 声明了逐音索引。
+pitch 和 dynamics 凭什么知道"第几个音"？第一版答不出来。
+同时 `notes.*` 只有 reference 侧，练习侧完全没有逐音索引 ——
+`dynamics` 因此写出了一条**无法满足的 MUST**（要求 WARPED 轴的 rms）。
+
+两个独立盲审模型各自复现了这个冲突，说明它不是笔误，是**端口表的对称性破裂**。
+
+修正后三个算法**都**声明 `notes.reference` + `notes.practice`：
+    - pitch    用逐音索引把逐帧偏差聚合成"第 n 个音偏了多少音分"
+    - timing   用 onset_sec 作两侧起音时刻的真值
+    - dynamics 用逐音区间取能量，从而**按音配对**而非按时间轴配对
+
+★ 关于"节奏与力度用相反的轴"这条旧说法：**它已被删除。**
+
+删除理由：`dynamics` 原本写 `AXIS = WARPED` 来表达"力度不关心何时吹"，
+但数据面里**不存在** WARPED 轴的 rms 端口，该约束不可满足。
+正确的表达方式不是"换一条轴"，而是"**按音聚合**"——
+两侧各自按自己的 onset 切分，再按音序配对。
+这样"何时吹"被排除，且不需要任何 WARPED 轴端口。
+
+`timing.AXIS = REFERENCE` **保持不变**：它的理由是硬的（用 WARPED 会让
+抢拍拖拍恒为 0 且不报错），与 dynamics 的取舍无关。"""
+
+
+PAYLOAD_SCHEMAS: Mapping[str, tuple[str, ...]] = {
+    "pitch": (
+        "per_note_cents",
+        "median_abs_cents",
+        "off_pitch_ratio",
+        "n_notes_used",
+        "sample_rate",
+    ),
+    "timing": (
+        "per_note_onset_ms",
+        "median_onset_ms",
+        "spread_ms",
+        "early_ratio",
+        "late_ratio",
+        "n_notes_used",
+    ),
+    "dynamics": (
+        "per_note_delta_db",
+        "median_db",
+        "spread_db",
+        "n_notes_used",
+        "n_unpaired",
+    ),
+}
+"""★ 盲审发现的关键缺口（G4）：算法 payload 的字段名原先**没有任何冻结处**。
+
+为什么必须有这张表：`AlgorithmResultEnvelope.payload` 是 `dict`，
+三个算法模块只给了散文式描述（"中位偏差、离散度、抢拍/拖拍比例"），
+而 `host/app.py` 要求"校验 schema 合法性"并据此产出 `ALGORITHM_RESULT_INVALID`。
+**产出方与校验方之间没有共同事实来源** —— 校验器无从知道该查哪些键。
+
+这**正是 `FIELD_LAYOUTS` 当初要消灭的那类缺陷**
+（"不会报错、只会静默算错"），只是我第一版没把这条教训推广到 payload 层。
+
+规则：
+    - 键名表即**唯一权威**，算法实现与 C1 校验器都必须引用它
+    - 每个算法 payload 的键必须**恰好**是表中列出的这些（不多不少）
+    - `per_note_*` 是逐音序列，长度必须等于该次统计的 `n_notes_used`
+    - `UiScalar.key` / `UiSeries.key` 的取值必须取自本表的键名，
+      从而 `metrics.json` 与界面不会出现两套名字
+"""
