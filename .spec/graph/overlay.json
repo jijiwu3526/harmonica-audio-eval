@@ -30,6 +30,124 @@
     }
   },
 
+  "component_derivation": {
+    "note": [
+      "★ 本节是「由下往上」的登记结果：先看代码能聚成什么坨，再与上面的 component_intent 对照。",
+      "推导**不使用**铭牌的 COMPONENT 字段作输入（见 tools/derive_clusters.py）。",
+      "verdict 三值：CONFIRMED（机械证据支持）/ PARTIAL（部分支持）/ NOT-CONFIRMED（证据不足以支持，不等于错）。",
+      "★ 为什么会有 NOT-CONFIRMED：空壳期函数体全是 raise，真实调用边尚未写出，",
+      "  故『编排关系』这类信息在代码里根本不存在。这是信号缺失，不是设计错误。"
+    ],
+    "method": {
+      "tool": "tools/derive_clusters.py",
+      "signals": [
+        "S1 import 边（空壳期残缺）",
+        "S2 端口生产 profile.PORTS[*].produced_by（空壳期完整）",
+        "S3 算法消费 algorithms.ALGORITHMS[*].required_ports（空壳期完整）",
+        "S4 契约符号足迹：文件引用 contract.py 的哪些符号（空壳期完整）"
+      ],
+      "algorithm": "Jaccard 平均连接层次聚类 + Tarjan 割点分析",
+      "honest_limitation": [
+        "阈值敏感性实测：从 1 坨摆到 18 坨，**没有稳定平台** →",
+        "  空壳期代码不足以决定组件边界。故本节的结论只取『跨全部阈值稳健』的部分，",
+        "  其余一律标 NOT-CONFIRMED，不假装推导出了边界。"
+      ]
+    },
+    "stable_findings": [
+      {
+        "pair": ["harmonica_eval.algorithms.dynamics", "harmonica_eval.algorithms.timing"],
+        "stability": "7/7 阈值",
+        "jaccard": 0.350,
+        "reading": "同层算法共享契约签名与『按音配对』口径"
+      },
+      {
+        "pair": ["harmonica_eval.algorithms.dynamics", "harmonica_eval.algorithms.pitch"],
+        "stability": "6/7 阈值",
+        "jaccard": 0.316,
+        "reading": "同上"
+      },
+      {
+        "pair": ["harmonica_eval.algorithms.pitch", "harmonica_eval.algorithms.timing"],
+        "stability": "6/7 阈值",
+        "jaccard": 0.300,
+        "reading": "同上"
+      },
+      {
+        "pair": ["harmonica_eval.__main__", "harmonica_eval.cockpit.app"],
+        "stability": "6/7 阈值",
+        "jaccard": 0.300,
+        "reading": "★ 两者是同一类东西：都是 UiView/UiSeries 的**消费者**。一个是无头落盘，一个是图形界面。这从代码层证实了不变量 F 的前提 —— 无头入口与 C4 处在内核之外的对等位置，故『删掉 C4 内核仍跑通』是结构性的，不是补丁。"
+      }
+    ],
+    "port_coupling": {
+      "note": "端口供需图在空壳期**完整**（它由 profile.PORTS 与 ALGORITHMS 决定，与函数体无关）",
+      "producers": {
+        "core.align": ["warp_path"],
+        "core.features": ["chroma.lowres.*", "notes.*", "pitch.*", "rms.*"],
+        "core.surface": ["pcm.mapped.*", "pcm.warped.practice"]
+      },
+      "consumers": {
+        "pitch": ["notes.*", "pitch.*"],
+        "timing": ["notes.*", "pcm.mapped.*"],
+        "dynamics": ["notes.*", "rms.*"]
+      },
+      "shared_vocabulary": "notes.*（三个算法**全部**需要）",
+      "unconsumed_families": ["chroma.lowres.*", "warp_path"],
+      "reading": [
+        "core.features 是产出枢纽：12 个端口里它产 8 个。",
+        "notes.* 是唯一的全算法共享词汇 → 它是 C2/C3 之间的**实际接口重心**，",
+        "  而不是 pitch.*/rms.*/pcm.*。这解释了为什么 MOLD BREAK 必须把 notes.practice 补上：",
+        "  缺了它，三个算法里有两个拿不到逐音索引。",
+        "chroma.lowres.* 与 warp_path 无算法消费 —— 二者是**证据端口**（供审查者复现对齐），",
+        "  不是死端口。derive_clusters 不对它们报警，正是 profile 的刻意豁免。"
+      ]
+    },
+    "articulation_point": {
+      "node": "harmonica_eval.contract",
+      "degree": 11,
+      "reading": [
+        "全图唯一的割点。删掉它，11 个文件的依赖同时断裂。",
+        "★ 这从机械上证实了 COMPONENT-CONTRACT 铭牌的声明：",
+        "  「四个组件之间的分界线，本身不是组件」。",
+        "  一个既连接所有人、又谁的内部都不属于的节点，正是『契约』的定义。"
+      ]
+    },
+    "per_component": {
+      "COMP-C1": {
+        "verdict": "NOT-CONFIRMED",
+        "evidence": "host.app 只 import contract；它与任何文件都不构成稳健黏连。",
+        "why_not_confirmed": "C1 的存在理由是『编排』，而编排边（谁调谁、按什么顺序）在空壳期**不存在** —— 函数体是 raise。故机械推导看不见它。这是信号缺失。",
+        "design_comparison": "不与现有设计冲突，但**也未被证实**。要证实它需要实现落地后重跑本工具。",
+        "risk_if_wrong": "低。C1 的边界由契约（CONTRACT-HOST-v1 的 7 个操作）定义，而非由耦合度定义。"
+      },
+      "COMP-C2": {
+        "verdict": "PARTIAL",
+        "evidence": "端口生产图把 core.align / core.features / core.surface 区分为三个不同生产者，三者互不共享端口族。core.api 是唯一 import core.surface 的文件。",
+        "why_partial": [
+          "机械推导支持『C2 是一个内聚单元』，但**不能**推出其内部 5 路切分",
+          "（ingest / align / features / surface / api）。",
+          "因为那 5 路是一条**数据流链**（解码→对齐→物化→装配→编排），",
+          "而数据流写在 docstring 里，不写在代码里。"
+        ],
+        "design_comparison": "一致。且推导独立复现了『core.api 是唯一对外门面』：它是 core 内部唯一被 import 的文件。",
+        "risk_if_wrong": "低。内部切分是 C2 的私有实现细节，深组件保证它不外泄。"
+      },
+      "COMP-C3": {
+        "verdict": "CONFIRMED",
+        "evidence": "三个算法两两稳健黏连（7/7、6/7、6/7），共享 AlgorithmDataContract / AlgorithmResultEnvelope / needs:notes / run / summarize。",
+        "design_comparison": "一致，且是本次推导**最强**的一条结论。",
+        "risk_if_wrong": "极低。"
+      },
+      "COMP-C4": {
+        "verdict": "PARTIAL",
+        "evidence": "cockpit 与 cockpit.app 只 import contract，与 C2/C3 零耦合 —— 机械证实了『C4 不进计算路径』。",
+        "extra_finding": "★ 推导还发现 __main__ 与 cockpit.app 是同一类（见 stable_findings）。设计里二者分属 COMP-PKG 与 COMP-C4，但它们在**结构角色**上对等：都是内核之外的结果消费者。",
+        "design_comparison": "与不变量 F 一致，且为该不变量提供了代码层证据。",
+        "risk_if_wrong": "低。"
+      }
+    }
+  },
+
   "mission_threads": [
     {
       "id": "MT-001",

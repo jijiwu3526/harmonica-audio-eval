@@ -439,6 +439,41 @@ def check_doc_port_count(r: Report) -> None:
     pattern = re.compile(r"(\d+)\s*个端口")
     hits: list[str] = []
 
+    # ★ 第四类误报（本仓第四次踩"形式当实质"的坑，故明写在此）：
+    #
+    # 第一版把「N 个端口」一律当成"端口总数声明"，于是刷出 7 条误报。
+    # 实测样例：FILE-004 的
+    #     「本 profile：11 个端口为 `REFERENCE`，仅 `pcm.warped.practice` 为 WARPED」
+    # **这句话完全正确** —— 它是"12 个里有 11 个用某条轴"的子集陈述，
+    # 不是"全仓只有 11 个端口"。同理「产出 8 个端口」是在说某个生产者产出几个。
+    #
+    # 判据：只有当数字后面**紧跟表总量的词**（总/共/全部/一共/计 或位于
+    # 「端口清单/端口总数」这类短语里）时，才当作总数声明。
+    # 用**前瞻**实现，而不是看整行有没有别的词 —— 因为"为 REFERENCE"、
+    # "产出"、"消费"这些限定语可能出现在数字**前后任意位置**，
+    # 按整行判断会把真违规也一起放过。
+    # ★ 第五类误报（同一类错误的第五次，全部记录在此以免后人重踩）：
+    #   实测的两条剩余误报：
+    #     (a) FILE-401「8721–8784 共 64 个端口全部 bind 失败」
+    #         —— 这是 **TCP 端口**，与本仓的**数据端口**只是同名的两回事。
+    #     (b) FILE-004「其余 11 个端口全部 float32」
+    #         —— 12 个里除 warp_path 外其余 11 个，是**正确子集**；
+    #            "全部"在这里修饰 dtype，不修饰端口总数。
+    #
+    #   修法：
+    #   - 网络语境排除：数字前若出现 IP / bind / listen / 端口号区间（N–M）
+    #     等线索，跳过。
+    #   - "其余/其他/剩下" 开头的子集陈述，跳过。
+    NET_CTX = re.compile(
+        r"(?:127\.0\.0\.1|localhost|bind|listen|TCP|HTTP|端口号|\d+\s*[–\-—]\s*\d+)"
+    )
+    SUBSET_CTX = re.compile(r"(?:其余|其他|剩下|另外|其中|除[^，。]{0,12}外)")
+
+    TOTAL_MARK = re.compile(
+        r"(\d+)\s*个端口\s*(?:（[^）]*）)?\s*"
+        r"(?=[，,。；;：:、]?\s*(?:总|共|全部|一共|计|清单|列表|数|$))"
+    )
+
     # 历史叙述的标记词：这些内容在描述**过去的设计**（已撤回/曾/原先/v1），
     # 其中的数字是历史事实，不该被当作当前声明。
     # 例：COMPONENTS.md 的「## 0. 本版相对 v1 的四处自我纠错」表里
@@ -480,7 +515,9 @@ def check_doc_port_count(r: Report) -> None:
             if any(h in line for h in HISTORICAL):
                 continue
 
-            for m in pattern.finditer(line):
+            if NET_CTX.search(line) or SUBSET_CTX.search(line):
+                continue
+            for m in TOTAL_MARK.finditer(line):
                 n = int(m.group(1))
                 if n != actual:
                     rel = path.relative_to(REPO)
@@ -656,14 +693,32 @@ def check_constitution_citations(r: Report) -> None:
             body = p.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for lineno, line in enumerate(body.splitlines(), 1):
-            # 已标注更正的说明行不算违规（它正是在记录这个错误）
-            if any(k in line for k in ("伪造", "更正", "原写", "已作废", "本仓自定")):
+        # ★ 豁免词必须按**窗口**看，不能按**行**看。
+        #
+        # 第一版是逐行判断豁免词，于是自己踩了坑：本仓的记录文字是中文散文，
+        # **会折行**。实测事故：
+        #     L402: 我手写的「宪章 §11 逃生口」引用
+        #     L403: 是**伪造的**，并传播到 6 个文件。
+        # 豁免词「伪造」在 403 行，触发词在 402 行 —— 逐行判断必然误报。
+        #
+        # 这与检查⑬ 的误报是**同一类错误**：把"语义作用域"当成了"文本行"。
+        # 修法：取命中行的前后各 2 行组成窗口，窗口内出现豁免词即放行。
+        # 代价：一段真正违规的文字若恰好邻近"伪造"二字会被放过。
+        # 接受该代价 —— 本检查的职责是**防止已修事故复发**，
+        # 而不是做语义真伪判定（那件事已明确交给 §23 跨层审计，见上）。
+        lines = body.splitlines()
+        EXEMPT = ("伪造", "更正", "原写", "已作废", "本仓自定", "伪引用", "事故")
+        for lineno, line in enumerate(lines, 1):
+            if "宪章 §11" not in line:
                 continue
-            if "宪章 §11" in line and ("逃生" in line or "自行预处理" in line):
-                regressions.append(
-                    f"{p.relative_to(REPO)}:{lineno} 复发伪引用「宪章 §11 逃生口」"
-                )
+            if not ("逃生" in line or "自行预处理" in line):
+                continue
+            window = "\n".join(lines[max(0, lineno - 3) : lineno + 2])
+            if any(k in window for k in EXEMPT):
+                continue
+            regressions.append(
+                f"{p.relative_to(REPO)}:{lineno} 复发伪引用「宪章 §11 逃生口」"
+            )
 
     for g in regressions:
         print(f"  ❌ {g}")
@@ -770,6 +825,168 @@ def check_doc_symbol_drift(r: Report) -> None:
         print("  ✅ 文档符号与代码一致")
 
 
+def check_registry_signature_consistency(r: Report) -> None:
+    """⑬ 算法注册表声明的端口，必须真的能被该算法的入口函数拿到。
+
+    ★ 由下往上核对代码时发现（走查 `algorithms/*.py` 的签名与 docstring）：
+
+        `algorithms.ALGORITHMS` 声明 pitch 需要
+            ('pitch.reference', 'pitch.practice', 'notes.reference', 'notes.practice')
+        且 `algorithms/__init__.py` 的 MOLD BREAK 注记明写：
+            "pitch 用逐音索引把逐帧偏差聚合成『第 n 个音偏了多少音分』"
+
+        但 `pitch.py` 的 `compare_pitch_curves(ref_pitch, prac_pitch, sample_rate)`
+        **没有 notes 参数**，docstring 却写"返回**逐音**的音分偏差"。
+        `summarize_deviations(deviations_cents)` 同样只收一个参数。
+
+        ⇒ 实现者被要求"聚合到第 n 个音"，却不被交给任何音符边界。
+        他只能：(a) 自己发明音符切分（重做 features 的活），
+        或 (b) 假装逐帧结果就是逐音结果（静默算错）。
+        两条路都是 §22 硬失败。
+
+    这个缺陷逃过了检查⑧：⑧ 只比对 `HostContract ↔ HostCore`，
+    不涉及算法注册表。而"注册表说要什么"与"签名真的收了什么"
+    之间的漂移，正是本仓反复吃亏的那一类。
+
+    检查方式（刻意保守，只报高置信度）：
+      对每个算法，若其入口模块里**存在**某个公开函数的 docstring
+      声称产出 `逐音`/`per_note` 结果，则同模块内**必须**有某个公开函数
+      的形参名里出现音符边界类词根（note / onset / span / bound）——
+      否则报错。
+
+    ★ 第一版把词根收窄成只有 `note`，刷出 **1 条误报**：
+        timing.py 的 `match_onsets(ref_onsets, prac_onsets, tolerance_sec)`
+        **确实**接收了音符边界（起音时刻就是边界），只是变量名叫 onset 不叫 note。
+      这正是本仓在检查⑪、⑫ 上重复吃过的亏：**过宽的检查制造噪声，
+      过窄的检查漏掉真缺陷**。现按实际语义补齐词根，并在此记录该误报。
+
+    为什么不是"检查 required_ports 每个端口都被用到"：
+    那会误报 `warp_path`（证据端口，刻意不被消费）、
+    以及 `run()` 内部读取的端口（它们经 `surface.read()` 动态取，签名里看不见）。
+    """
+    print()
+    print("─" * 72)
+    print("⑬ 算法注册表 ↔ 入口函数签名 一致性")
+    print("─" * 72)
+
+    import ast as _ast
+
+    # 音符边界类词根。判据是**语义**（能不能拿到音符边界），不是命名风格。
+    BOUNDARY_ROOTS = ("note", "onset", "span", "bound")
+
+    alg_dir = PKG / "algorithms"
+    hits: list[str] = []
+    checked = 0
+
+    for path in sorted(alg_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        src = path.read_text(encoding="utf-8")
+        tree = _ast.parse(src, filename=str(path))
+
+        claims_per_note = False
+        params_by_func: dict[str, list[str]] = {}
+        for node in tree.body:
+            if not isinstance(node, _ast.FunctionDef):
+                continue
+            params_by_func[node.name] = [a.arg for a in node.args.args]
+            ds = _ast.get_docstring(node) or ""
+            if "逐音" in ds or "per_note" in ds:
+                claims_per_note = True
+
+        if not claims_per_note:
+            continue
+        checked += 1
+
+        has_note_param = any(
+            any(root in p.lower() for root in BOUNDARY_ROOTS)
+            for params in params_by_func.values()
+            for p in params
+        )
+        if not has_note_param:
+            funcs = ", ".join(
+                f"{n}({', '.join(p)})" for n, p in params_by_func.items()
+            )
+            hits.append(
+                f"{path.name} 的 docstring 声称产出『逐音』结果，"
+                f"但没有任何函数接收音符边界（note/onset/span/bound）—— "
+                f"签名：{funcs}"
+            )
+
+    for h in hits:
+        print(f"  ❌ {h}")
+        r.err(h)
+
+    print(f"  检查了 {checked} 个声称『逐音』输出的算法模块")
+    if not hits:
+        print("  ✅ 声称逐音输出的算法都能拿到音符边界")
+
+
+def check_build_instruction_completeness(r: Report) -> None:
+    """检查⑭：Build Instruction 的完整性（结构 + 无占位符残留）。
+
+    ★ 判据不能是「标题必须逐字等于 `## N · 名称`」——
+      **第一版就是这么写的，结果把 FILE-004 误判成"缺 10 节"**：
+      它写的是 `## §1 归属与邻居`，节次齐全、内容还是全仓质量最高的一份
+      （58 KB，12 个端口逐个规格化）。
+      这与检查⑪（豁免词按**行**看，但中文散文**会折行**）、
+      检查⑬（词根只认 `note`，漏了 `onset`）是**同一类错误**：
+      **把"形式"当成了"实质"**。
+      故本版只要求**节号出现**，不限定分隔符写法。
+      这是本仓第三次踩同一个坑，故在此明写。
+
+    第二类判据是**占位符残留**。本仓改用「骨架法」产出 Build Instruction ——
+    先把模板结构写进磁盘，再让智能体逐节填充，好处是**部分成果也落盘**
+    （此前 8 个智能体全部空手而死，一个字都没留下）。
+    代价就是**可能留下没填的占位符**，所以必须有这道闸。
+    实测该判据真的抓住了 FILE-101 / FILE-201（各 16 处残留）。
+    """
+    print()
+    print("─" * 72)
+    print("⑭ Build Instruction 完整性")
+    print("─" * 72)
+
+    bi_dir = REPO / ".spec" / "build"
+    if not bi_dir.is_dir():
+        print("  ⚠️  .spec/build/ 不存在，跳过")
+        return
+
+    # 只要求「第 N 节」的节号出现，允许 `## 1 ·` / `## §1 ` / `## 1.` 等写法
+    sec_patterns = [
+        re.compile(rf"^#{{1,3}}\s*§?\s*{n}\b", re.M) for n in range(1, 11)
+    ]
+    ph_pattern = re.compile(r"<待填[^>]*>")
+
+    bi_bad: list[str] = []
+    bi_ok = 0
+    for p in sorted(bi_dir.glob("FILE-*-v1.md")):
+        body = p.read_text(encoding="utf-8")
+        missing = [
+            n for n, pat in zip(range(1, 11), sec_patterns) if not pat.search(body)
+        ]
+        ph = len(ph_pattern.findall(body))
+        issues: list[str] = []
+        if missing:
+            issues.append("缺节 " + "/".join(str(n) for n in missing))
+        if ph:
+            issues.append(f"占位符残留 {ph} 处")
+        if len(body) < 4000:
+            issues.append(f"过短（{len(body)} B）")
+        if issues:
+            bi_bad.append(f"{p.name}: " + "，".join(issues))
+        else:
+            bi_ok += 1
+
+    for b in bi_bad:
+        print(f"  ❌ {b}")
+        r.err(b)
+
+    total_bi = bi_ok + len(bi_bad)
+    print(f"  合格 {bi_ok} / {total_bi} 份")
+    if not bi_bad:
+        print("  ✅ 全部 Build Instruction 结构完整、无占位符残留")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -787,6 +1004,8 @@ def main() -> int:
     check_timing_payload_consistency(r)
     check_constitution_citations(r)
     check_doc_symbol_drift(r)
+    check_registry_signature_consistency(r)
+    check_build_instruction_completeness(r)
 
     print()
     print("=" * 72)
