@@ -1,0 +1,15 @@
+# 宪章 §15：两份 Prompt 必须成对版本化
+pair_id: PROMPT-COMP-C1-v1
+version: 1
+component_id: COMP-C1
+component_name: "Framework / Host"
+git_commit: null          # 首次提交后回填
+parent_artifacts:
+  - SPEC.md@v2.1
+  - COMPONENTS.md@v2
+generated_by_role: L1 System Architect
+reviewed_by: null         # 待 L0 复核
+supersedes: null
+status: CONVERGED
+blocking: "OC1 待裁定（仅影响句柄形态）"
+downstream: null          # 未生成：OC1 待裁定（仅影响句柄形态）
