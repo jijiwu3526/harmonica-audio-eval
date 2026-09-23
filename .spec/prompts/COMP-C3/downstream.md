@@ -67,7 +67,7 @@ harmonica_eval/algorithms/dynamics.py   力度对比
 
 | 项 | 内容 |
 | --- | --- |
-| 消费端口 | `pcm.mapped.reference` · `pcm.mapped.practice` · `notes.reference` · `warp_path` |
+| 消费端口 | `pcm.mapped.reference` · `pcm.mapped.practice` · `notes.reference` · `notes.practice` · `warp_path` |
 | 时间轴 | **REFERENCE（强制）** |
 
 必须产出的量：
@@ -75,7 +75,7 @@ harmonica_eval/algorithms/dynamics.py   力度对比
 - 偏差的中位数与离散度
 - 抢拍/拖拍比例
 
-**这是全系统唯一必须用 REFERENCE 轴的算法。** 参考侧起音时刻从 `notes.reference` 取，
+**这是全系统唯一必须用 REFERENCE 轴的算法。** 两侧起音时刻分别从 `notes.reference` / `notes.practice` 取，
 练习侧从 `pcm.mapped.practice` 的起音检测取——**两者都在源时间轴上**，不可换轴。
 
 ### `dynamics.py` — 力度

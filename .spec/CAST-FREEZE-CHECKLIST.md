@@ -62,7 +62,7 @@
 ## E. 契约一致（§31 零未决）
 
 - [ ] `contract.py` 的全部类型被下游正确引用（无孤岛）
-- [ ] `profile.PORTS` 的 11 个端口都有 `produced_by` 指向真实模块
+- [ ] `profile.PORTS` 的 12 个端口都有 `produced_by` 指向真实模块
 - [ ] `CORE_REQUIRED_PORTS` 在 `profile.PORTS` 中全部存在（import 时已自检）
 - [ ] `algorithms.ALGORITHMS` 的 `required_ports` 都是 `profile.PORTS` 子集
 - [ ] **不存在任何 TODO / FIXME / 未决标记**
@@ -166,7 +166,7 @@ grep -rn "TODO\|FIXME" harmonica_eval/ || echo "✅ 无未决标记"
 git status --porcelain
 
 # 打 tag（仅当以上全过）
-git tag -a CAST-FREEZE-v1.0 -m "空壳冻结：18 文件，11 端口封闭清单，契约全冻结"
+git tag -a CAST-FREEZE-v1.0 -m "空壳冻结：18 文件，12 端口封闭清单，契约全冻结"
 ```
 
 ---
@@ -176,7 +176,7 @@ git tag -a CAST-FREEZE-v1.0 -m "空壳冻结：18 文件，11 端口封闭清单
 | 冻结的东西 | 含义 |
 | --- | --- |
 | **接口行为** | §43：冻结行为，不冻结结构。实现可重组，只要行为不变 |
-| **端口清单** | 11 个端口封闭。新增端口 = 破坏冻结（需 `MOLD BREAK`） |
+| **端口清单** | 12 个端口封闭。新增端口 = 破坏冻结（需 `MOLD BREAK`） |
 | **依赖方向** | 可自动检查，违反即驳回 |
 | **不冻结的东西** | 函数内部实现方式、数据结构的物理布局、UI 框架选择、缓存策略 |
 

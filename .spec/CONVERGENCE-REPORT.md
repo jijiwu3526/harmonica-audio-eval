@@ -18,7 +18,7 @@
 | # | 产物 | 说明 |
 | --- | --- | --- |
 | 1 | `harmonica_eval/contract.py` | 24 个公开符号、11 个错误码、10 个禁止方法名 |
-| 2 | `harmonica_eval/profile.py` | 11 个端口的**封闭清单** + import 时自检 |
+| 2 | `harmonica_eval/profile.py` | 12 个端口的**封闭清单** + import 时自检 |
 | 3 | `.spec/SHELL-STANDARD.md` | 空壳格式标准（9 字段铭牌 + `NotImplementedError` 协议） |
 | 4 | `.spec/CAST-FREEZE-CHECKLIST.md` | 7 段冻结检查，含 §20 盲审方法 |
 | 5 | `.spec/BLIND-REVIEW-PROTOCOL.md` | 盲审协议（白名单/黑名单/三个问题） |

@@ -79,7 +79,7 @@ harmonica_eval/core/api.py         门面：CONTRACT-HOST-v1 的 7 个操作
 
 ### `features.py`
 
-生成四个端口：`pitch.*` / `rms.*` / `chroma.lowres.*` / `notes.reference`。
+生成四个端口族：`pitch.*` / `rms.*` / `chroma.lowres.*` / `notes.*`（各自成对）。
 参数见 `profile.MATERIALIZE`。
 
 | 输出 | 形状 | 说明 |
@@ -87,14 +87,14 @@ harmonica_eval/core/api.py         门面：CONTRACT-HOST-v1 的 7 个操作
 | `pitch.*` | `(frame, field)` | field = `[f0_hz, voiced, confidence]`；未发声帧 f0 置 0 且 voiced=0 |
 | `rms.*` | `(frame,)` | 逐帧 RMS 能量 |
 | `chroma.lowres.*` | `(frame, 12)` | 仅供对齐与复现，**明确不作评分依据**（chroma 八度不变） |
-| `notes.reference` | `(note, field)` | field = `[onset_sec, f0_hz, rms]`；逐音摘要 |
+| `notes.reference` / `notes.practice` | `(note, field)` | field = `[onset_sec, f0_hz, rms]`；逐音摘要（两侧对称） |
 
 **音高必须绝对音高，不得 chroma 化。** 实测：采样率 22.05 kHz 会把 D5 判成 D4
 （恰好 −1200 音分），故必须按 `profile.AUDIO.sample_rate` 运行，且**不得**降采样。
 
 ### `surface.py`
 
-- 按 `profile.PORTS` **穷举**生成全部 11 个端口
+- 按 `profile.PORTS` **穷举**生成全部 12 个端口
 - 生成后 **Seal**：所有数组 `setflags(write=False)`
 - 计算每个端口的 `content_hash`（用于同 build 回归断言）
 - 产出 `SurfaceManifest`

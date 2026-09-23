@@ -24,7 +24,7 @@
 | **CONTRACT-HOST-v1** | C1 → C2，7 个操作 | ✅ **FROZEN**（`acquire_surface` 返回内存数据面句柄） |
 | **CONTRACT-ALGORITHM-DATA-v1** | C3 → 数据面，2 个操作 | ✅ **FROZEN**（`manifest()` / `read()`，纯查表、无副作用） |
 | **CONTRACT-UI-v1** | C1 ↔ C4 投影与命令 | ✅ **FROZEN** |
-| **CORE_PROFILE_V0.1** | **封闭端口清单**（11 个端口，写死） | ✅ **FROZEN** |
+| **CORE_PROFILE_V0.1** | **封闭端口清单**（12 个端口，写死） | ✅ **FROZEN** |
 
 **所有契约均已冻结，无待定项。**
 

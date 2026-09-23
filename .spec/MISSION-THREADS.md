@@ -56,7 +56,7 @@ Dev 运行 python3 -m harmonica_eval --reference 原曲.wav --practice 练习曲
       → C2 ingest：解码 → mono → 44100Hz → float32
       → C2 align：低分辨率 chroma → DTW → warp_path
       → C2 features：pitch / rms / chroma / notes
-      → C2 surface：按 profile 预生成 11 个端口 → Seal
+      → C2 surface：按 profile 预生成 12 个端口 → Seal
                                           [DATA_READY]
   → C1 逐算法兼容性检查（只判断端口有无）
   → C1 依次运行 pitch / timing / dynamics

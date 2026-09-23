@@ -93,6 +93,7 @@ chroma.lowres.reference  参考低分辨率 chroma（仅供对齐，不对外评
 chroma.lowres.practice   练习低分辨率 chroma
 warp_path                时间映射（对齐的唯一产物）
 notes.reference          参考逐音摘要（起音时刻/音高/能量）
+notes.practice           练习逐音摘要（与上同轴，使按音比较在两侧都成立）
 ```
 
 预计规模：120 秒音频约 **10–20 MB**。全部内存常驻。

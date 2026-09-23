@@ -402,6 +402,89 @@ def check_contract_signatures(r: Report) -> None:
         print("  ✅ 7 个方法签名逐参数一致，且无契约外方法")
 
 
+def check_doc_port_count(r: Report) -> None:
+    """⑨ 文档中的端口数与代码实际一致。
+
+    ★ 被一次真实疏漏逼出来的：我把端口从 11 个加到 12 个（补 notes.practice），
+    但 6 处 `.md` 仍写「11 个端口」。**文档与代码不一致**正是本项目
+    反复批判的那类缺陷 —— 读文档的人会按错的数字做设计。
+
+    本检查扫描 .md 里的「N 个端口」说法，与实际 len(profile.PORTS) 比对。
+    """
+    print()
+    print("─" * 72)
+    print("⑨ 文档 ↔ 代码 端口数一致")
+    print("─" * 72)
+
+    sys.path.insert(0, str(REPO))
+    try:
+        from harmonica_eval.profile import PORTS
+    except Exception as exc:  # pragma: no cover
+        msg = f"无法导入 profile 以取得端口数: {exc}"
+        print(f"  ❌ {msg}")
+        r.err(msg)
+        return
+
+    actual = len(PORTS)
+    pattern = re.compile(r"(\d+)\s*个端口")
+    hits: list[str] = []
+
+    # 历史叙述的标记词：这些内容在描述**过去的设计**（已撤回/曾/原先/v1），
+    # 其中的数字是历史事实，不该被当作当前声明。
+    # 例：COMPONENTS.md 的「## 0. 本版相对 v1 的四处自我纠错」表里
+    #     「把 P000–P431（约 34 个端口）写进 L1 契约」—— 那是被撤回的旧方案。
+    #
+    # ★ 必须同时看**行**与**所在小节标题**：紧邻的标题常常是唯一的历史线索，
+    #   而表格行本身可能一个历史词都没有（实测踩过这个坑）。
+    HISTORICAL = ("曾", "原先", "第一版", "v1 ", "已撤回", "此前", "旧", "历史",
+                  "自我纠错", "纠错", "撤回", "不再", "原名", "改名")
+    HEADING_HISTORICAL = ("v1", "历史", "纠错", "撤回", "变更", "修订", "沿革")
+
+    md_files = [
+        p for p in REPO.rglob("*.md")
+        if ".spec" not in p.parts
+        and "harmonica_mvp_dataset" not in p.parts
+        and "node_modules" not in p.parts
+    ] + [
+        p for p in (REPO / ".spec").rglob("*.md")
+        if "BLIND-TEST-REPORT" not in p.name  # 报告里记录的是历史数字
+    ]
+
+    for path in md_files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        in_historical_section = False
+        for line in text.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                # 进入/离开历史小节
+                in_historical_section = any(
+                    h in stripped for h in HEADING_HISTORICAL
+                )
+                continue
+            if in_historical_section:
+                continue
+            if any(h in line for h in HISTORICAL):
+                continue
+
+            for m in pattern.finditer(line):
+                n = int(m.group(1))
+                if n != actual:
+                    rel = path.relative_to(REPO)
+                    hits.append(f"{rel}: 说「{n} 个端口」，实际 {actual}")
+
+    for h in hits:
+        print(f"  ❌ {h}")
+        r.err(h)
+
+    print(f"  扫描了 {len(md_files)} 个 .md，实际端口数 = {actual}")
+    if not hits:
+        print("  ✅ 文档中的端口数与代码一致")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -415,6 +498,7 @@ def main() -> int:
     check_forbidden_on_host(r)
     check_no_shadowing(r)
     check_contract_signatures(r)
+    check_doc_port_count(r)
 
     print()
     print("=" * 72)
