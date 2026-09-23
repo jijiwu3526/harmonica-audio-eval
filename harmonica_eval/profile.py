@@ -46,7 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from .contract import CORE_REQUIRED_PORTS, TimelineBasis
+from .contract import CORE_REQUIRED_PORTS, FIELD_LAYOUTS, TimelineBasis
 
 PROFILE_VERSION = "CORE_PROFILE_V0.1"
 """数据面身份的一部分。数据面内容 = f(reference, practice, PROFILE_VERSION)。"""
@@ -195,6 +195,12 @@ class PortSpec:
     """为什么需要它。**每个端口都必须能回答这个问题**——
     答不出来就该从清单里删掉。"""
 
+    field_names: Sequence[str] = ()
+    """多维度端口的字段名，顺序即内存布局。单维端口留空。
+
+    **必须**与 `contract.FIELD_LAYOUTS[类别前缀]` 一致 ——
+    这是防止「f0_hz 与 voiced 静默错位」的唯一手段。"""
+
 
 PORTS: tuple[PortSpec, ...] = (
     # ── 对齐结果（真正必须物化的东西）────────────────────────────
@@ -202,6 +208,7 @@ PORTS: tuple[PortSpec, ...] = (
         port_id="warp_path",
         units="index",
         dimensions=("warp_point", "axis"),
+        field_names=("reference_frame", "practice_frame"),
         element_type="int32",
         timeline_basis=TimelineBasis.REFERENCE,
         produced_by="core.align",
@@ -255,6 +262,7 @@ PORTS: tuple[PortSpec, ...] = (
         port_id="pitch.reference",
         units="hz",
         dimensions=("frame", "field"),
+        field_names=("f0_hz", "voiced", "confidence"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
         produced_by="core.features",
@@ -267,6 +275,7 @@ PORTS: tuple[PortSpec, ...] = (
         port_id="pitch.practice",
         units="hz",
         dimensions=("frame", "field"),
+        field_names=("f0_hz", "voiced", "confidence"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
         produced_by="core.features",
@@ -301,6 +310,7 @@ PORTS: tuple[PortSpec, ...] = (
         port_id="chroma.lowres.reference",
         units="chroma",
         dimensions=("frame", "bin"),
+        field_names=("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
         produced_by="core.features",
@@ -314,6 +324,7 @@ PORTS: tuple[PortSpec, ...] = (
         port_id="chroma.lowres.practice",
         units="chroma",
         dimensions=("frame", "bin"),
+        field_names=("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
         produced_by="core.features",
@@ -325,6 +336,7 @@ PORTS: tuple[PortSpec, ...] = (
         port_id="notes.reference",
         units="index",
         dimensions=("note", "field"),
+        field_names=("onset_sec", "f0_hz", "rms"),
         element_type="float32",
         timeline_basis=TimelineBasis.REFERENCE,
         produced_by="core.features",
@@ -343,10 +355,11 @@ PORT_INDEX: dict[str, PortSpec] = {p.port_id: p for p in PORTS}
 def assert_profile_integrity() -> None:
     """profile 自检。**在 import 时即执行**，让配置错误立刻暴露。
 
-    检查三件事：
+    检查四件事：
       1. 端口清单是**封闭**的：无重复 port_id
       2. 逃生口存在：CORE_REQUIRED_PORTS 全部被声明
       3. 每个端口都有非空 rationale（答不出「为什么需要」就该删）
+      4. 多维度端口的字段顺序与契约 FIELD_LAYOUTS 一致
 
     失败即抛，不返回布尔值 —— 配置错误不该被忽略。
     """
@@ -370,6 +383,31 @@ def assert_profile_integrity() -> None:
             f"以下端口未说明存在理由: {no_rationale}。"
             "端口清单封闭的前提是「每个端口都能回答为什么需要它」。"
         )
+
+    # 检查 4：多维度端口必须声明字段顺序，且与契约一致。
+    # 这是独立盲审发现的缺口 —— 没有它，两个实现者会写出不同的内存布局，
+    # 读出来的 f0_hz 可能是 voiced，**而且不会报错，只会静默算错**。
+    for spec in PORTS:
+        if len(spec.dimensions) <= 1:
+            if spec.field_names:
+                raise ValueError(
+                    f"端口 {spec.port_id} 是单维，不应声明 field_names"
+                )
+            continue
+
+        prefix = spec.port_id.split(".")[0]
+        expected = FIELD_LAYOUTS.get(prefix)
+        if expected is None:
+            raise ValueError(
+                f"端口 {spec.port_id} 是多维，但 contract.FIELD_LAYOUTS 中"
+                f"没有 '{prefix}' 的字段定义。多维端口必须有明确字段顺序，"
+                "否则下游会静默错位读取。"
+            )
+        if tuple(spec.field_names) != tuple(expected):
+            raise ValueError(
+                f"端口 {spec.port_id} 的 field_names={tuple(spec.field_names)} "
+                f"与契约定义的 {tuple(expected)} 不一致。"
+            )
 
 
 assert_profile_integrity()

@@ -135,11 +135,42 @@ class AudioFormat:
 # 二 · 数据面（CONTRACT-ALGORITHM-DATA-v1）
 # ═════════════════════════════════════════════════════════════════════
 
+FIELD_LAYOUTS: Mapping[str, tuple[str, ...]] = {
+    "warp_path": ("reference_frame", "practice_frame"),
+    "pitch": ("f0_hz", "voiced", "confidence"),
+    "notes": ("onset_sec", "f0_hz", "rms"),
+    "chroma": (
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ),
+}
+"""多维度端口的**字段顺序定义**。★ 盲审发现的缺口，已补。
+
+为什么必须有这张表：`dimensions=('frame','field')` 只说了"第二维是字段"，
+**没说字段是什么、什么顺序**。没有它，两个实现者会写出不同的内存布局，
+读出来的 `f0_hz` 可能是 `voiced`——而且**不会报错**，只会静默算错。
+
+键取 port_id 的**类别前缀**（第一个 `.` 之前的部分）：
+    'warp_path' → ('reference_frame', 'practice_frame')
+    'pitch.*'   → ('f0_hz', 'voiced', 'confidence')
+    'notes.*'   → ('onset_sec', 'f0_hz', 'rms')
+    'chroma.*'  → 12 个音级，**从 C 开始**（不是从 A）
+
+chroma 的音级起点同样有歧义（bin 0 是 C 还是 A？），故一并冻结：
+**bin 0 = C**，依次半音上行。
+
+`profile.assert_profile_integrity()` 会检查：凡 `len(dimensions) > 1`
+的端口，其前缀必须在这张表里，且字段数必须等于 `dimensions[-1]` 声明的大小。
+"""
+
+
 @dataclass(frozen=True)
 class PortDescriptor:
     """一个端口的自描述头。算法仅凭它即可决定是否可用。
 
     **端口清单是封闭的**（写死在 profile.py），不随算法需求增长。
+
+    多维度端口的字段顺序见 `FIELD_LAYOUTS`——算法**必须**用它来解释第二维，
+    不得自行假定顺序。
     """
 
     port_id: str
@@ -150,19 +181,27 @@ class PortDescriptor:
     """numpy dtype 名称，如 'float32' / 'int32'。"""
 
     dimensions: Sequence[str]
-    """维度语义名，如 ('sample',) / ('frame',) / ('frame', 'bin')。"""
+    """维度语义名，如 ('sample',) / ('frame',) / ('frame', 'field')。"""
 
     shape: Sequence[int]
     units: str
     """'amplitude' / 'hz' / 'rms' / 'cents' / 'seconds' / 'index' …"""
 
-    timeline_basis: TimelineBasis
-    """**必填**。无默认值——忘记声明会导致节奏指标算错。"""
+    field_names: Sequence[str] = ()
+    """第二维的字段名，顺序即内存布局顺序。
 
-    sample_rate: int
-    """**必填**。采样率是算法结果的成因，不是元数据。"""
+    单维端口为空元组。多维度端口**必须**填，且必须与
+    `FIELD_LAYOUTS[类别前缀]` 完全一致 —— 这是防止静默错位的唯一手段。
+    """
 
-    content_hash: str
+    timeline_basis: TimelineBasis = TimelineBasis.REFERENCE
+    """**必填语义**。忘记声明会导致节奏指标算错（见 TimelineBasis）。"""
+
+    sample_rate: int = 0
+    """**必填语义**。采样率是算法结果的成因，不是元数据。
+    0 表示该端口与采样率无关（如 chroma / index 类）。"""
+
+    content_hash: str = ""
     """Seal 时计算的内容指纹，用于同 build 回归断言。"""
 
 
@@ -244,11 +283,26 @@ class AlgorithmDataContract(Protocol):
     ) -> BufferView:
         """按键读取一个端口的（可选时间窗）只读视图。
 
-        time_range 为 None ⇒ 整段；单位秒，坐标含义由该端口的
-        timeline_basis 决定。
+        **单位是秒**（不是帧、不是采样点）。坐标含义由该端口的
+        `timeline_basis` 决定：
+            REFERENCE → 秒，相对参考演奏起点
+            WARPED    → 秒，相对时间归一化后的起点
 
-        端口不存在 ⇒ 抛 ContractViolation。
-        **不得**返回空数组冒充成功。
+        `time_range=(t0, t1)`，左闭右开 `[t0, t1)`。
+        `None` ⇒ 整段。
+
+        与帧坐标的换算由**实现**负责，调用方不得自行乘除 hop
+        （那会让调用方依赖 profile 的内部参数）。
+
+        失败语义（**必须严格区分，不得混淆**）：
+        - 端口不存在 → 抛 `ContractViolation`
+        - `t0 >= t1`，或 `t1` 超出该端口时长 → 抛 `ContractViolation`
+        - **绝不返回空视图冒充成功**（宪章 §5.6 No Silent Degradation）
+
+        返回值保证：
+        - `data.flags.writeable is False`
+        - `data.ndim == len(descriptor.dimensions)`
+        - `element_count == product(data.shape)`
         """
         ...
 
@@ -526,6 +580,7 @@ __all__ = [
     "SessionState", "TimelineBasis", "AlignmentRepresentation", "AudioFormat",
     # 数据面
     "PortDescriptor", "BufferView", "SurfaceManifest", "AlgorithmResultEnvelope",
+    "FIELD_LAYOUTS",
     "AlgorithmDataContract", "CORE_REQUIRED_PORTS",
     # Host
     "HostContract", "FORBIDDEN_OPERATIONS",
