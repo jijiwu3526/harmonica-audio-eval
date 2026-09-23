@@ -1,0 +1,154 @@
+{
+  "schema": "virtual-system-graph-overlay/v1",
+  "note": [
+    "★ 本文件是**手写**的部分 —— 代码里不存在、因而无法推导的事实。",
+    "与 virtual-system-graph.json（脚本生成）分开存放，",
+    "使『哪些是我推导的、哪些是我声称的』一眼可辨。",
+    "手写内容会漂移，故每条都附依据；无依据的条目不写。"
+  ],
+
+  "component_intent": {
+    "COMP-C1": {
+      "why_exists": "全系统唯一的编排点。去掉它必然发生两件事之一：C2 得知道有哪些算法（深组件被破坏，Core 变成插件需求的函数），或 C4 直接调 C2/C3（界面进入计算路径，UI 崩溃会污染数据面）。故它不是转发层，它拥有编排权。",
+      "traces_to": "SPEC.md §1（双音频对比 → 客观数值指标）· COMPONENTS.md §4 · 宪章 §8（责任单元）",
+      "not_responsible_for": "不做 DSP；不实现算法；不读端口内容；不持有 C4 之外的平台依赖"
+    },
+    "COMP-C2": {
+      "why_exists": "把两段音频编译成一份与算法无关的、不可变的分析数据面。它是『深组件』的兑现处：算法只见 manifest + read 两个操作，看不见 Core 内部的模块划分、DAG、缓存或存储策略，故 Core 可在不破坏任何算法的情况下重组内部实现。",
+      "traces_to": "SPEC.md §5/§6/§7 · COMPONENTS.md §4.2 · 宪章 §9（可执行契约）",
+      "not_responsible_for": "不知道有哪些算法；不因算法缺端口就去生成数据；不做 UI；不判断吹得好不好"
+    },
+    "COMP-C3": {
+      "why_exists": "把数据面翻译成『这个音准不准 / 这个音早了晚了 / 这个音强弱差多少』的可定位数值。每个算法是一个独立可替换的责任单元，只依赖端口契约，互不感知。",
+      "traces_to": "SPEC.md §1（只到数值层）· COMPONENTS.md §4 · 宪章 §8",
+      "not_responsible_for": "不做时间对齐（Core 的职责）；不生成自然语言反馈或教学结论（SPEC §1 边界）；不改数据面"
+    },
+    "COMP-C4": {
+      "why_exists": "让开发者能看见并驱动前三个组件。v0.1 只服务一个开发者、一台 Mac；它必须在 C4 缺席时全流程仍可跑通（不变量 F），故它不得进入计算路径。",
+      "traces_to": "负责人裁定（Mac 端只给开发者看，核心调完再移手机端）· COMPONENTS.md §5 不变量 F",
+      "not_responsible_for": "不进入计算热路径；不保存 Core 状态；不直接读数据面；不解释算法内部"
+    }
+  },
+
+  "mission_threads": [
+    {
+      "id": "MT-001",
+      "title": "主流程：两段音频 → 客观指标（无头）",
+      "components": ["COMP-C1", "COMP-C2", "COMP-C3"],
+      "end_to_end": true,
+      "world_change": "无（正常世界）",
+      "verifies": ["不变量 F（C4 缺席仍跑通）", "不变量 B（换算法 Core 零修改）"]
+    },
+    {
+      "id": "MT-002",
+      "title": "有界面：开发者调试流程",
+      "components": ["COMP-C4", "COMP-C1", "COMP-C2", "COMP-C3"],
+      "end_to_end": true,
+      "world_change": "无",
+      "verifies": ["C4 只经 UiProjectionPort 与 C1 对话"]
+    },
+    {
+      "id": "MT-003",
+      "title": "输入是坏的",
+      "components": ["COMP-C2"],
+      "end_to_end": false,
+      "world_change": "输入文件不可解码 / 过短 / 全静音",
+      "verifies": ["宪章 §5.6 无静默降级", "错误码显式"]
+    },
+    {
+      "id": "MT-004",
+      "title": "对齐无法建立",
+      "components": ["COMP-C2"],
+      "end_to_end": false,
+      "world_change": "两段音频毫无共同结构（如一段是噪声）",
+      "verifies": ["宪章 §5.6：不得退化成逐点硬比", "ErrorCode.ALIGNMENT_UNRECOVERABLE"]
+    },
+    {
+      "id": "MT-005",
+      "title": "一个算法失败，其余必须继续",
+      "components": ["COMP-C1", "COMP-C3"],
+      "end_to_end": true,
+      "world_change": "某个算法抛异常 / 返回 NaN",
+      "verifies": ["不变量 D（故障隔离）"]
+    },
+    {
+      "id": "MT-006",
+      "title": "算法死循环（v0.1 已知缺口）",
+      "components": ["COMP-C3", "COMP-C1"],
+      "end_to_end": false,
+      "world_change": "算法永不返回",
+      "verifies": ["★ 已知缺口：v0.1 会挂住整个 rack，无超时机制"],
+      "known_gap": true
+    },
+    {
+      "id": "MT-007",
+      "title": "界面断开 / 缺席",
+      "components": ["COMP-C4", "COMP-C1"],
+      "end_to_end": true,
+      "world_change": "C4 进程被杀 / 从未启动",
+      "verifies": ["不变量 F", "ErrorCode.COCKPIT_DETACHED（v0.1 不产出）"]
+    },
+    {
+      "id": "MT-008",
+      "title": "命令时序非法",
+      "components": ["COMP-C1"],
+      "end_to_end": false,
+      "world_change": "在 DATA_READY 之前触发算法 / 重复 build",
+      "verifies": ["状态机单调推进", "COMMAND_LEGALITY"]
+    },
+    {
+      "id": "MT-009",
+      "title": "重复构建与销毁",
+      "components": ["COMP-C2"],
+      "end_to_end": false,
+      "world_change": "同会话 build 两次 / destroy 后继续用",
+      "verifies": ["会话生命周期", "Seal 后不可变"]
+    },
+    {
+      "id": "MT-010",
+      "title": "同输入可复现",
+      "components": ["COMP-C2"],
+      "end_to_end": true,
+      "world_change": "无（同 build 两次运行）",
+      "verifies": ["不变量 A（回归断言）", "content_hash 一致"]
+    }
+  ],
+
+  "known_gaps": [
+    {
+      "id": "GAP-1",
+      "what": "算法死循环会挂住整个 rack",
+      "why_not_fixed": "v0.1 无超时/隔离机制；加它需要契约变更（谁负责 kill、超时算哪种失败）",
+      "affects": ["MT-006"],
+      "owner_decision_needed": true
+    },
+    {
+      "id": "GAP-2",
+      "what": "ErrorCode.COCKPIT_DETACHED 在 v0.1 永不产出",
+      "why_not_fixed": "它需要 C4 主动上报断连，而 v0.1 的 C4 只是本机进程内视图，没有独立的连接生命周期",
+      "affects": ["MT-007"],
+      "owner_decision_needed": false
+    },
+    {
+      "id": "GAP-3",
+      "what": "progress 是粗粒度的",
+      "why_not_fixed": "平滑进度需要契约变更（Core 要在计算中回调），当前只在状态切换时更新",
+      "affects": ["MT-002"],
+      "owner_decision_needed": true
+    },
+    {
+      "id": "GAP-4",
+      "what": "数据集只有 1 首歌",
+      "why_not_fixed": "02–10 的批量构建暂停，等负责人听过 01 的产出",
+      "affects": ["MT-001"],
+      "owner_decision_needed": false
+    },
+    {
+      "id": "GAP-5",
+      "what": "虚拟组件目前不可执行（宪章 §10 要求可端到端跑）",
+      "why_not_fixed": "18 个空壳全部 raise NotImplementedError；尚无 stub/mock 实现层。§10 要求『一行真实业务实现都没有时，系统应已经能跑关键 Mission Thread』—— 这需要一层『虚拟实现』，目前不存在",
+      "affects": ["MT-001", "MT-002", "MT-005", "MT-010"],
+      "owner_decision_needed": true
+    }
+  ]
+}
