@@ -686,6 +686,90 @@ def check_constitution_citations(r: Report) -> None:
         print("  ✅ 所有『宪章 §N』引用都落在宪章实际章节内")
 
 
+def check_doc_symbol_drift(r: Report) -> None:
+    """⑫ 文档里提到的类型名与状态值，必须真的存在于代码里。
+
+    ★ 由下往上核对代码时发现的**一整类**漂移：
+
+        COMPONENTS.md 写 `AlgorithmResultEnvelopeV1`（3 次）
+                      `AnalysisDataSurfaceV1` / `SurfaceManifestV1`
+                      `SurfaceHandle` / `SessionHandle`
+                      → 代码里这些名字**全都不存在**
+
+        COMPONENTS.md 写会话状态含 `RUNNING` / `RESULTS_READY`
+                      → contract.SessionState 只有 6 个取值，没这两个
+
+    为什么危险：文档是**实现者的输入**。名字对不上，
+    实现者要么去找一个不存在的类型，要么自己发明一个 ——
+    后者正是 §22 硬失败「Build Instruction 要求实现者自行做上层设计」。
+
+    检查范围刻意收窄到**高置信度**信号：
+      - 只查 `V1` 结尾的类型名（本仓已弃用该后缀风格）
+      - 只查会话状态枚举值（有唯一权威 contract.SessionState）
+    不做"文档里任意 CamelCase 都必须是代码符号"的宽检查 ——
+    那会把 PCM / MIDI / STFT 这类通用词全部误报（实测会刷出 40+ 条噪声）。
+    """
+    print()
+    print("─" * 72)
+    print("⑫ 文档符号漂移")
+    print("─" * 72)
+
+    sys.path.insert(0, str(REPO))
+    import harmonica_eval.contract as C
+
+    issues: list[str] = []
+
+    # ① 已弃用的 V1 后缀类型名
+    for doc in sorted(REPO.glob("*.md")):
+        body = doc.read_text(encoding="utf-8")
+        for m in re.finditer(r"\b([A-Z][A-Za-z]+V1)\b", body):
+            issues.append(
+                f"{doc.name} 提到 {m.group(1)}，但代码里没有这个类型"
+            )
+
+    # ② 会话状态值 —— **只对 C1 章节**生效。
+    #
+    # 为什么必须限定范围：C2 章节的 state_model 写的是
+    # `CREATED → INGESTING → CANONICALIZING → ALIGNING → MATERIALIZING`，
+    # 那是 **Core 内部阶段**，而契约明说「C2 内部阶段不得外泄」——
+    # 它们**本来就不该**出现在 SessionState 里。把它们报成错误是误报
+    # （实测第一版就刷出 4 条这种假警报）。
+    #
+    # 真正要防的是 C1 章节：C1 的状态机**就是** SessionState，
+    # 两者必须逐字一致，否则实现者会去实现一个不存在的状态。
+    real_states = {s.name for s in C.SessionState}
+    for doc in sorted(REPO.glob("*.md")):
+        body = doc.read_text(encoding="utf-8")
+        m = re.search(r"### COMP-C1.*?(?=\n### |\Z)", body, re.S)
+        if not m:
+            continue
+        for sm in re.finditer(r"state_model:[^\n]*", m.group(0)):
+            for tok in re.findall(r"\b([A-Z][A-Z_]{2,})\b", sm.group(0)):
+                if tok in real_states or tok.endswith("_V1"):
+                    continue
+                issues.append(
+                    f"{doc.name} 的 C1 state_model 含 {tok}，"
+                    f"但 SessionState 无此取值（实际：{sorted(real_states)}）"
+                )
+
+    # 说明性输出：C2 内部阶段无代码对应物，这是**正确**的，不是缺陷
+    c2 = re.search(r"### COMP-C2.*?(?=\n### |\Z)",
+                   (REPO / "COMPONENTS.md").read_text(encoding="utf-8"), re.S)
+    if c2:
+        mm = re.search(r"state_model:[^\n]*", c2.group(0))
+        if mm:
+            print("  ℹ️  C2 内部阶段（刻意不进 SessionState，非缺陷）："
+                  f"{mm.group(0).split(':', 1)[1].strip()[:64]}")
+
+    for i in issues:
+        print(f"  ❌ {i}")
+        r.err(i)
+
+    print(f"  SessionState 实际取值：{sorted(real_states)}")
+    if not issues:
+        print("  ✅ 文档符号与代码一致")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -702,6 +786,7 @@ def main() -> int:
     check_doc_port_count(r)
     check_timing_payload_consistency(r)
     check_constitution_citations(r)
+    check_doc_symbol_drift(r)
 
     print()
     print("=" * 72)

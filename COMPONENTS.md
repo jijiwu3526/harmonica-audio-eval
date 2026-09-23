@@ -104,8 +104,12 @@ guarantees:
   - G1 状态单调推进，不跳过 DATA_READY 直接触发算法
   - G2 编排逻辑只存在于 C1；C2 与 C3 互相不可见
   - G3 任何失败都归一化为显式错误码，不泄漏内部异常/堆栈
-state_model: CREATED → INPUT_READY → BUILDING → DATA_READY → RUNNING → RESULTS_READY → CLOSED
+state_model: CREATED → INPUT_READY → BUILDING → DATA_READY → CLOSED
              （任一状态可 → FAILED）
+★ 更正：原写 …DATA_READY → RUNNING → RESULTS_READY → CLOSED，
+  但 contract.SessionState 只有 6 个取值，**没有** RUNNING / RESULTS_READY。
+  算法运行结果体现在 AlgorithmResultEnvelope.status，不是会话状态 ——
+  故「跑算法」不产生新会话状态。
 invariants:
   - INV-C1-1 不读取端口缓冲区内容
   - INV-C1-2 不 import C3 的算法实现模块（只依赖契约）
@@ -120,7 +124,7 @@ resource_budget: "O(1) 业务状态 + 句柄；不持有音频数据"
 security_boundary: 唯一允许接触平台文件系统与权限的组件；C2/C3 默认无文件与网络访问
 dependencies: → C2（必须）；→ C4（可选）
 acceptance_scenarios:
-  - AS-C1-1 正常两段音频 → RESULTS_READY
+  - AS-C1-1 正常两段音频 → DATA_READY，各算法各自返回 status='OK' 的信封
   - AS-C1-2 C4 缺席时同一条 Mission Thread 仍完成
   - AS-C1-3 C2 构建失败 → FAILED，且未触发任何算法
 virtual_behavior: |
@@ -150,7 +154,7 @@ provides:
   - CONTRACT-HOST-v1（状态 / 句柄）
   - CONTRACT-ALGORITHM-DATA-v1（只读自描述数据面）
 inputs: [Reference AudioAsset, Practice AudioAsset, core_profile_version]
-outputs: [AnalysisDataSurfaceV1（不可变逻辑数据空间）]
+outputs: [Surface（实现 AlgorithmDataContract 的只读对象，不可变逻辑数据空间）]
 assumptions:
   - 两段音频内容为同一首曲子的两次演奏（这是产品前提，不校验）
   - 输入为可解码的常见音频格式
@@ -200,7 +204,7 @@ purpose: 消费标准数据面，返回标准算法结果
 responsibilities:
   - 从数据面读取自己需要的端口
   - 完成一个独立算法能力
-  - 返回 AlgorithmResultEnvelopeV1
+  - 返回 AlgorithmResultEnvelope
   - 自报本次实际消费了哪些端口（consumed_ports）
 non_responsibilities:
   - 不管理音频生命周期；不做对齐；不碰 UI/平台 API
@@ -208,9 +212,9 @@ non_responsibilities:
   - 不访问文件系统固定路径；不访问网络
   - 不修改任何端口数据
 requires: [只读数据面视图]
-provides: [AlgorithmResultEnvelopeV1]
+provides: [AlgorithmResultEnvelope]
 inputs: [PortDescriptor + BufferView + timeline_basis + sample_rate]
-outputs: [AlgorithmResultEnvelopeV1]
+outputs: [AlgorithmResultEnvelope]
 assumptions:
   - 所需端口已在 manifest 中声明且存在（否则不启动）
   - 数据面在其运行期间保持有效（Seal 后不可变，故天然成立）
@@ -220,7 +224,12 @@ guarantees:
   - G11 不依赖 C2/C1 内部符号，只依赖契约
   - G12 失败被隔离：自身 FAILED 不影响数据面与其他算法
   - G13 声明 required_ports 仅用于兼容性检查，绝不反向触发 C2 生成数据
-state_model: CREATED → COMPATIBILITY_CHECKED → RUNNING → RESULTS_SUBMITTED / FAILED
+state_model: 无独立状态机。算法是**无状态**的：
+             run(surface) 一次调用内完成，结果状态体现在
+             AlgorithmResultEnvelope.status ∈ {'OK','FAILED','INCOMPATIBLE'}
+★ 更正：原写 CREATED → COMPATIBILITY_CHECKED → RUNNING → RESULTS_SUBMITTED/FAILED。
+  但代码里没有这些状态，也没有算法状态机 —— algorithms/__init__.py 的
+  AlgorithmSpec 只有 id/version/required_ports/entry/label。
 invariants:
   - INV-C3-1 不持有跨越会话生命周期的端口指针
   - INV-C3-2 不依赖 process-global 可变单例
@@ -297,15 +306,15 @@ virtual_behavior: 静态页面 + 脚本化命令序列；可在无真实 C1 时�
 | 暴露状态 | `CREATED` / `INPUT_READY` / `BUILDING` / `DATA_READY` / `FAILED` / `CLOSED`（C1 不需知道内部阶段） |
 | 禁止 | `align()` / `fft()` / `generate_pitch_input()` / `prepare_for_*()` / `generate_plugin_requirement()` |
 | 必须包含 | `core_profile_version` —— 没有它"同一对输入"不成立 |
-| 资源所有权 | Core 拥有 Core 缓冲；`SurfaceHandle` 有效期至 `destroy_session` |
+| 资源所有权 | Core 拥有 Core 缓冲；`AlgorithmDataContract` 句柄有效期至 `destroy_session` |
 
 ### 4.2 CONTRACT-ALGORITHM-DATA-v1（C2 ↔ C3）—— 本版深化
 
 **接口只有两个操作**（这是"深组件"的落点）：
 
 ```text
-SurfaceHandle.manifest()            → SurfaceManifestV1   # 自描述，列出端口
-SurfaceHandle.read(port_id, range)  → BufferView          # 零拷贝或分块视图
+AlgorithmDataContract.manifest()    → SurfaceManifest     # 自描述，列出端口
+AlgorithmDataContract.read(port_id, range) → BufferView    # 零拷贝或分块视图
 ```
 
 | 项 | 内容 |
