@@ -216,3 +216,96 @@ New CAST FREEZE              ← 新 tag
 然后实现者在 `dynamics` 上撞墙 —— 要么违反 MUST NOT，
 要么自行发明一套"WARPED 轴 rms"，
 产出一份**看起来正常、但与他人不可复现**的力度报告。
+
+---
+
+## 八、`MOLD BREAK` 执行记录（§38）
+
+**原则**：§38 禁止"先做一个能跑的 workaround，以后再说"。
+故**不修 `dynamics` 一行让它通过**，而是回去修 `TimelineBasis` 的定义。
+
+### 8.1 根因链（比盲审报告更深一层）
+
+```text
+TimelineBasis.REFERENCE 的 docstring 自相矛盾
+  「保留源时间」+「对齐后重采样到参考演奏的时间轴」
+        ↓ 含混定义向下传播
+dynamics.py 写出一条无法满足的 MUST
+  「用 WARPED 轴」+ required_ports 只有 REFERENCE 轴的 rms.*
+        ↓ 继续追问
+真正的病灶：端口表对称性破裂
+  notes.* 只有 reference 侧；而 pitch / timing / dynamics 三者
+  都声称「可定位到第几个音」，只有 timing 声明了逐音索引
+  → 「按音比较」这个核心能力原先只有一半
+```
+
+**关键判断**：`dynamics` 需要的**不是"WARPED 轴"，而是"逐音配对"**。
+我用时间轴当"按音对齐"的代理，是**错误的机制** ——
+它既丢失逐音索引，又要求一个数据面里不存在的端口。
+
+### 8.2 已修 12 项
+
+| 缺口 | 修法 |
+| --- | --- |
+| G1 `dynamics` 轴矛盾 | 改为**按音配对**，删除 `AXIS` 常量 |
+| G2 缺 `notes.practice` | 补齐，三算法统一声明成对 `notes.*` |
+| G3 `entry` 签名未冻结 | 冻结为 `entry(surface) -> AlgorithmResultEnvelope` |
+| G4 payload 键名未冻结 | 新增 `PAYLOAD_SCHEMAS` |
+| G5 帧移未声明 | 新增 `PortSpec.hop_length` + `MATERIALIZE.pitch_hop_length` |
+| G6 `dimensions[-1]` 无法校验 | 改为校验 `len(field_names)` |
+| G7 `UiCommand.payload` 无键名 | 新增 `UI_PAYLOAD_KEYS` |
+| G8 Host 签名不自洽 | `set_reference/practice` 补 `session_id` |
+| G9 `progress` 无产生机制 | 定义为"C1 步骤计数"，并记录为何不做平滑进度 |
+| G10 `units` 无词表 | 新增 `UNITS_VOCABULARY` |
+| G11 `CANCEL`/`RESET` 未定义 | 新增 `COMMAND_EFFECTS` |
+| G12 `content_hash` 未冻结 | 冻结算法 + `CONTENT_HASH_MAGIC` |
+
+**顺带修**：G14 `COCKPIT_DETACHED` 无产生者（记录为功能残留）、
+G15 `render_series_plot` 返回标注与散文冲突、G16 `read()` 对 `warp_path` 语义。
+
+### 8.3 新增 4 项机械检查（全部负向测试过）
+
+| 检查 | 抓什么 | 负向测试 |
+| --- | --- | --- |
+| ⑤ 帧类端口 `hop_length` | 帧移漏声明 / 误声明 | ✅ 按预期原因触发 |
+| ⑥ 端口对称性 | `X.reference` 缺 `X.practice` | ✅ 含 `pcm.warped` 例外 |
+| ⑦ **重复定义（静默遮蔽）** | 同名 class/def 重复 | ✅ 注入后抓到 |
+| ⑧ 契约↔实现签名一致 | 契约说一套、实现写另一套 | ✅ 去掉 `session_id` 后抓到 |
+
+**检查⑦的由来是一次真实事故**：我修 `contract.py` 时误留一个重复的
+`class SessionState` 头，**Python 静默遮蔽旧定义、import 照常成功**。
+这与 `FIELD_LAYOUTS`、`hop_length`、端口对称性属于**同一族缺陷**：
+**不报错，只静默算错**。故用机械检查兜住。
+
+**检查⑧的必要性**：G8 那种"契约与实现漂移"不会报错，
+直到有人真的去调用才发现对不上。
+
+### 8.4 自检从 4 项扩到 8 项
+
+`profile.assert_profile_integrity()` 新增：
+5. 帧类端口必须声明 `hop_length`，非帧类必须留 0
+6. 端口对称性（`pcm.warped.*` 为唯一例外）
+7. `units` 必须在受控词表内
+8. （原 4 项保留）
+
+### 8.5 当前状态
+
+```text
+机械验证   7/7 通过（18 文件 / 72 函数 / 依赖方向 / 禁名单 / 无遮蔽 / 签名一致）
+交叉验证   26/26 通过
+§20 盲审   待重跑 —— 必须用**新问题**，且**必须含自由探索**
+```
+
+### 8.6 下一轮 §20 的方法修正
+
+**本轮最大方法论教训**：定选式问题**只能测量已知项**。
+我的 15 问全部指向自己已修过的地方 → 必然一致 → 得出"语义收敛"的假象。
+
+**真正的缺陷 100% 来自自由探索部分，没有一个来自那 15 问。**
+
+故下一轮必须：
+1. **不定选** —— 让审查者自由描述"你会怎么实现 `dynamics`"
+2. **给任务不给问题** —— 例如"写出 `align_by_note` 的实现伪码"，
+   从他们的**实际读法**里看分叉，而不是问"有没有歧义"
+3. 换用**新的**模型组合（不能是同一批，它们见过旧版本）
+4. 定选问题**保留但降权** —— 它测的是"回归"，不是"发现"

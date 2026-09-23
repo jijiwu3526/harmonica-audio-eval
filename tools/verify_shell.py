@@ -336,6 +336,72 @@ def check_no_shadowing(r: Report) -> None:
         print("  ✅ 无重复定义（不存在静默遮蔽）")
 
 
+def check_contract_signatures(r: Report) -> None:
+    """⑧ 契约与实现的签名一致性。
+
+    ★ G8 修正（§20 盲审发现）：`HostContract.set_reference(uri)` 只有 1 个参数，
+    而 `HostCore.set_reference(self, uri)` 实现的虽是同一件事，
+    同协议里另外 5 个操作却**都**要 `session_id`。
+    契约内部不自洽，实现者无法判断该往哪个会话登记。
+
+    这类"契约说一套、另一边写另一套"的漂移不会报错 ——
+    直到有人真的去调用才发现对不上。故机械检查：
+    `core/api.py` 的 `HostCore` 每个方法签名必须与 `contract.HostContract`
+    的同名方法**逐参数一致**。
+    """
+    print()
+    print("─" * 72)
+    print("⑧ 契约 ↔ 实现 签名一致性")
+    print("─" * 72)
+
+    import ast as _ast
+
+    contract_path = PKG / "contract.py"
+    api_path = PKG / "core" / "api.py"
+
+    def method_params(path: Path, cls_name: str) -> dict[str, list[str]]:
+        tree = _ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        out: dict[str, list[str]] = {}
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.ClassDef) and node.name == cls_name:
+                for sub in node.body:
+                    if isinstance(sub, _ast.FunctionDef):
+                        out[sub.name] = [a.arg for a in sub.args.args]
+        return out
+
+    proto = method_params(contract_path, "HostContract")
+    impl = method_params(api_path, "HostCore")
+
+    hits: list[str] = []
+    for name, pparams in proto.items():
+        if name not in impl:
+            hits.append(f"HostCore 缺少契约方法 '{name}'")
+            continue
+        # 去掉 self 后逐参数比对
+        ip = [p for p in impl[name] if p != "self"]
+        pp = [p for p in pparams if p != "self"]
+        if ip != pp:
+            hits.append(
+                f"'{name}' 签名不一致：契约 ({', '.join(pp)}) "
+                f"vs 实现 ({', '.join(ip)})"
+            )
+
+    extra = set(impl) - set(proto)
+    if extra:
+        hits.append(
+            f"HostCore 多出契约未声明的方法 {sorted(extra)}"
+            "（宪章 §47.6 Silent Contract Mutation）"
+        )
+
+    for h in hits:
+        print(f"  ❌ {h}")
+        r.err(h)
+
+    print(f"  比对了 {len(proto)} 个契约方法")
+    if not hits:
+        print("  ✅ 7 个方法签名逐参数一致，且无契约外方法")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -348,6 +414,7 @@ def main() -> int:
     check_layer_direction(r)
     check_forbidden_on_host(r)
     check_no_shadowing(r)
+    check_contract_signatures(r)
 
     print()
     print("=" * 72)

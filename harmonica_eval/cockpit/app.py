@@ -127,7 +127,7 @@ def render_scalars(scalars: Sequence[UiScalar]) -> str:
     raise NotImplementedError("SHELL: FILE-401 待注入实现")
 
 
-def render_series_plot(series: UiSeries) -> str:
+def render_series_plot(series: UiSeries) -> object:
     """渲染一条曲线，并在图上标注它的时间轴含义。
 
     参数：
@@ -135,14 +135,23 @@ def render_series_plot(series: UiSeries) -> str:
 
     契约：
         - **必须**读 series.timeline_basis 并把它标注在图上：
-          REFERENCE = 保留源时间（抢拍拖拍可见）；
-          WARPED = 时间归一化（抢拍拖拍已被抹掉）。
+          REFERENCE = 源时间网格（抢拍拖拍可见）；
+          WARPED = 归一化网格（抢拍拖拍已被抹掉）。
           轴的含义不标出来，用户会把 warped 轴上的图当成真实时间而误读节奏。
         - 纵轴单位取 series.unit，横轴是秒；两者都不得省略
         - **不重采样、不插值、不平滑**：投影已是最终形状，界面只画不改
         - 不解释曲线的算法来源（D4）；source_port 只作为追溯字段原样展示
 
-    返回：可绘制内容（实现者可返回 SVG / HTML / 前端图表配置 —— 框架选择留给实现者）。
+    ★ G15 修正（§20 盲审发现）：返回类型第一版标注为 `str`，
+    但本 docstring 又说"实现者可返回 SVG / HTML / 前端图表配置"。
+    **标注与散文冲突** —— 实现者按标注返回 `str` 是合规的，
+    按散文返回图表配置对象也是合规的，而调用方（`build_plots`）
+    声明的是 `Sequence[str]`，两种实现里必有一种让调用方拿到非 str。
+
+    修正为 `object`：**故意不指定具体类型**，因为框架选择确实留给实现者，
+    契约强制不了。但把"不强制"写成 `str` 是错的 —— 那是**假装**有约束。
+    调用方 `build_plots` 相应地也改为 `Sequence[object]`，
+    并**不得**对元素做字符串操作（只能原样传递给前端）。
     """
     raise NotImplementedError("SHELL: FILE-401 待注入实现")
 
@@ -178,7 +187,7 @@ def render_error(view: UiView) -> str:
     raise NotImplementedError("SHELL: FILE-401 待注入实现")
 
 
-def build_plots(view: UiView) -> Sequence[str]:
+def build_plots(view: UiView) -> Sequence[object]:
     """把投影里的全部曲线渲染成一屏可展示的内容。
 
     参数：
@@ -188,6 +197,9 @@ def build_plots(view: UiView) -> Sequence[str]:
         - 每条曲线**逐一**交给 render_series_plot（时间轴标注在单条曲线内完成）
         - series 为空 ⇒ 返回空序列，不报错、不造图
         - 只读：本函数不修改 view，也不触发任何 C1 侧行为
+        - ★ G15 修正：元素类型随 render_series_plot 改为 `object`。
+          本函数**不得**对元素做字符串操作（拼接/切片/正则），
+          只能原样收集后交给前端 —— 元素是什么由实现者的框架决定。
 
     返回：渲染结果的序列（与 view.series 一一对应、同序）。
     """

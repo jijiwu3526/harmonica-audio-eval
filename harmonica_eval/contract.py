@@ -425,11 +425,43 @@ class AlgorithmDataContract(Protocol):
 
         与帧坐标的换算由**实现**负责，调用方不得自行乘除 hop
         （那会让调用方依赖 profile 的内部参数）。
+        换算依据是该端口自己的 `hop_length`（见 `PortDescriptor.hop_length`）——
+        **不是** `profile.ALIGN.hop_length`，后者只是 chroma 端口的帧移。
+
+        ★ G16 修正（§20 盲审发现）：**非帧类端口的时间窗语义**。
+
+        `warp_path` 的 `units="index"`、`dimensions=("warp_point","axis")`
+        —— 它**没有** frame 维度，却声明了 `timeline_basis=REFERENCE`。
+        第一版没说对它调 `read(port_id, (t0,t1))` 时秒该怎么换算
+        （用哪个 hop？warp_point 不是帧）。审查者指出这是"最尖锐"的缺口。
+
+        冻结语义：`time_range` **对所有端口统一以秒为单位**，
+        换算规则按端口的 `units` 决定：
+
+            units == "amplitude"  → 秒 × sample_rate            → 采样点
+            dimensions 含 "frame"  → 秒 × sample_rate / hop_length → 帧
+            units == "index"      → 秒 × sample_rate / hop_length → 索引
+                                    （notes.* 用 hop_length=0，
+                                      故按 **onset_sec 字段**筛选，见下）
+            units == "chroma"     → 同 frame 规则
+
+        `notes.*` 特殊：它是**逐音**表（不是等间隔栅格），
+        故 `time_range` 按 `field_names` 中的 `onset_sec` **筛选行**：
+        返回 onset_sec ∈ [t0, t1) 的音。这也正是 `hop_length=0` 的含义 ——
+        "本端口不是等间隔栅格，不要用帧移换算"。
+
+        `warp_path` 特殊：它是**路径点**表，时间窗按
+        `reference_frame` 换算后的秒值筛选（因为它的 basis 是 REFERENCE）。
+        注意其 `unit="index"` 指的是**列语义**（帧号），不是时间单位。
 
         失败语义（**必须严格区分，不得混淆**）：
         - 端口不存在 → 抛 `ContractViolation`
         - `t0 >= t1`，或 `t1` 超出该端口时长 → 抛 `ContractViolation`
         - **绝不返回空视图冒充成功**（宪章 §5.6 No Silent Degradation）
+          ★ 例外：若时间窗**合法**但窗内确实无数据（如 `notes.*` 在
+          一段静音里没有任何 onset），返回**空视图是正确的**，
+          不是静默降级 —— 因为"窗内没有音"是真实答案。
+          判据：`t1` 在时长内 ⇒ 空是合法结果；`t1` 超时长 ⇒ 抛错。
 
         返回值保证：
         - `data.flags.writeable is False`
@@ -470,12 +502,35 @@ class HostContract(Protocol):
         """
         ...
 
-    def set_reference(self, uri: str) -> None:
-        """登记参考演奏。**不触发**解码或计算。"""
+    def set_reference(self, session_id: str, uri: str) -> None:
+        """登记参考演奏。**不触发**解码或计算。
+
+        ★ G8 修正（§20 盲审发现）：本方法第一版签名是 `set_reference(uri)`，
+        **没有 session_id** —— 而同一个协议里 `build_surface` / `status` /
+        `acquire_surface` / `destroy_session` **都**要求 session_id。
+
+        这是契约内部不自洽：会话句柄既然由 `create_session` 返回、
+        又必须传给其他 5 个操作，唯独两个 setter 不用它，
+        实现者无法判断该往哪个会话登记（多会话时直接歧义；
+        单会话时又要额外约定"当前会话"这个隐含状态）。
+
+        修正为显式传 `session_id`：**所有会话级操作都必须显式定位会话**，
+        不引入"当前会话"这种隐含状态（隐含状态是并发缺陷的温床，
+        且与 `create_session` 返回 id 的设计自相矛盾）。
+
+        合法状态：CREATED / INPUT_READY
+        两段都登记后 → INPUT_READY
+        """
         ...
 
-    def set_practice(self, uri: str) -> None:
-        """登记学习者演奏。**不触发**解码或计算。"""
+    def set_practice(self, session_id: str, uri: str) -> None:
+        """登记学习者演奏。**不触发**解码或计算。
+
+        G8 修正：同上，补上 `session_id`。
+
+        合法状态：CREATED / INPUT_READY
+        两段都登记后 → INPUT_READY
+        """
         ...
 
     def build_surface(self, session_id: str) -> None:
@@ -582,7 +637,26 @@ class ErrorCode(str, Enum):
     """归属 C1。**v0.1 未实现**（已知缺口：死循环会卡住流程）。"""
 
     COCKPIT_DETACHED = "COCKPIT_DETACHED"
-    """归属 C4。界面断开不影响会话，仅记录。"""
+    """归属 C4。界面断开不影响会话。★ G14 修正（§20 盲审发现）。
+
+    第一版定义了这个码，但**没有任何地方能产生它** ——
+    `UiProjectionPort` 只有 `snapshot` / `submit` 两个操作，
+    没有上报通道；C1 也不检测界面存活。审查者原话：
+    「该码目前无处产生」。
+
+    这是**已删除的功能残留**，不是待实现的接口。故：
+
+    ★ **v0.1 不会产生此码。** 保留它是因为删除会让
+    `ErrorCode` 的编号在文档/报表里发生偏移（已发出的证据包会失效）。
+
+    v0.1 对"界面断开"的实际处理（见 MT-007）：
+        界面断开 = C4 进程消失 → C1 **什么都不做**，会话继续。
+        这本来就是正确的行为（不变量 F：C4 可缺席），
+        **不需要**一个错误码来记录它 —— 没有人在监听这个码。
+
+    若将来确实要记录界面事件，正确做法是新增一个**事件通道**，
+    而不是复用 `ErrorCode`（断开不是错误，塞进错误码会污染失败统计）。
+    """
 
     INTERNAL_ERROR = "INTERNAL_ERROR"
     """兜底。出现即表示有未分类失败路径，应视为缺陷。"""
@@ -681,7 +755,8 @@ class UiView:
     series: Sequence[UiSeries] = ()
     scalars: Sequence[UiScalar] = ()
     progress: float | None = None
-    """构建进度。★ C4 盲审发现的歧义，已冻结。
+    """构建进度。★ C4 盲审发现的歧义，已冻结取值域；
+    ★ G9 修正（§20 盲审发现）补上了**产生机制**。
 
     **取值域是 0.0–1.0（比例，不是百分数）。**
         0.0      已完成 0%
@@ -689,7 +764,37 @@ class UiView:
         None     该会话**没有进度概念**（尚未开始，或已进入终态）
 
     **界面不得自行归一化、不得推断百分比** —— 它只负责显示这个数。
-    """
+
+    ── 产生机制（G9：第一版只有取值域，没有产生规则）──
+
+    盲审指出：「`progress` 取值域冻结了，但 C2 的 `status()` 只回 6 个
+    `SessionState`，内部阶段 `INTERNAL_STAGES` 明确禁止外泄 →
+    C1 拿不到任何中间进度源」。属实。
+
+    这里是**刻意**的取舍，不是遗漏：
+
+        C1 能计数的是**它自己编排的步骤**，不是 Core 的内部阶段。
+        `build_surface` 是**一次**同步阻塞调用 —— 在它内部，
+        Core 会 ingest → align → features → surface 四个阶段，
+        但这四个阶段名**禁止外泄**（泄漏它们会让 C1 开始依赖
+        Core 的内部实现，深组件随即瓦解，见 core/api.py 的 status()）。
+
+    故 `progress` 的定义是 **"C1 已完成的正交步骤数 / 总步骤数"**：
+
+        BUILD_SURFACE 期间    → 0.0 → 1.0 的**单次跳变**（或 None）
+                                没有中间值，因为那需要 Core 汇报内部阶段
+        RUN_ALGORITHMS 期间   → k / 3（k = 已完成算法数，按 registry 顺序）
+
+    一个"平滑的构建进度条"需要 Core 开放内部阶段 —— 那是**契约变更**，
+    会让 `CONTRACT-HOST-v1` 从 7 个操作变成 8 个（加一个进度查询），
+    直接违反负责人裁定的**封闭端口/封闭契约**原则。
+
+    **本轮（快速原型验证）不做这件事。** 宁可 progress 粗粒度、
+    也不为了一个进度条破坏深组件边界。
+
+    ★ 记入已知缺口：若将来确实需要平滑进度，
+    正确做法**不是**让 Core 汇报内部阶段，而是在 C1 里把构建拆成
+    可观测的多次调用（那同样需要契约变更，须由负责人裁定）。"""
 
     error_code: str | None = None
     error_detail: str | None = None

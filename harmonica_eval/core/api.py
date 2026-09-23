@@ -63,16 +63,21 @@ class HostCore(HostContract):
         """
         raise NotImplementedError("SHELL: FILE-105 待注入实现")
 
-    def set_reference(self, uri: str) -> None:
+    def set_reference(self, session_id: str, uri: str) -> None:
         """登记参考演奏。**不触发**解码或计算。
+
+        ★ G8 修正：补上 `session_id`（原签名 `set_reference(uri)` 与
+        同协议其余 5 个操作不自洽 —— 见 contract.HostContract 的说明）。
 
         合法状态：CREATED / INPUT_READY
         两段都登记后 → INPUT_READY
         """
         raise NotImplementedError("SHELL: FILE-105 待注入实现")
 
-    def set_practice(self, uri: str) -> None:
+    def set_practice(self, session_id: str, uri: str) -> None:
         """登记学习者演奏。**不触发**解码或计算。
+
+        ★ G8 修正：补上 `session_id`。
 
         合法状态：CREATED / INPUT_READY
         两段都登记后 → INPUT_READY
