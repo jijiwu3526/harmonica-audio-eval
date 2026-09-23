@@ -987,6 +987,134 @@ def check_build_instruction_completeness(r: Report) -> None:
         print("  ✅ 全部 Build Instruction 结构完整、无占位符残留")
 
 
+def check_bi_symbol_references(r: Report) -> None:
+    """检查⑮：Build Instruction 引用的符号必须**真实存在**。
+
+    ★ 为什么需要这条检查 —— 它抓住的是一类**最贵的错误**：
+
+    FILE-103-v1.md 曾引用 6 个**不存在**的东西：
+        ErrorCode.INVALID_AUDIO / PITCH_ESTIMATION_FAILED / PORT_NOT_FOUND
+        MATERIALIZE.chroma_frame_length / chroma_hop_length
+        MATERIALIZE.pitch_fmin / pitch_fmax
+        harmonica_eval.core.profile / harmonica_eval.core.contract（模块不存在）
+
+    危险性在于：Build Instruction 是**冻结产物**，开头写着
+    「实现者**不得**修改本文件」。所以实现者会**照着不存在的东西写代码**，
+    撞到 `AttributeError` / `ModuleNotFoundError` 后，
+    最可能的反应是**怀疑自己**，而不是怀疑那份"冻结"的文档。
+
+    这与检查⑪（伪造宪章引用）是同一族缺陷：
+    **一句凭印象写下的判断，进了文档，随后看起来就像事实。**
+    区别只是⑪伪造的是"外部权威"，本条伪造的是"内部符号"。
+
+    检查方式（刻意保守，只报高置信度）：
+      对每份 Build Instruction，提取 `ErrorCode.X` / `MATERIALIZE.X` /
+      `AUDIO.X` / `ALIGN.X` / `FIELD_LAYOUTS['X']` 形态的引用，
+      与代码里的真实成员比对；再检查 `harmonica_eval.core.*` 这种
+      不存在的模块路径。
+
+    豁免：说明性行（含「不存在」「是错的」「上一版」等更正标记）跳过 ——
+      因为本文件的修正记录**必须**提到那些错误名字。
+      ★ 注意用**窗口**而非单行判断：中文散文会折行（检查⑪ 的教训）。
+
+    ★ 本检查第一版有 **2 处误报**，均已修正并记录在此（不掩盖）：
+      (1) `AUDIO.__dataclass_params__` —— 这是 **dataclass 的真实协议属性**
+          （`@dataclass(frozen=True)` 会生成它），FILE-004 用它断言 frozen，
+          **完全正确**。修正：正则排除 dunder（`__x__`）。
+      (2) `MATERIALIZE.rms_*` —— 这是**通配简写**（指 rms_frame_length 与
+          rms_hop_length 两个字段），FILE-202 的写法是合理的。
+          修正：结尾为 `_` 或以 `_` 收尾的片段视为通配，跳过。
+      ⇒ 又一次印证：**把"形式"当"实质"是我这类检查器最容易犯的错**，
+        与检查⑨（TCP 端口）、检查⑪（折行）是同一族。
+    """
+    print()
+    print("─" * 72)
+    print("⑮ Build Instruction 引用的符号是否存在")
+    print("─" * 72)
+
+    import harmonica_eval.contract as _c
+    import harmonica_eval.profile as _p
+
+    real: dict[str, set[str]] = {
+        "ErrorCode": {e.name for e in _c.ErrorCode},
+        "MATERIALIZE": set(_p.MATERIALIZE.__dataclass_fields__),
+        "AUDIO": set(_p.AUDIO.__dataclass_fields__),
+        "ALIGN": set(_p.ALIGN.__dataclass_fields__),
+        "FIELD_LAYOUTS": set(_c.FIELD_LAYOUTS),
+    }
+
+    # 引用的正则形态。
+    # `[a-zA-Z_]` 开头 + `[a-z_]` 后续，但**排除 dunder**（由 _is_wildcard 兜住）。
+    ref_patterns = [
+        (re.compile(r"ErrorCode\.([A-Z_]{3,})"), "ErrorCode"),
+        (re.compile(r"MATERIALIZE\.([a-z_]{2,})"), "MATERIALIZE"),
+        (re.compile(r"\bAUDIO\.([a-z_]{2,})"), "AUDIO"),
+        (re.compile(r"\bALIGN\.([a-z_]{2,})"), "ALIGN"),
+        (re.compile(r"FIELD_LAYOUTS\[['\"]([a-z_]+)['\"]\]"), "FIELD_LAYOUTS"),
+    ]
+    # 不存在的模块路径（真实是包根的 profile / contract）
+    bad_module = re.compile(r"harmonica_eval\.core\.(profile|contract)\b")
+    # 更正标记（按窗口判断，防折行）
+    EXEMPT = ("不存在", "是错的", "上一版", "ModuleNotFoundError", "更正",
+              "原写", "伪造", "历史", "已作废")
+
+    def _skip(name: str) -> bool:
+        """是否应跳过这个属性名（dunder / 通配简写）。"""
+        if name.startswith("__") and name.endswith("__"):
+            return True          # dunder：dataclass 协议等
+        if name.endswith("_"):
+            return True          # 通配简写，如 rms_ / chroma_
+        return False
+
+    bi_dir = REPO / ".spec" / "build"
+    if not bi_dir.is_dir():
+        print("  ⚠️  .spec/build/ 不存在，跳过")
+        return
+
+    hits: list[str] = []
+    n_refs = 0
+
+    for path in sorted(bi_dir.glob("FILE-*-v1.md")):
+        body = path.read_text(encoding="utf-8")
+        lines = body.splitlines()
+
+        # ① 符号引用
+        for lineno, line in enumerate(lines, 1):
+            window = "\n".join(lines[max(0, lineno - 3) : lineno + 2])
+            if any(k in window for k in EXEMPT):
+                continue
+            for pat, family in ref_patterns:
+                for m in pat.finditer(line):
+                    name = m.group(1)
+                    if _skip(name):
+                        continue
+                    n_refs += 1
+                    if name in real[family]:
+                        continue
+                    hits.append(
+                        f"{path.name}:{lineno} 引用不存在的 {family}.{name}"
+                    )
+
+        # ② 模块路径
+        for lineno, line in enumerate(lines, 1):
+            window = "\n".join(lines[max(0, lineno - 3) : lineno + 2])
+            if any(k in window for k in EXEMPT):
+                continue
+            for m in bad_module.finditer(line):
+                hits.append(
+                    f"{path.name}:{lineno} 引用不存在的模块 "
+                    f"harmonica_eval.core.{m.group(1)}（真实位置是包根）"
+                )
+
+    for h in hits:
+        print(f"  ❌ {h}")
+        r.err(h)
+
+    print(f"  检查了 {n_refs} 处符号引用（跨 {len(list(bi_dir.glob('FILE-*-v1.md')))} 份文档）")
+    if not hits:
+        print("  ✅ 全部引用的符号与模块真实存在")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -1006,6 +1134,7 @@ def main() -> int:
     check_doc_symbol_drift(r)
     check_registry_signature_consistency(r)
     check_build_instruction_completeness(r)
+    check_bi_symbol_references(r)
 
     print()
     print("=" * 72)

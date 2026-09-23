@@ -79,7 +79,9 @@
 - 任何其他解码器或容器读取路径：`wave`、`aifc`、`sunau`、`audioread`、`pydub`、`moviepy`、`torchaudio`、`av`、`cv2`、`sounddevice`、`pyaudio`、`scipy.io.wavfile`、`numpy.fromfile` 直读音频字节。
 - 任何特征/音高/能量/对齐计算：`librosa`、`pyin`、`crepe`、`aubio`、`praat-parselmouth`、`torch`、`scipy.signal`、`scipy.fft`、`numpy.fft`。特征属于 `core/features.py`（见 §7）。
 - 任何降噪/增强/归一化/动态处理：`noisereduce`、`pyloudnorm`、`sklearn`、`scipy.signal`（滤波器/包络/限幅）。
-- 本包的其他层与同层模块：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`、`harmonica_eval.core.api`、`harmonica_eval.core.align`、`harmonica_eval.core.features`、`harmonica_eval.core.surface`、`harmonica_eval.core.profile`。本文件只允许向上依赖 `contract` 与 `profile` 两个根模块，禁止任何同层横向依赖（否则 `core` 内部出现环，import 顺序会变成隐式契约）。
+- 本包的其他层与同层模块：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`、`harmonica_eval.core.api`、`harmonica_eval.core.align`、`harmonica_eval.core.features`、`harmonica_eval.core.surface`。本文件只允许向上依赖 `harmonica_eval.contract` 与 `harmonica_eval.profile` 两个**包根**模块，禁止任何同层横向依赖（否则 `core` 内部出现环，import 顺序会变成隐式契约）。
+
+  > ★ 更正（本版）：上一版此处把 `harmonica_eval.core.profile` 也列进了禁止清单。**该模块不存在** —— `profile` 与 `contract` 都在**包根**（`harmonica_eval/profile.py`、`harmonica_eval/contract.py`），不在 `core/` 下。列一个不存在的模块会让读者以为它存在，并去推导一个不成立的依赖方向。
 - 任何产生副作用的模块：`os`（只用 `os.path`）、`sys`、`pathlib` 的写操作、`atexit`、`signal`、`multiprocessing`、`threading`、`socket`、`requests`、`urllib`。本文件只读本地文件，不做网络、不写盘、不起线程/进程。
 - 环境变量与运行时配置来源：`os.environ`、`configparser`、`dotenv`。全部阈值只能来自 `profile.AUDIO` 与本模块的 `SILENCE_RMS_THRESHOLD`。
 

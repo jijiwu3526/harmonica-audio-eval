@@ -6,7 +6,6 @@
     "使『哪些是我推导的、哪些是我声称的』一眼可辨。",
     "手写内容会漂移，故每条都附依据；无依据的条目不写。"
   ],
-
   "component_intent": {
     "COMP-C1": {
       "why_exists": "全系统唯一的编排点。去掉它必然发生两件事之一：C2 得知道有哪些算法（深组件被破坏，Core 变成插件需求的函数），或 C4 直接调 C2/C3（界面进入计算路径，UI 崩溃会污染数据面）。故它不是转发层，它拥有编排权。",
@@ -29,7 +28,6 @@
       "not_responsible_for": "不进入计算热路径；不保存 Core 状态；不直接读数据面；不解释算法内部"
     }
   },
-
   "component_derivation": {
     "note": [
       "★ 本节是「由下往上」的登记结果：先看代码能聚成什么坨，再与上面的 component_intent 对照。",
@@ -55,44 +53,78 @@
     },
     "stable_findings": [
       {
-        "pair": ["harmonica_eval.algorithms.dynamics", "harmonica_eval.algorithms.timing"],
+        "pair": [
+          "harmonica_eval.algorithms.dynamics",
+          "harmonica_eval.algorithms.timing"
+        ],
         "stability": "7/7 阈值",
-        "jaccard": 0.350,
+        "jaccard": 0.35,
         "reading": "同层算法共享契约签名与『按音配对』口径"
       },
       {
-        "pair": ["harmonica_eval.algorithms.dynamics", "harmonica_eval.algorithms.pitch"],
+        "pair": [
+          "harmonica_eval.algorithms.dynamics",
+          "harmonica_eval.algorithms.pitch"
+        ],
         "stability": "6/7 阈值",
         "jaccard": 0.316,
         "reading": "同上"
       },
       {
-        "pair": ["harmonica_eval.algorithms.pitch", "harmonica_eval.algorithms.timing"],
+        "pair": [
+          "harmonica_eval.algorithms.pitch",
+          "harmonica_eval.algorithms.timing"
+        ],
         "stability": "6/7 阈值",
-        "jaccard": 0.300,
+        "jaccard": 0.3,
         "reading": "同上"
       },
       {
-        "pair": ["harmonica_eval.__main__", "harmonica_eval.cockpit.app"],
+        "pair": [
+          "harmonica_eval.__main__",
+          "harmonica_eval.cockpit.app"
+        ],
         "stability": "6/7 阈值",
-        "jaccard": 0.300,
+        "jaccard": 0.3,
         "reading": "★ 两者是同一类东西：都是 UiView/UiSeries 的**消费者**。一个是无头落盘，一个是图形界面。这从代码层证实了不变量 F 的前提 —— 无头入口与 C4 处在内核之外的对等位置，故『删掉 C4 内核仍跑通』是结构性的，不是补丁。"
       }
     ],
     "port_coupling": {
       "note": "端口供需图在空壳期**完整**（它由 profile.PORTS 与 ALGORITHMS 决定，与函数体无关）",
       "producers": {
-        "core.align": ["warp_path"],
-        "core.features": ["chroma.lowres.*", "notes.*", "pitch.*", "rms.*"],
-        "core.surface": ["pcm.mapped.*", "pcm.warped.practice"]
+        "core.align": [
+          "warp_path"
+        ],
+        "core.features": [
+          "chroma.lowres.*",
+          "notes.*",
+          "pitch.*",
+          "rms.*"
+        ],
+        "core.surface": [
+          "pcm.mapped.*",
+          "pcm.warped.practice"
+        ]
       },
       "consumers": {
-        "pitch": ["notes.*", "pitch.*"],
-        "timing": ["notes.*", "pcm.mapped.*"],
-        "dynamics": ["notes.*", "rms.*"]
+        "pitch": [
+          "notes.*",
+          "pitch.*"
+        ],
+        "timing": [
+          "notes.*",
+          "pcm.mapped.*"
+        ],
+        "dynamics": [
+          "notes.*",
+          "rms.*"
+        ]
       },
       "shared_vocabulary": "notes.*（三个算法**全部**需要）",
-      "unconsumed_families": ["chroma.lowres.*", "warp_path"],
+      "unconsumed_families": [
+        "chroma.lowres.*",
+        "warp_path"
+      ],
       "reading": [
         "core.features 是产出枢纽：12 个端口里它产 8 个。",
         "notes.* 是唯一的全算法共享词汇 → 它是 C2/C3 之间的**实际接口重心**，",
@@ -147,126 +179,205 @@
       }
     }
   },
-
   "mission_threads": [
     {
       "id": "MT-001",
       "title": "主流程：两段音频 → 客观指标（无头）",
-      "components": ["COMP-C1", "COMP-C2", "COMP-C3"],
+      "components": [
+        "COMP-C1",
+        "COMP-C2",
+        "COMP-C3"
+      ],
       "end_to_end": true,
       "world_change": "无（正常世界）",
-      "verifies": ["不变量 F（C4 缺席仍跑通）", "不变量 B（换算法 Core 零修改）"]
+      "verifies": [
+        "不变量 F（C4 缺席仍跑通）",
+        "不变量 B（换算法 Core 零修改）"
+      ]
     },
     {
       "id": "MT-002",
       "title": "有界面：开发者调试流程",
-      "components": ["COMP-C4", "COMP-C1", "COMP-C2", "COMP-C3"],
+      "components": [
+        "COMP-C4",
+        "COMP-C1",
+        "COMP-C2",
+        "COMP-C3"
+      ],
       "end_to_end": true,
       "world_change": "无",
-      "verifies": ["C4 只经 UiProjectionPort 与 C1 对话"]
+      "verifies": [
+        "C4 只经 UiProjectionPort 与 C1 对话"
+      ]
     },
     {
       "id": "MT-003",
       "title": "输入是坏的",
-      "components": ["COMP-C2"],
+      "components": [
+        "COMP-C2"
+      ],
       "end_to_end": false,
       "world_change": "输入文件不可解码 / 过短 / 全静音",
-      "verifies": ["宪章 §5.6 无静默降级", "错误码显式"]
+      "verifies": [
+        "宪章 §5.6 无静默降级",
+        "错误码显式"
+      ]
     },
     {
       "id": "MT-004",
       "title": "对齐无法建立",
-      "components": ["COMP-C2"],
+      "components": [
+        "COMP-C2"
+      ],
       "end_to_end": false,
       "world_change": "两段音频毫无共同结构（如一段是噪声）",
-      "verifies": ["宪章 §5.6：不得退化成逐点硬比", "ErrorCode.ALIGNMENT_UNRECOVERABLE"]
+      "verifies": [
+        "宪章 §5.6：不得退化成逐点硬比",
+        "ErrorCode.ALIGNMENT_UNRECOVERABLE"
+      ]
     },
     {
       "id": "MT-005",
       "title": "一个算法失败，其余必须继续",
-      "components": ["COMP-C1", "COMP-C3"],
+      "components": [
+        "COMP-C1",
+        "COMP-C3"
+      ],
       "end_to_end": true,
       "world_change": "某个算法抛异常 / 返回 NaN",
-      "verifies": ["不变量 D（故障隔离）"]
+      "verifies": [
+        "不变量 D（故障隔离）"
+      ]
     },
     {
       "id": "MT-006",
       "title": "算法死循环（v0.1 已知缺口）",
-      "components": ["COMP-C3", "COMP-C1"],
+      "components": [
+        "COMP-C3",
+        "COMP-C1"
+      ],
       "end_to_end": false,
       "world_change": "算法永不返回",
-      "verifies": ["★ 已知缺口：v0.1 会挂住整个 rack，无超时机制"],
+      "verifies": [
+        "★ 已知缺口：v0.1 会挂住整个 rack，无超时机制"
+      ],
       "known_gap": true
     },
     {
       "id": "MT-007",
       "title": "界面断开 / 缺席",
-      "components": ["COMP-C4", "COMP-C1"],
+      "components": [
+        "COMP-C4",
+        "COMP-C1"
+      ],
       "end_to_end": true,
       "world_change": "C4 进程被杀 / 从未启动",
-      "verifies": ["不变量 F", "ErrorCode.COCKPIT_DETACHED（v0.1 不产出）"]
+      "verifies": [
+        "不变量 F",
+        "ErrorCode.COCKPIT_DETACHED（v0.1 不产出）"
+      ]
     },
     {
       "id": "MT-008",
       "title": "命令时序非法",
-      "components": ["COMP-C1"],
+      "components": [
+        "COMP-C1"
+      ],
       "end_to_end": false,
       "world_change": "在 DATA_READY 之前触发算法 / 重复 build",
-      "verifies": ["状态机单调推进", "COMMAND_LEGALITY"]
+      "verifies": [
+        "状态机单调推进",
+        "COMMAND_LEGALITY"
+      ]
     },
     {
       "id": "MT-009",
       "title": "重复构建与销毁",
-      "components": ["COMP-C2"],
+      "components": [
+        "COMP-C2"
+      ],
       "end_to_end": false,
       "world_change": "同会话 build 两次 / destroy 后继续用",
-      "verifies": ["会话生命周期", "Seal 后不可变"]
+      "verifies": [
+        "会话生命周期",
+        "Seal 后不可变"
+      ]
     },
     {
       "id": "MT-010",
       "title": "同输入可复现",
-      "components": ["COMP-C2"],
+      "components": [
+        "COMP-C2"
+      ],
       "end_to_end": true,
       "world_change": "无（同 build 两次运行）",
-      "verifies": ["不变量 A（回归断言）", "content_hash 一致"]
+      "verifies": [
+        "不变量 A（回归断言）",
+        "content_hash 一致"
+      ]
     }
   ],
-
   "known_gaps": [
     {
       "id": "GAP-1",
       "what": "算法死循环会挂住整个 rack",
       "why_not_fixed": "v0.1 无超时/隔离机制；加它需要契约变更（谁负责 kill、超时算哪种失败）",
-      "affects": ["MT-006"],
+      "affects": [
+        "MT-006"
+      ],
       "owner_decision_needed": true
     },
     {
       "id": "GAP-2",
       "what": "ErrorCode.COCKPIT_DETACHED 在 v0.1 永不产出",
       "why_not_fixed": "它需要 C4 主动上报断连，而 v0.1 的 C4 只是本机进程内视图，没有独立的连接生命周期",
-      "affects": ["MT-007"],
+      "affects": [
+        "MT-007"
+      ],
       "owner_decision_needed": false
     },
     {
       "id": "GAP-3",
       "what": "progress 是粗粒度的",
       "why_not_fixed": "平滑进度需要契约变更（Core 要在计算中回调），当前只在状态切换时更新",
-      "affects": ["MT-002"],
+      "affects": [
+        "MT-002"
+      ],
       "owner_decision_needed": true
     },
     {
       "id": "GAP-4",
       "what": "数据集只有 1 首歌",
       "why_not_fixed": "02–10 的批量构建暂停，等负责人听过 01 的产出",
-      "affects": ["MT-001"],
+      "affects": [
+        "MT-001"
+      ],
       "owner_decision_needed": false
     },
     {
       "id": "GAP-5",
       "what": "虚拟组件目前不可执行（宪章 §10 要求可端到端跑）",
       "why_not_fixed": "18 个空壳全部 raise NotImplementedError；尚无 stub/mock 实现层。§10 要求『一行真实业务实现都没有时，系统应已经能跑关键 Mission Thread』—— 这需要一层『虚拟实现』，目前不存在",
-      "affects": ["MT-001", "MT-002", "MT-005", "MT-010"],
+      "affects": [
+        "MT-001",
+        "MT-002",
+        "MT-005",
+        "MT-010"
+      ],
       "owner_decision_needed": true
+    },
+    {
+      "id": "GAP-6",
+      "what": "音高引擎选型未冻结，SPEC §7.5 要求的对照实验尚未进行",
+      "why_not_fixed": "SPEC.md@v2.1 §7.5 明令「引擎选型不在此处冻结」，并要求最终选定前必须有一次用数据决定选型的对照实验（候选：librosa.pyin 传统 DSP / torchcrepe 神经网络）。实验未做。★ 此前 FILE-103-v1.md 把「估计器为 librosa.pyin」写成了冻结规格，事实上取消了这场实验 —— 那是把「待定」偷偷变成「已定」并伪装成权威，与早先那次「伪造宪章引用」属同一族缺陷。已改为「首选实现 + 引擎不冻结」。",
+      "affects": [
+        "FILE-103",
+        "MT-003"
+      ],
+      "owner_decision_needed": true,
+      "current_default": "librosa.pyin（首选实现，非冻结选型）",
+      "unblocks": "不阻塞代码注入；阻塞「引擎选型冻结」这一决定本身",
+      "where_documented": ".spec/build/FILE-103-v1.md §11"
     }
   ]
 }
