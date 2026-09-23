@@ -56,11 +56,21 @@ git log                        ← 提交信息会泄露设计意图
 > 有没有哪个签名/类型/字段存在**两种以上合理解读**？
 
 判据：不能有歧义。典型的歧义源：
-- `time_range` 的单位是秒还是帧？
-- `pitch.*` 的 `field` 维到底是哪几个字段、顺序如何？
-- `notes.reference` 的 `field` 维语义？
-- `warp_path` 每行是 `(ref, prac)` 还是 `(prac, ref)`？
-- `read()` 返回的 `BufferView` 是否可能为空？
+- `time_range` 的单位是秒还是帧？ ← **已修**：契约现在写明是秒、左闭右开
+- `pitch.*` 的 `field` 维到底是哪几个字段、顺序如何？ ← **已修**：`FIELD_LAYOUTS`
+- `notes.reference` 的 `field` 维语义？ ← **已修**：`FIELD_LAYOUTS`
+- `warp_path` 每行是 `(ref, prac)` 还是 `(prac, ref)`？ ← **已修**：`FIELD_LAYOUTS`
+- `chroma.*` 的 bin 0 是 C 还是 A？ ← **已修**：bin 0 = C
+- `read()` 返回的 `BufferView` 是否可能为空？ ← **已修**：明确不得返回空视图
+
+> **以上 6 条不是假想，是我在派工前自己做了一轮盲审自测真实抓到的。**
+> 修法是新增 `contract.FIELD_LAYOUTS`，并在 `profile.assert_profile_integrity()`
+> 里加断言、配负向测试（故意颠倒字段顺序，验证能被拦截）。
+>
+> 教训：**`dimensions=('frame','field')` 这种声明是假的严谨**——
+> 它说了"第二维是字段"，却没说字段是什么、什么顺序。
+> 两个实现者会写出不同的内存布局，读出来的 `f0_hz` 可能是 `voiced`，
+> **而且不会报错，只会静默算错。**
 
 ### 问题 3：信息缺口
 
