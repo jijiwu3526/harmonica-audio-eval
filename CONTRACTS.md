@@ -10,16 +10,23 @@
 
 ## 0. 当前冻结状态总览
 
-| 契约 | 覆盖 | 状态 | 依赖 OC1？ |
-| --- | --- | --- | --- |
-| **CONTRACT-SESSION-v1** | 会话状态、时间基准、音频格式 | ✅ **FROZEN** | **否** |
-| **CONTRACT-ERRORS-v1** | 错误码与异常层次 | ✅ **FROZEN** | **否** |
-| **CONTRACT-HOST-v1** | C1 → C2，7 个操作 | 🟡 **结构冻结，签名部分待定** | **部分**（仅 `acquire_surface` 返回类型） |
-| **CONTRACT-ALGORITHM-DATA-v1** | C3 → 数据面，2 个操作 | 🟡 **结构冻结，签名待定** | **是** |
-| **CONTRACT-UI-v1** | C1 ↔ C4 投影与命令 | ✅ **FROZEN** | **否** |
+**OC1 已关闭，且裁定方式与初版相反**（见 `research/03-datapath-decision.md` §7）：
 
-`OC1` = 数据面形态未决项（全内存物化 / mmap·磁盘 / 惰性按需 / 流式）。
-详见 `COMPONENTS.md` §8 与各组件 `upstream.md`。
+> **Core 预生成，端口清单封闭。算法适配 Core，不是 Core 适配算法。**
+> 不做惰性计算、不做存储后端选型、不做 LRU 缓存。
+> 原因：惰性计算要求 Core 为算法现场算数据，必须附带协商协议，
+> 而那会让 Core 的外部接口变成**插件需求的函数**——正是要避免的反模式。
+
+| 契约 | 覆盖 | 状态 |
+| --- | --- | --- |
+| **CONTRACT-SESSION-v1** | 会话状态、时间基准、音频格式 | ✅ **FROZEN** |
+| **CONTRACT-ERRORS-v1** | 错误码与异常层次 | ✅ **FROZEN** |
+| **CONTRACT-HOST-v1** | C1 → C2，7 个操作 | ✅ **FROZEN**（`acquire_surface` 返回内存数据面句柄） |
+| **CONTRACT-ALGORITHM-DATA-v1** | C3 → 数据面，2 个操作 | ✅ **FROZEN**（`manifest()` / `read()`，纯查表、无副作用） |
+| **CONTRACT-UI-v1** | C1 ↔ C4 投影与命令 | ✅ **FROZEN** |
+| **CORE_PROFILE_V0.1** | **封闭端口清单**（11 个端口，写死） | ✅ **FROZEN** |
+
+**所有契约均已冻结，无待定项。**
 
 ---
 
