@@ -1,0 +1,59 @@
+{
+  "spike": "CORE-PROFILE-MEMORY",
+  "input": {
+    "ref": "原曲_完整版.wav",
+    "duration_sec": 72.802,
+    "sr": 44100
+  },
+  "results": [
+    {
+      "profile": "最小",
+      "data_surface_logical_bytes": 89916264,
+      "rss_delta_mb": 0.0,
+      "elapsed_sec": 0.138,
+      "resident_bytes": 0,
+      "contents": [
+        "底座 aligned PCM ×3",
+        "STFT 幅度 2048/512 ×2（真实计算）"
+      ],
+      "extrapolated_180s_mb": 222.3
+    },
+    {
+      "profile": "中等",
+      "data_surface_logical_bytes": 192711960,
+      "rss_delta_mb": 0.0,
+      "elapsed_sec": 0.404,
+      "resident_bytes": 0,
+      "contents": [
+        "底座 aligned PCM ×3",
+        "STFT 幅度 2048/512 ×2（真实计算）",
+        "STFT 幅度 1024/256 ×2（真实计算）",
+        "STFT 幅度 4096/1024 ×2（真实计算）"
+      ],
+      "extrapolated_180s_mb": 476.5
+    },
+    {
+      "profile": "愿望清单",
+      "data_surface_logical_bytes": 603788552,
+      "rss_delta_mb": 0.0,
+      "elapsed_sec": 0.398,
+      "resident_bytes": 0,
+      "contents": [
+        "底座 aligned PCM ×3",
+        "STFT 幅度 2048/512 ×2（真实计算）",
+        "STFT 幅度 1024/256 ×2（真实计算）",
+        "STFT 幅度 4096/1024 ×2（真实计算）",
+        "frame bank ×2",
+        "frame bank ×2",
+        "frame bank ×2",
+        "复数 STFT ×2"
+      ],
+      "extrapolated_180s_mb": 1492.8
+    }
+  ],
+  "estimate_comparison_180s": {
+    "最小": 222.4,
+    "中等": 476.7,
+    "愿望清单": 1493.0
+  }
+}

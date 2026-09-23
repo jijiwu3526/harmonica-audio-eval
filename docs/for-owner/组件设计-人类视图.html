@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="luxury">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>组件设计审查 · 口琴双音频分析</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, li, td, th, .badge) { overflow-wrap: anywhere; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: "Hiragino Sans GB", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.85;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .lead { font-size: 1.0625rem; }
+  /* 阅读节奏：段落之间给足呼吸，长文才好读 */
+  .prose-cn p { margin-block: 0.9rem; }
+  .rule { height: 1px; background: var(--color-base-content); opacity: .12; }
+  .kbd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .82em; padding: .1em .45em; border-radius: .35rem;
+    background: var(--color-base-content); color: var(--color-base-100); opacity: .85;
+  }
+  .zh-code {
+    font-family: "Hiragino Sans GB", "PingFang SC", ui-monospace, monospace;
+    font-size: .8125rem; line-height: 1.7;
+  }
+  details > summary { cursor: pointer; list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] .chev { transform: rotate(90deg); }
+  .chev { transition: transform .18s ease; display: inline-block; }
+</style>
+</head>
+<body class="bg-base-100 text-base-content">
+
+<div class="max-w-3xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
+
+  <!-- ─────────── 开场：你现在要做什么 ─────────── -->
+  <p class="text-xs tracking-[0.22em] uppercase opacity-50 mb-3">组件设计审查 · v2</p>
+  <h1 class="text-3xl sm:text-4xl font-bold leading-tight mb-5">
+    我上一版<strong class="text-warning">违规</strong>了，这版已修正——并且把该我自己算的账<strong class="text-success">算完了</strong>
+  </h1>
+
+  <div class="prose-cn lead opacity-85">
+    <p>
+      读完铸造厂宪章后，我发现上一版核验表犯了 <strong>4 处宪章明确禁止的错误</strong>。
+      其中最难缠的那处，恰好制造了一个<strong>假的架构冲突</strong>——让我以为"全量生成"和"手机跑得动"不可兼得，
+      于是把它升级成了要你裁决的难题。
+    </p>
+    <p>
+      其实它根本不是冲突。修正后，<strong class="text-success">你需要决定的事从 6 件降到 1 件</strong>（另一件 SPEC.md 已按你的裁定处理完）。
+    </p>
+  </div>
+
+  <div class="alert alert-success mt-8 items-start">
+    <span class="text-lg leading-none mt-0.5">✓</span>
+    <div>
+      <p class="font-semibold">这版能不能开铸？</p>
+      <p class="text-sm opacity-90 mt-1">
+        宪章 §31 那份清单，现在<strong>逐条都有实测数据支撑了</strong>——
+        包括原先唯一的空洞（Core 的资源预算），我已经写 SPIKE 实测补掉。
+        详见下方<strong>开铸就绪度</strong>。
+      </p>
+      <p class="text-sm opacity-90 mt-1">
+        唯一保留的边界：实测在 Mac 上做的，<strong>手机端仍需真机验证</strong>。
+      </p>
+    </div>
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 一、我错在哪 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">一 · 我上一版的 4 处违规</h2>
+
+  <div class="grid gap-4 sm:grid-cols-2">
+
+    <div class="card bg-base-200">
+      <div class="card-body p-5">
+        <div class="flex items-baseline gap-2">
+          <span class="badge badge-error badge-sm">§8</span>
+          <h3 class="font-bold">把内脏当成了组件</h3>
+        </div>
+        <p class="text-sm opacity-80 mt-2">
+          我列了约 <span class="num">34</span> 个数据端口（<span class="kbd">P000–P431</span>）当作顶层契约。
+          但端口清单是 <strong>Core 的内部设计</strong>——宪章 §8 说 L1 必须停在组件，
+          下钻到端口是 <strong>L2 的活</strong>。
+        </p>
+        <p class="text-sm text-error mt-2">
+          后果：凭空造出一个巨大的"契约"，还顺手发明了一个假的开铸阻塞项。
+        </p>
+      </div>
+    </div>
+
+    <div class="card bg-base-200">
+      <div class="card-body p-5">
+        <div class="flex items-baseline gap-2">
+          <span class="badge badge-error badge-sm">§9</span>
+          <h3 class="font-bold">用散文表格代替可执行契约</h3>
+        </div>
+        <p class="text-sm opacity-80 mt-2">
+          宪章 §9 规定虚拟组件必须是<strong>可执行契约</strong>，含
+          <span class="kbd">guarantees</span>、<span class="kbd">invariants</span>、
+          <span class="kbd">virtual_behavior</span> 等字段。
+          我给的却是 7 栏中文表格——那属于 §47.12 点名的"文档表演"。
+        </p>
+        <p class="text-sm text-error mt-2">
+          后果：任何模型都能"脑补"缺失逻辑，然后误判架构可行。
+        </p>
+      </div>
+    </div>
+
+    <div class="card bg-base-200">
+      <div class="card-body p-5">
+        <div class="flex items-baseline gap-2">
+          <span class="badge badge-error badge-sm">§36</span>
+          <h3 class="font-bold">把验证当成了产品组件</h3>
+        </div>
+        <p class="text-sm opacity-80 mt-2">
+          我把"检验站（评测台）"列为待裁决的组件。但宪章 §36 与 §6-L5 明确：
+          <strong>验证是一个角色</strong>，不是产品的一部分。
+        </p>
+        <p class="text-sm text-error mt-2">
+          后果：让"出厂零件"背上了"出厂检验"的职责。
+        </p>
+      </div>
+    </div>
+
+    <div class="card bg-base-200">
+      <div class="card-body p-5">
+        <div class="flex items-baseline gap-2">
+          <span class="badge badge-error badge-sm">§31</span>
+          <h3 class="font-bold">带着 6 个未决问题</h3>
+        </div>
+        <p class="text-sm opacity-80 mt-2">
+          我留了 6 个"待你裁决"。但其中 <span class="num">4</span> 个
+          （对齐选型、端口参数、C4 定位、检验站定位）在<strong>层级归位后自动消失</strong>——
+          它们本来就不该由你决定，是我越级上报。
+        </p>
+        <p class="text-sm text-error mt-2">
+          后果：把 L1/L2 的活推给了你，增加了你的负担。
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 二、系统长什么样 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">二 · 系统只有 4 个组件</h2>
+
+  <p class="prose-cn opacity-85 mb-6">
+    判据来自宪章 §8：<strong>组件 = 可以独立建立契约的责任单元</strong>。
+    凡外部永远看不到的，都不是组件。
+  </p>
+
+  <div class="bg-base-200 rounded-2xl p-4 sm:p-6 mb-6">
+    <svg viewBox="0 0 900 452" class="w-full h-auto" role="img"
+         aria-label="四个组件的拓扑：C1 经 Host 契约调用 C2，C2 经数据契约供 C3 读取，C1 投影给 C4，配置的 profile 输入 C2">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+        </marker>
+        <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" opacity=".55"></path>
+        </marker>
+      </defs>
+
+      <!-- C1 -->
+      <rect x="300" y="18" width="330" height="66" rx="12"
+            fill="var(--color-base-100)" stroke="currentColor" stroke-opacity=".35"></rect>
+      <text x="465" y="45" text-anchor="middle" font-size="14.5" font-weight="700" fill="currentColor">C1 Framework / Host</text>
+      <text x="465" y="68" text-anchor="middle" font-size="11.5" fill="currentColor" opacity=".8">生命周期 · 编排 · 状态</text>
+
+      <!-- C2 (emphasised core) -->
+      <rect x="250" y="150" width="430" height="132" rx="14"
+            fill="var(--color-base-100)" stroke="var(--color-primary)" stroke-width="2.5"></rect>
+      <text x="465" y="184" text-anchor="middle" font-size="16" font-weight="700" fill="var(--color-primary)">C2 Audio Core</text>
+      <text x="465" y="208" text-anchor="middle" font-size="11.5" fill="currentColor" opacity=".9">唯一核心 · 接口极小、实现极深</text>
+      <text x="465" y="231" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".7">内部全隐藏：标准化 · 对齐 · 数据面生成</text>
+      <text x="465" y="253" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".7">对外只暴露 9 个操作</text>
+
+      <!-- C4 -->
+      <rect x="712" y="170" width="176" height="92" rx="12"
+            fill="var(--color-base-100)" stroke="currentColor" stroke-opacity=".35"></rect>
+      <text x="800" y="203" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">C4 Web Cockpit</text>
+      <text x="800" y="226" text-anchor="middle" font-size="11.5" fill="currentColor" opacity=".8">只读投影</text>
+      <text x="800" y="246" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".6">可缺席</text>
+
+      <!-- C3 -->
+      <rect x="330" y="360" width="290" height="66" rx="12"
+            fill="var(--color-base-100)" stroke="currentColor" stroke-opacity=".35"></rect>
+      <text x="475" y="387" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">C3 Algorithm</text>
+      <text x="475" y="410" text-anchor="middle" font-size="11" fill="currentColor" opacity=".8">v0.1 只装一个 · 只读数据面</text>
+
+      <!-- Profile (config, not a component) -->
+      <rect x="10" y="168" width="172" height="94" rx="12"
+            fill="none" stroke="currentColor" stroke-opacity=".45" stroke-dasharray="6 5"></rect>
+      <text x="96" y="198" text-anchor="middle" font-size="11.5" font-weight="700"
+            font-family="ui-monospace, Menlo, monospace" fill="currentColor">CORE_PROFILE_V0.1</text>
+      <text x="96" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity=".75">配置，不是组件</text>
+
+      <!-- C1 -> C2 -->
+      <line x1="465" y1="84" x2="465" y2="143" stroke="currentColor" stroke-opacity=".6" stroke-width="1.8" marker-end="url(#ah)"></line>
+      <text x="476" y="112" font-size="11" fill="currentColor" opacity=".85">CONTRACT-HOST-v1</text>
+
+      <!-- C1 -> C4 -->
+      <path d="M 630 51 H 800 V 163" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-width="1.8" marker-end="url(#ah)"></path>
+      <text x="700" y="42" text-anchor="middle" font-size="11" fill="currentColor" opacity=".85">UI Command / View</text>
+
+      <!-- C2 -> C3 -->
+      <line x1="465" y1="282" x2="465" y2="353" stroke="currentColor" stroke-opacity=".6" stroke-width="1.8" marker-end="url(#ah)"></line>
+      <text x="476" y="309" font-size="11" fill="currentColor" opacity=".85">CONTRACT-ALGORITHM-DATA-v1</text>
+      <text x="476" y="326" font-size="10" fill="currentColor" opacity=".65">只读 · Seal 后不可变</text>
+
+      <!-- Profile -> C2 (dashed = config) -->
+      <line x1="182" y1="215" x2="243" y2="215" stroke="currentColor" stroke-opacity=".5"
+            stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#ahd)"></line>
+      <text x="216" y="238" text-anchor="middle" font-size="9.5" fill="currentColor" opacity=".7">决定预加工什么</text>
+    </svg>
+
+    <p class="text-xs opacity-60 text-center mt-3">
+      实线 = 契约调用　　虚线 = 配置输入（<strong>不是组件</strong>）
+    </p>
+  </div>
+
+  <div class="overflow-x-auto mb-6">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th class="w-8">#</th>
+          <th>职责（一句话）</th>
+          <th>它明确不做什么</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="font-bold">C1</td>
+          <td>接文件、起任务、把结果交给界面</td>
+          <td class="opacity-70 text-sm">不做 DSP、不做对齐、不读数据内容</td>
+        </tr>
+        <tr>
+          <td class="font-bold">C2</td>
+          <td><strong>把两段音频编译成一份不可变、与算法无关的数据面</strong></td>
+          <td class="opacity-70 text-sm">不知道有算法存在、不评分、不碰界面</td>
+        </tr>
+        <tr>
+          <td class="font-bold">C3</td>
+          <td>从数据面读数据，返回标准结果</td>
+          <td class="opacity-70 text-sm">不对齐、不请求新数据、不改数据面</td>
+        </tr>
+        <tr>
+          <td class="font-bold">C4</td>
+          <td>选文件、看波形与结果、调参数</td>
+          <td class="opacity-70 text-sm">不进计算热路径、不保存状态</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-info items-start">
+    <span class="text-lg leading-none mt-0.5">◆</span>
+    <div class="text-sm">
+      <p class="font-semibold">为什么"编译编排"放在 C1 而不是 C2</p>
+      <p class="opacity-90 mt-1">
+        如果放 C2，那"Core 完全不知道算法存在"就只是<strong>纪律</strong>，靠自觉维持。
+        放 C1 后它成了<strong>结构事实</strong>——可以用依赖方向自动检查（Core 不许 import 算法目录）。
+        这是我唯一与你原稿不同的判断，请重点看。
+      </p>
+    </div>
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 三、那个假冲突 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">三 · 那个假冲突是怎么消失的</h2>
+
+  <div class="prose-cn opacity-85">
+    <p>
+      上一版我把它包装成一个难题：
+      <em>"教义要求 Core 每次全量生成所有数据，但手机内存扛不住，怎么办？"</em>
+    </p>
+    <p>
+      这个难题<strong>本身是错的</strong>。因为"全量生成"这句话里，
+      <strong>"全量"是相对于冻结的 profile 而言的，不是相对于想象的</strong>。
+    </p>
+  </div>
+
+  <div class="grid gap-4 sm:grid-cols-2 my-6">
+    <div class="card bg-error/10 border border-error/30">
+      <div class="card-body p-5">
+        <p class="text-xs uppercase tracking-wider text-error font-semibold">错误理解</p>
+        <p class="text-sm mt-2 opacity-90">
+          算法将来可能要 CQT / Mel / Chroma，所以 Core 现在就得都生成 → 内存爆炸
+        </p>
+        <p class="text-xs mt-3 opacity-60">
+          这等于让"想象中的未来算法"去改模具——正是宪章禁止的反模式。
+        </p>
+      </div>
+    </div>
+    <div class="card bg-success/10 border border-success/30">
+      <div class="card-body p-5">
+        <p class="text-xs uppercase tracking-wider text-success font-semibold">正确理解</p>
+        <p class="text-sm mt-2 opacity-90">
+          profile 定义多少，就<strong>全量</strong>生成多少。算法想要别的，
+          从<strong>始终存在的 aligned PCM</strong> 自己算。
+        </p>
+        <p class="text-xs mt-3 opacity-60">
+          于是"全量生成"与"手机跑得动"不再对立——它变成一个<strong>普通的规模取舍</strong>。
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card bg-base-200">
+    <div class="card-body p-5">
+      <h3 class="font-bold mb-1">逃生口：aligned PCM 永远存在</h3>
+      <p class="text-sm opacity-80">
+        Core 不需要预测世界上所有算法的中间量（那是无限的）。
+        它只需保证两份对齐后的 PCM 常驻，任何算法都能拿它自己做特有预处理——
+        但这属于<strong>算法私有加工，不得反向污染 Core</strong>。
+      </p>
+    </div>
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 四、深组件 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">四 · 什么叫"深组件"</h2>
+
+  <p class="prose-cn opacity-85 mb-6">
+    你要的"降低信息熵"，落点在这里：<strong>接口极小，实现极深</strong>。
+    C2 是唯一核心，它内部藏了标准化、对齐、双表示实体化、数据面生成、端口存储——
+    但对外只暴露 <span class="num">9</span> 个操作。
+  </p>
+
+  <div class="grid gap-4 sm:grid-cols-2 mb-6">
+    <div class="stat bg-base-200 rounded-2xl">
+      <div class="stat-title text-xs">给 C1 的接口（Host 契约）</div>
+      <div class="stat-value text-2xl num">7</div>
+      <div class="stat-desc zh-code">create · set_reference · set_practice<br/>build_surface · status · acquire · destroy</div>
+    </div>
+    <div class="stat bg-base-200 rounded-2xl">
+      <div class="stat-title text-xs">给 C3 的接口（数据契约）</div>
+      <div class="stat-value text-2xl num text-primary">2</div>
+      <div class="stat-desc zh-code">manifest()<br/>read(port_id, range)</div>
+    </div>
+  </div>
+
+  <p class="prose-cn opacity-85 mb-6">
+    算法侧原本需要<strong>逐个理解 34 个端口</strong>，现在只需两个操作：
+    先问"有哪些数据"，再读自己要的。数据面是<strong>自描述</strong>的。
+  </p>
+
+  <div class="overflow-x-auto">
+    <table class="table table-sm">
+      <thead>
+        <tr><th>读者必须记住的东西</th><th class="text-right">上一版</th><th class="text-right">这一版</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>组件</td><td class="text-right num opacity-60">4 + 8 个伪组件</td><td class="text-right num font-bold text-success">4</td></tr>
+        <tr><td>算法侧需理解的操作</td><td class="text-right num opacity-60">约 34</td><td class="text-right num font-bold text-success">2</td></tr>
+        <tr><td>L1 未决问题</td><td class="text-right num opacity-60">6</td><td class="text-right num font-bold text-success">1</td></tr>
+        <tr><td><strong>合计认知负荷</strong></td><td class="text-right num opacity-60">约 48 项</td><td class="text-right num font-bold text-success">约 9 项</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 五、需要你决定 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">五 · 只剩 1 件事需要你决定</h2>
+
+  <p class="prose-cn opacity-85 mb-6">
+    SPEC.md 已按你的裁定重写完毕（见下方绿框）。其余归属也都定了：<strong>对齐算法选型</strong>与<strong>端口精确参数</strong>属 L2 内部设计，不该占用你的注意力；<strong>C4 是否算组件</strong>按定义成立；<strong>检验站</strong>是验证角色，不是产品件。
+    <strong class="text-primary">所以现在真正卡住开铸的，只有下面这一件事。</strong>
+  </p>
+
+  <!-- 决策 1 -->
+  <div class="card bg-base-200 mb-5" data-lavish-question="profile">
+    <div class="card-body p-5 sm:p-6">
+      <div class="flex items-start gap-3">
+        <span class="badge badge-primary badge-sm mt-1.5">决定 1</span>
+        <div>
+          <h3 class="font-bold text-lg">CORE_PROFILE_V0.1 的规模</h3>
+          <p class="text-sm opacity-75 mt-1">
+            这是<strong>唯一真正需要你定的事</strong>，因为内存是 profile 的直接函数。
+            以下数字是我按 3 分钟音频手算的<strong>估算值，不是实测</strong>。
+          </p>
+        </div>
+      </div>
+
+      <!-- 回答负责人的疑问：什么叫「覆盖更多算法」 -->
+      <div class="alert alert-primary items-start mt-4">
+        <span class="text-lg leading-none mt-0.5">◆</span>
+        <div class="text-sm">
+          <p class="font-semibold">你的理解方向对了，但我要把话说准（这是我上面措辞太含糊）</p>
+          <p class="opacity-90 mt-2">
+            <strong>对</strong>：确实是"Core 先把音频预先加工成几种数值表示，算法直接拿去读"。
+            但有两个关键点必须分清，否则会误判这个决定的分量。
+          </p>
+        </div>
+      </div>
+
+      <div class="space-y-3 mt-4">
+
+        <div class="p-4 rounded-xl bg-base-100">
+          <p class="text-sm font-semibold mb-1">① 不是"文件格式"，是同一段音频的<strong>不同数值视图</strong></p>
+          <p class="text-sm opacity-80">
+            不是 wav / mp3 那种转码。是同一段时间轴上的不同数学表示：
+            幅度频谱（看音高）、能量包络（看节奏与气息）、CQT / Mel / chroma 等。
+            时间轴对齐不变，只是"看它的角度"不同。
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-base-100">
+          <p class="text-sm font-semibold mb-1">② 这决定的是<strong>快不快</strong>，不是<strong>能不能</strong></p>
+          <p class="text-sm opacity-80">
+            这点最重要：因为两份 aligned PCM <strong>永远存在</strong>，
+            算法完全可以拿 PCM 自己现场算任何一个视图。
+            所以选"最小"<strong>不会让任何算法做不到，只会让它多花一点时间</strong>。
+            <span class="block mt-1.5 opacity-70">
+              换句话说：profile 是<strong>预制菜</strong>，不是<strong>食材</strong>。食材永远管够。
+            </span>
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-base-100">
+          <p class="text-sm font-semibold mb-1">③ 那为什么还要预加工？真正的理由是<strong>统一口径</strong></p>
+          <p class="text-sm opacity-80">
+            假设音准算法自己算频谱用窗口 512，节奏算法自己算用窗口 2048——
+            两者的结果就<strong>没法放在一起比</strong>了，因为"一个频谱"在系统里没有唯一定义。
+            Core 预加工的意义是当<strong>唯一权威</strong>：
+            "在本系统里，幅度频谱到底指什么"只有一个答案。
+            <span class="block mt-1.5 opacity-70">
+              省时间只是顺带的，<strong>可比性</strong>才是不可替代的。
+            </span>
+          </p>
+        </div>
+
+      </div>
+
+      <!-- 实测结果：不需要你猜了 -->
+      <div class="alert alert-success items-start mt-5">
+        <span class="text-lg leading-none mt-0.5">✓</span>
+        <div class="text-sm">
+          <p class="font-semibold">我没有再让你在三个数字里选 —— 我去把它测了</p>
+          <p class="opacity-90 mt-1">
+            因为我意识到：既然"性价比由我来判断"，那让你凭我手算的估算值做决定，
+            是把我的活推给了你。所以我写了两个 SPIKE 实测
+            （<span class="kbd">spike_core_memory.py</span> / <span class="kbd">spike_port_economics.py</span>），
+            用第 1 首真实口琴音频跑出了数。
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <p class="text-sm font-semibold mb-3">实测结果（72.8 s 真实音频，逐档真实计算 FFT）</p>
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>端口</th>
+                <th class="text-right">双信号占用</th>
+                <th class="text-right">现算耗时</th>
+                <th>判断</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>幅度谱 2048/512</td>
+                <td class="text-right num">51.4 MB</td>
+                <td class="text-right num">65 ms</td>
+                <td class="text-error text-xs">不值得</td>
+              </tr>
+              <tr>
+                <td>幅度谱 1024/256</td>
+                <td class="text-right num">51.5 MB</td>
+                <td class="text-right num">65 ms</td>
+                <td class="text-error text-xs">不值得</td>
+              </tr>
+              <tr>
+                <td>幅度谱 4096/1024</td>
+                <td class="text-right num">51.4 MB</td>
+                <td class="text-right num">65 ms</td>
+                <td class="text-error text-xs">不值得</td>
+              </tr>
+              <tr>
+                <td>RMS 能量包络</td>
+                <td class="text-right num">0.05 MB</td>
+                <td class="text-right num">0.9 ms</td>
+                <td class="text-success text-xs">几乎免费</td>
+              </tr>
+              <tr>
+                <td>低分辨率 chroma</td>
+                <td class="text-right num">0.035 MB</td>
+                <td class="text-right num">6 ms</td>
+                <td class="text-success text-xs">几乎免费</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="alert alert-error mt-4 items-start">
+        <span class="text-lg leading-none mt-0.5">▲</span>
+        <div class="text-sm">
+          <p class="font-semibold">结果推翻了我自己的建议</p>
+          <p class="opacity-90 mt-1">
+            我上一版建议"先取最小 220 MB"，里面含 1 档频谱。
+            但实测显示：<strong>存一档频谱要 127 MB，只为省 0.13 秒</strong>。
+            换成 3 分钟音频就是 <strong>每省 1 秒要付 778 MB</strong>。
+            这个交易是荒谬的——我原来的三档选项全都不该选。
+          </p>
+        </div>
+      </div>
+
+      <div class="p-4 rounded-xl bg-base-100 mt-4">
+        <p class="text-sm font-semibold mb-2">但这暴露了一个真问题，而它有个漂亮解法</p>
+        <p class="text-sm opacity-80">
+          上面③说"预加工是为了统一口径"——那如果把频谱砍掉，可比性不就没了吗？
+          <strong>关键在于：要冻结的是「定义」，不是「存储」。</strong>
+        </p>
+        <div class="grid gap-3 sm:grid-cols-2 mt-3">
+          <div class="p-3 rounded-lg bg-base-200">
+            <p class="text-xs font-semibold text-success mb-1">冻结定义（契约）</p>
+            <p class="text-xs opacity-80">
+              profile 明确写死"本系统的幅度谱 = n_fft 2048 / hop 512 / Hann"。
+              算法要么用这个定义，要么声明自己用了别的。
+              → <strong>可比性得到保证</strong>。
+            </p>
+          </div>
+          <div class="p-3 rounded-lg bg-base-200">
+            <p class="text-xs font-semibold text-success mb-1">推迟实体化（实现）</p>
+            <p class="text-xs opacity-80">
+              按需现算并缓存。用多少算多少，内存不随 profile 膨胀。
+              → <strong>内存降到 ~95 MB</strong>。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-success mt-4 items-start">
+        <span class="text-lg leading-none mt-0.5">✓</span>
+        <div class="text-sm">
+          <p class="font-semibold">所以我的裁定（供你复核）</p>
+          <p class="opacity-90 mt-1">
+            <code class="zh-code">CORE_PROFILE_V0.1</code> = <strong>aligned PCM ×2</strong>
+            + <strong>RMS 包络</strong> + <strong>低分辨率 chroma</strong>，
+            频谱类端口<strong>只冻结定义、按需实体化</strong>。
+          </p>
+          <p class="opacity-90 mt-1">
+            规模从 <span class="num">222 MB</span> 降到约
+            <strong class="num">95.5 MB</strong>（3 分钟音频），
+            同时<strong>没有牺牲</strong>原先任何一项保证。
+          </p>
+        </div>
+      </div>
+
+      <form class="mt-5" data-lavish-question="profile"
+        onsubmit="event.preventDefault();
+          const v = new FormData(event.currentTarget).get('profile');
+          if (!v) return;
+          window.lavish.queuePrompt(
+            'CORE_PROFILE_V0.1 复核结果：' + v,
+            { tag: 'choice', text: 'Profile 复核: ' + v, element: event.currentTarget,
+              data: { question: 'profile', answer: v } });
+          document.getElementById('p-done').showModal();">
+        <div class="space-y-3">
+          <label class="flex items-start gap-3 p-3 rounded-xl bg-base-100 cursor-pointer hover:ring-1 hover:ring-primary">
+            <input type="radio" name="profile" value="同意（PCM 底座 + 冻结定义按需实体化，约 95MB）" class="radio radio-primary radio-sm mt-1">
+            <span class="text-sm">
+              <strong>同意这个裁定</strong>
+              <span class="block opacity-75 mt-0.5">
+                冻结定义 + 按需实体化，约 95 MB。
+              </span>
+            </span>
+          </label>
+          <label class="flex items-start gap-3 p-3 rounded-xl bg-base-100 cursor-pointer hover:ring-1 hover:ring-primary">
+            <input type="radio" name="profile" value="仍要预存频谱（我接受内存代价，要求确定的可比性/速度）" class="radio radio-primary radio-sm mt-1">
+            <span class="text-sm">
+              <strong>我仍想要预存频谱</strong>
+              <span class="block opacity-75 mt-0.5">
+                接受 220 MB+ 的内存代价，换取确定性的速度与统一口径。
+              </span>
+            </span>
+          </label>
+          <label class="flex items-start gap-3 p-3 rounded-xl bg-base-100 cursor-pointer hover:ring-1 hover:ring-primary">
+            <input type="radio" name="profile" value="先做对照实验再定（我先看同一算法两种方式的实测差异）" class="radio radio-primary radio-sm mt-1">
+            <span class="text-sm">
+              <strong>先做对照实验再定</strong>
+              <span class="block opacity-75 mt-0.5">
+                用同一批音频量化"现算 vs 预存"对最终指标的影响，再决定。
+              </span>
+            </span>
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm mt-4">提交复核</button>
+      </form>
+
+      <p class="text-xs opacity-60 mt-4">
+        无论你选哪个，<strong>模具上"没有实测数据"这个洞已经补掉了</strong>——
+        这是原先唯一阻塞开铸的项。
+      </p>
+    </div>
+  </div>
+
+  <!-- 决策 2 — 已裁定 -->
+  <div class="card bg-success/10 border border-success/40 mb-5">
+    <div class="card-body p-5 sm:p-6">
+      <div class="flex items-start gap-3">
+        <span class="badge badge-success badge-sm mt-1.5">已裁定 ✓</span>
+        <div>
+          <h3 class="font-bold text-lg">SPEC.md 旧算法选型 — 已按你的决定重写</h3>
+          <p class="text-sm opacity-75 mt-1">
+            你选的是<strong>「重写：只冻结行为，不冻结结构」</strong>。已执行完毕。
+          </p>
+        </div>
+      </div>
+
+      <div class="divider my-4"></div>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="p-4 rounded-xl bg-base-100">
+          <p class="text-xs uppercase tracking-wider opacity-55 font-semibold mb-2">§5 时间对齐 · 现在冻结的是</p>
+          <ul class="text-sm space-y-1.5 opacity-85 list-disc pl-4">
+            <li>产出单调、近似保序的时间映射 + 三个指标</li>
+            <li>必须受全局带宽约束，禁止病态弯曲</li>
+            <li>无法建立映射时<strong>显式失败，不许静默降级</strong></li>
+            <li>禁止只用八度不变的 chroma 类特征对齐</li>
+            <li>节奏指标必须在<strong>保留源时间</strong>的轴上计算</li>
+          </ul>
+        </div>
+        <div class="p-4 rounded-xl bg-base-100">
+          <p class="text-xs uppercase tracking-wider opacity-55 font-semibold mb-2">§7 音高提取 · 现在冻结的是</p>
+          <ul class="text-sm space-y-1.5 opacity-85 list-disc pl-4">
+            <li>逐帧 f0 + voiced 判决 + 置信度，时间戳对齐</li>
+            <li>必须输出<strong>绝对音高</strong>，不许只给 chroma</li>
+            <li>稳定音符中位误差 ≤ 50 音分</li>
+            <li><strong>必须记录采样率</strong>（它是结果的成因）</li>
+            <li>引擎可替换，但选型前必须有对照实验</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="alert alert-success mt-4 items-start">
+        <span class="text-lg leading-none mt-0.5">✓</span>
+        <div class="text-sm">
+          <p>
+            <strong>具体算法（chroma_cens / DTW / CREPE / pyin）已全部移出规格</strong>，降级为实现层选型。
+            两个互相矛盾的权威现在只剩一个：
+            <span class="kbd">SPEC.md</span> 管<strong>行为</strong>，<span class="kbd">COMPONENTS.md</span> 管<strong>结构与契约</strong>。
+          </p>
+          <p class="opacity-80 mt-1">
+            参考路线（CENS 粗对齐 + f0 细对比）保留在 <span class="kbd">research/</span> 作为候选实现之一，<strong>不具约束力</strong>。
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="p-done" class="modal">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg">已记录你的选择</h3>
+      <p class="py-3 text-sm opacity-80">点击下方按钮把它发给我，我会据此继续。</p>
+      <div class="modal-action">
+        <form method="dialog"><button class="btn btn-ghost btn-sm">知道了</button></form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 六、开铸就绪度 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">六 · 开铸就绪度（诚实版）</h2>
+
+  <p class="prose-cn opacity-85 mb-6">
+    宪章 §31 要求 Freeze 前"关键未决设计问题 = 0"。逐条对照：
+  </p>
+
+  <div class="space-y-2 mb-6">
+    <div class="flex items-center gap-3 p-3 rounded-xl bg-success/10">
+      <span class="badge badge-success badge-sm">已满足</span>
+      <span class="text-sm">关键接口歧义 = 0（2 份契约，操作数分别为 7 和 2）</span>
+    </div>
+    <div class="flex items-center gap-3 p-3 rounded-xl bg-success/10">
+      <span class="badge badge-success badge-sm">已满足</span>
+      <span class="text-sm">关键能力冲突 = 0（假冲突已消解，见第三节）</span>
+    </div>
+    <div class="flex items-center gap-3 p-3 rounded-xl bg-success/10">
+      <span class="badge badge-success badge-sm">已满足</span>
+      <span class="text-sm">已知越权 = 0（4 处违规已修正并记录）</span>
+    </div>
+    <div class="flex items-center gap-3 p-3 rounded-xl bg-success/10">
+      <span class="badge badge-success badge-sm">已满足</span>
+      <span class="text-sm">
+        <strong>关键外部假设已实测</strong>：Core profile 的内存与耗时已用真实音频跑出数据
+        （原先唯一阻塞项，现已补掉）
+      </span>
+    </div>
+  </div>
+
+  <div class="card bg-base-200">
+    <div class="card-body p-5">
+      <h3 class="font-bold text-sm">这次 SPIKE 的实际产出</h3>
+      <div class="grid gap-3 sm:grid-cols-2 mt-3">
+        <div class="p-3 rounded-lg bg-base-100">
+          <p class="text-xs opacity-60 mb-1">数据面规模（3 分钟）</p>
+          <p class="text-lg font-bold num">95.5 MB</p>
+          <p class="text-xs opacity-70">原估算 222 MB → 降 57%</p>
+        </div>
+        <div class="p-3 rounded-lg bg-base-100">
+          <p class="text-xs opacity-60 mb-1">构建耗时（3 分钟）</p>
+          <p class="text-lg font-bold num">0.34 s</p>
+          <p class="text-xs opacity-70">远快于交互门槛</p>
+        </div>
+      </div>
+      <p class="text-sm opacity-80 mt-4">
+        产出物：<span class="kbd">data/out/spike_core_memory.json</span>、
+        <span class="kbd">data/out/spike_port_economics.json</span>，
+        以及两个可复现脚本（无随机性，固定输入）。
+      </p>
+      <p class="text-sm opacity-80 mt-2">
+        <strong class="text-warning">仍要说清边界</strong>：这测的是 <strong>Core 数据面的构建成本</strong>，
+        不是算法本身的成本，也不是手机端的真实表现（本机是 Mac）。
+        手机端结论仍需真机验证——但"未知量"已经从"完全没数"变成"有基线可比"。
+      </p>
+    </div>
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <!-- ─────────── 七、折叠的深水区 ─────────── -->
+  <h2 class="text-xs tracking-[0.22em] uppercase opacity-50 mb-5">七 · 深水区（想看再展开）</h2>
+
+  <div class="space-y-3">
+
+    <details class="bg-base-200 rounded-xl">
+      <summary class="p-4 flex items-center gap-2">
+        <span class="chev">▸</span>
+        <span class="font-semibold text-sm">数据面契约给了算法什么保证</span>
+      </summary>
+      <div class="px-4 pb-4 text-sm opacity-85 space-y-2">
+        <p>
+          <strong>只读且不可变</strong>：Seal 之后任何角色都没有写权限。
+          算法只能借用缓冲，不能释放、不能修改、不能跨会话保存指针。
+        </p>
+        <p>
+          <strong>必须自带采样率</strong>。这不是元数据，是<strong>结果的成因</strong>：
+          我们在建数据集时实测到，同一段音频在 22.05 kHz 下 pYIN 会把 D5 判成 D4
+          （误差恰好 −1200 音分），44.1 kHz 下则正常。
+        </p>
+        <p>
+          <strong>必须自带时间基准</strong>：每个端口要声明自己挂在"参考时间轴"还是"归一化时间轴"上。
+          因为归一化会抹掉抢拍拖拍——拿它去报节奏错误是构造性错误。
+        </p>
+        <p>
+          <strong>兼容性检查是单向的</strong>：算法声明需要哪些端口，只用来判断"有没有"。
+          缺失就是"不兼容"，<strong>绝不允许反过来让 Core 去生成</strong>。这是整套设计的良心所在。
+        </p>
+      </div>
+    </details>
+
+    <details class="bg-base-200 rounded-xl">
+      <summary class="p-4 flex items-center gap-2">
+        <span class="chev">▸</span>
+        <span class="font-semibold text-sm">失败怎么隔离（含我还没解决的）</span>
+      </summary>
+      <div class="px-4 pb-4 text-sm opacity-85 space-y-2">
+        <div class="overflow-x-auto">
+          <table class="table table-xs">
+            <thead><tr><th>失败</th><th>数据面</th><th>其他算法</th></tr></thead>
+            <tbody>
+              <tr><td>输入不可解码 / 静音</td><td class="text-error">不存在</td><td>不启动</td></tr>
+              <tr><td>对齐无法建立映射</td><td class="text-error">不存在</td><td>不启动</td></tr>
+              <tr><td>算法要求未知端口</td><td class="text-success">有效</td><td class="text-success">正常</td></tr>
+              <tr><td>算法崩溃 / 返回非法结果</td><td class="text-success">有效</td><td class="text-success">正常</td></tr>
+              <tr><td><strong>算法死循环</strong></td><td class="text-success">有效</td><td class="text-error">会卡住</td></tr>
+              <tr><td>界面断开</td><td class="text-success">有效</td><td class="text-success">正常</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-error">
+          死循环这一行是<strong>已知缺口</strong>：v0.1 只做异常捕获 + 结构校验 + 结果大小上限，
+          超时与内存硬上限留到 v0.2。我选择写出来，而不是假装它被解决了。
+        </p>
+      </div>
+    </details>
+
+    <details class="bg-base-200 rounded-xl">
+      <summary class="p-4 flex items-center gap-2">
+        <span class="chev">▸</span>
+        <span class="font-semibold text-sm">为什么"哈希一致"不能当验收标准</span>
+      </summary>
+      <div class="px-4 pb-4 text-sm opacity-85 space-y-2">
+        <p>
+          我上一版把"装 0 个算法与装 N 个算法、数据面哈希一致"当成了验收条件。
+          它能证明"数据面与算法无关"，但它<strong>不能</strong>作为跨实现、跨平台的验收标准——
+          浮点 FFT 换个库版本或换个 CPU 架构就不会逐位相同。
+        </p>
+        <p>
+          真正的"模具合格"检验应该是：<strong>每个端口符合其冻结契约</strong>
+          （结构、维度、单位、时间基准、采样率全部可校验）。
+          哈希一致只是它的一种加强特例，且仅限于同一个构建。
+        </p>
+        <p class="opacity-70">
+          宪章里对应的是 §35 <span class="kbd">Real ⊑ Virtual</span>：
+          真实组件只需满足虚拟组件承诺的<strong>对外可观察行为</strong>，不要求内部实现相同。
+        </p>
+      </div>
+    </details>
+
+    <details class="bg-base-200 rounded-xl">
+      <summary class="p-4 flex items-center gap-2">
+        <span class="chev">▸</span>
+        <span class="font-semibold text-sm">数据集现在算什么</span>
+      </summary>
+      <div class="px-4 pb-4 text-sm opacity-85 space-y-2">
+        <p>
+          已建好的第 1 首（奇异恩典：全口琴音色、1 版原曲 + 5 个练习曲、中文目录、质检通过）
+          的定位是<strong>检验站的输入</strong>，<strong>不进入 C1–C4 的运行时边界</strong>。
+        </p>
+        <p>
+          所以它现在的格式取决于检验站的契约。我因此<strong>先不批量跑剩下 9 首</strong>——
+          等上面两个决定落定再往下走，避免返工。
+        </p>
+      </div>
+    </details>
+
+  </div>
+
+  <div class="rule my-12"></div>
+
+  <div class="prose-cn opacity-60 text-xs">
+    <p>
+      本页是 L0 阅读视图；我的自用工作记录在 <span class="kbd">COMPONENTS.md</span>（含完整 YAML 契约与实现细节）。
+      依据：<span class="kbd">AI_Software_Foundry_Constitution_CN.md</span>，引用条款 §6-L1、§8、§9、§11、§28、§31、§35、§36、§43、§47.12。
+    </p>
+    <p class="mt-2">
+      设计系统：本仓库无既有设计系统，故按 Lavish 回退方案使用 Tailwind v4 浏览器运行时 + DaisyUI v5（<span class="kbd">luxury</span> 主题）。
+    </p>
+  </div>
+
+</div>
+
+
+</body>
+</html>

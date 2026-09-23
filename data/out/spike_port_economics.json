@@ -1,0 +1,72 @@
+{
+  "spike": "PORT-ECONOMICS",
+  "input": {
+    "file": "原曲_完整版.wav",
+    "duration_sec": 72.802,
+    "sr": 44100
+  },
+  "pcm_base_3x_mb": 38.5,
+  "ports": [
+    {
+      "port": "幅度谱 2048/512",
+      "one_signal_mb": 25.711,
+      "two_signal_mb": 51.422,
+      "recompute_ms": 74.75,
+      "mb_per_ms_saved": 0.6879,
+      "verdict": "不值得（单消费者）",
+      "note": "通用分析主力，算法通常需要"
+    },
+    {
+      "port": "幅度谱 1024/256",
+      "one_signal_mb": 25.736,
+      "two_signal_mb": 51.472,
+      "recompute_ms": 72.42,
+      "mb_per_ms_saved": 0.7108,
+      "verdict": "不值得（单消费者）",
+      "note": "高时间分辨率"
+    },
+    {
+      "port": "幅度谱 4096/1024",
+      "one_signal_mb": 25.703,
+      "two_signal_mb": 51.405,
+      "recompute_ms": 72.77,
+      "mb_per_ms_saved": 0.7064,
+      "verdict": "不值得（单消费者）",
+      "note": "高频率分辨率"
+    },
+    {
+      "port": "RMS 能量包络 @512",
+      "one_signal_mb": 0.025,
+      "two_signal_mb": 0.05,
+      "recompute_ms": 0.96,
+      "mb_per_ms_saved": 0.0522,
+      "verdict": "仅多消费者时值得",
+      "note": "节奏/气息，极小"
+    },
+    {
+      "port": "低分辨率 chroma @5Hz",
+      "one_signal_mb": 0.017,
+      "two_signal_mb": 0.035,
+      "recompute_ms": 6.52,
+      "mb_per_ms_saved": 0.0054,
+      "verdict": "值得（内存几乎免费）",
+      "note": "对齐专用，极小"
+    }
+  ],
+  "recommendation": {
+    "must_have": "aligned PCM ×3 (mapped ref, mapped practice, warped practice)",
+    "precompute": [
+      "低分辨率 chroma @5Hz"
+    ],
+    "precompute_only_if_multi_consumer": [
+      "RMS 能量包络 @512"
+    ],
+    "let_algorithms_recompute": [
+      "幅度谱 2048/512",
+      "幅度谱 1024/256",
+      "幅度谱 4096/1024"
+    ],
+    "recommended_profile_mb": 38.6,
+    "with_multi_consumer_tiers_mb": 38.6
+  }
+}
