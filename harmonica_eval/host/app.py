@@ -68,7 +68,47 @@ MAX_PROJECTION_POINTS: int = 2000
 
 
 class HostApp(UiProjectionPort):
-    """编排层。持有会话、驱动状态机、调算法、产出投影。"""
+    """编排层。持有会话、驱动状态机、调算法、产出投影。
+
+    ★ 澄清（§20 盲审报告的 G8 有一半是误读，此处写清以免再被误读）：
+
+    本类**不是** `HostContract` 的实现类，而是它的**消费方**。
+
+        HostContract   —— C1 → C2 的接口，由 **C2** 实现（`core/api.py: HostCore`）
+        UiProjectionPort —— C1 → C4 的接口，由**本类**实现
+
+    故本类的方法集合**本来就不该**等于 HostContract 的 7 个操作 ——
+    它额外拥有 `run_algorithms` / `check_compatibility` / `normalize_error` /
+    `build_view` 这些**编排职责**，这恰恰是 C1 存在的理由
+    （见本模块 INTENT：C1 不是转发层，它拥有编排权）。
+
+    盲审者把"消费方"误当成"实现方"了。但它指出的**真问题**成立：
+    `__main__.py` 的 `run_headless` 需要知道"登记输入"到底调谁 ——
+    第一版没写清 C1 自己有没有会话跟踪 API。
+
+    ── 冻结 C1 的会话跟踪职责（答上述问题）──
+
+    C1 **持有** session_id，并且：
+
+        create_session(profile_version)  → 调 C2 建会话，把 id 记在 C1 里
+        set_reference(path) / set_practice(path)
+                                         → 用 C1 记住的 id 调 C2
+                                           （**不带 session_id 参数**）
+        build_surface()                  → 同样用 C1 记住的 id
+        run_algorithms()                 → 用 C1 记住的 id 取数据面并跑算法
+
+    为什么 C1 这些方法**不带** session_id 而 C2 的带：
+        C2 要支持**多会话**（它是通用核心，不该假设只有一个会话）；
+        C1 在本产品里**只服务一个开发者、一个会话**（Mac 端调试工具）。
+        把"当前会话"这个隐含状态**收在 C1**，而不是泄漏到 C2 的签名里。
+
+    这与 G8 的修正**不矛盾**：`HostContract`（C2 的接口）必须显式传
+    session_id，因为 C2 是多会话的；`HostApp`（C1 的门面）不需要，
+    因为 C1 在一次运行里只有一个会话。
+
+    ★ 若将来 C1 要支持多会话，`HostApp` 的方法**必须**加 session_id ——
+    但那是一次契约变更，须由负责人裁定，不得由实现者自行"顺手加上"。
+    """
 
     def __init__(self, core: object) -> None:
         """装配。C1 是**唯一**知道"有哪些实现"的地方。
@@ -82,11 +122,46 @@ class HostApp(UiProjectionPort):
     # ── ① 生命周期 ────────────────────────────────────────────
 
     def create_session(self, profile_version: str) -> str:
-        """创建会话。状态 → CREATED。返回 session_id。"""
+        """创建会话。状态 → CREATED。返回 session_id。
+
+        C1 **记住**这个 id（见类 docstring 的会话跟踪说明），
+        后续 set_reference / set_practice / build_surface / run_algorithms
+        **不需要**再传它。
+        """
         raise NotImplementedError("SHELL: FILE-301 待注入实现")
 
     def destroy_session(self, session_id: str) -> None:
-        """销毁会话，释放资源。状态 → CLOSED。"""
+        """销毁会话，释放资源。状态 → CLOSED。
+
+        ★ 本方法**带** session_id，而其他编排方法不带 ——
+        这不是笔误：销毁是可能发生在错误恢复路径上的操作，
+        此时 C1 记住的 id 可能已经失效或需要显式指定要清理哪个会话。
+        传参比依赖隐含状态更安全（清理路径上的异常会掩盖真实失败）。
+        """
+        raise NotImplementedError("SHELL: FILE-301 待注入实现")
+
+    def set_reference(self, path: str) -> None:
+        """登记参考演奏路径。用 C1 记住的会话。成功 → INPUT_READY。
+
+        ★ 参数名是 `path`（不是 `uri`），且类型是 `str`。
+
+        为什么与 C2 的 `uri` 不同名：C2 是通用核心，"uri" 允许未来
+        扩展成非文件来源；C1 是本产品的门面，本轮**只接受文件路径**。
+        两者语义不同（C1 的 path 会被 C1 校验存在性后再交给 C2），
+        强行同名会让读者以为可以直接透传。
+        """
+        raise NotImplementedError("SHELL: FILE-301 待注入实现")
+
+    def set_practice(self, path: str) -> None:
+        """登记练习演奏路径。用 C1 记住的会话。成功 → INPUT_READY。"""
+        raise NotImplementedError("SHELL: FILE-301 待注入实现")
+
+    def build_surface(self) -> None:
+        """构建数据面。用 C1 记住的会话。
+
+        前置：状态 == INPUT_READY，否则抛 ContractViolation。
+        这是**同步阻塞**调用（见 contract.UiView.progress 的 G9 说明）。
+        """
         raise NotImplementedError("SHELL: FILE-301 待注入实现")
 
     # ── ② 编排 ────────────────────────────────────────────────
