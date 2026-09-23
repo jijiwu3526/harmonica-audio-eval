@@ -1,0 +1,80 @@
+{
+  "spike": "DTW-MEMORY",
+  "spec_duration_max_sec": 120,
+  "cases": [
+    {
+      "hop": 512,
+      "n_frames": 10336,
+      "chroma_mb": 0.99,
+      "D_actual_shape": [
+        10336,
+        10336
+      ],
+      "D_actual_mb": 854.66,
+      "D_predicted_mb": 427.33,
+      "warp_path_points": 10336,
+      "warp_path_mb": 0.1654,
+      "band_rad": null,
+      "elapsed_sec": 2.99,
+      "rss_peak_mb": 2347.1,
+      "duration_sec": 120.0
+    },
+    {
+      "hop": 512,
+      "n_frames": 10336,
+      "chroma_mb": 0.99,
+      "D_actual_shape": [
+        10336,
+        10336
+      ],
+      "D_actual_mb": 854.66,
+      "D_predicted_mb": 427.33,
+      "warp_path_points": 10336,
+      "warp_path_mb": 0.1654,
+      "band_rad": 0.25,
+      "elapsed_sec": 2.15,
+      "rss_peak_mb": 3037.4,
+      "duration_sec": 120.0
+    },
+    {
+      "hop": 2048,
+      "n_frames": 2584,
+      "chroma_mb": 0.25,
+      "D_actual_shape": [
+        2584,
+        2584
+      ],
+      "D_actual_mb": 53.42,
+      "D_predicted_mb": 26.71,
+      "warp_path_points": 2584,
+      "warp_path_mb": 0.0413,
+      "band_rad": null,
+      "elapsed_sec": 0.09,
+      "rss_peak_mb": 3037.4,
+      "duration_sec": 120.0
+    },
+    {
+      "hop": 512,
+      "n_frames": 15504,
+      "chroma_mb": 1.49,
+      "D_actual_shape": [
+        15504,
+        15504
+      ],
+      "D_actual_mb": 1922.99,
+      "D_predicted_mb": 961.5,
+      "warp_path_points": 15504,
+      "warp_path_mb": 0.2481,
+      "band_rad": null,
+      "elapsed_sec": 3.75,
+      "rss_peak_mb": 5113.9,
+      "duration_sec": 180.0
+    }
+  ],
+  "findings": {
+    "M1_cost_matrix_is_N_squared": false,
+    "M2_sakoe_chiba_does_not_shrink_D": true,
+    "M3_hop_widening_reduces_D_by": 16.0,
+    "M4_warp_path_is_tiny_kb": 165.4
+  }
+}
