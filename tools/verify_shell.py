@@ -485,6 +485,64 @@ def check_doc_port_count(r: Report) -> None:
         print("  ✅ 文档中的端口数与代码一致")
 
 
+def check_timing_payload_consistency(r: Report) -> None:
+    """⑩ 算法模块的 payload 键名与冻结表一致。
+
+    ★ 被一次真实事故逼出来的（§20 盲审第二轮发现）：
+    我新增 `PAYLOAD_SCHEMAS` 时，不知道 `timing.py` 正文的 docstring
+    已经写了另一套键名（`median_ms` / `mad_ms` / `n_matched` / `n_unmatched`）。
+    于是**同一份事实有了两个互相冲突的来源**：
+      - 模块说"我产出这些键"
+      - 注册表说"必须恰好产出那些键"
+    实现者无法同时满足，而两者都不会在 import 时报错。
+
+    这与 `FIELD_LAYOUTS` 是**同一个教训的第三次出现**
+    （前两次：`hop_length` 未声明、端口对称性破裂）。
+    故用机械检查兜住：模块 OUTPUT 段声明的键必须与注册表逐字一致。
+    """
+    print()
+    print("─" * 72)
+    print("⑩ 算法 payload 键名 ↔ 冻结表")
+    print("─" * 72)
+
+    sys.path.insert(0, str(REPO))
+    try:
+        from harmonica_eval.algorithms import PAYLOAD_SCHEMAS
+    except Exception as exc:
+        msg = f"无法导入 PAYLOAD_SCHEMAS: {exc}"
+        print(f"  ❌ {msg}")
+        r.err(msg)
+        return
+
+    hits: list[str] = []
+    for algo, keys in PAYLOAD_SCHEMAS.items():
+        path = PKG / "algorithms" / f"{algo}.py"
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+
+        # 找 "现统一到冻结表" 之类的清单块（我们冻结的写法）
+        blocks = re.findall(
+            r"冻结表的\s*\d+\s*个键：(.*?)\n\s*\"\"\"", text, re.S
+        )
+        if not blocks:
+            continue  # 该模块尚未采用显式清单写法
+        declared = re.findall(r"^\s+(\w+)\s{2,}", blocks[0], re.M)
+        if declared != list(keys):
+            hits.append(
+                f"{algo}.py 声明的键 {declared} "
+                f"与 PAYLOAD_SCHEMAS 的 {list(keys)} 不一致"
+            )
+
+    for h in hits:
+        print(f"  ❌ {h}")
+        r.err(h)
+
+    print(f"  检查了 {len(PAYLOAD_SCHEMAS)} 个算法的 payload 键表")
+    if not hits:
+        print("  ✅ 模块声明与冻结表逐字一致")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -499,6 +557,7 @@ def main() -> int:
     check_no_shadowing(r)
     check_contract_signatures(r)
     check_doc_port_count(r)
+    check_timing_payload_consistency(r)
 
     print()
     print("=" * 72)

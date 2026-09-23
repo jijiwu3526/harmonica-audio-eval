@@ -338,7 +338,12 @@ produced_by="core.features",
         timeline_basis=TimelineBasis.REFERENCE,
                 hop_length=MATERIALIZE.rms_hop_length,
 produced_by="core.features",
-        rationale="逐帧 RMS。力度对比需要它，且真值来自 MIDI velocity。",
+        rationale=(
+            "逐帧 RMS。力度对比需要它。"
+            "★ §20 盲审修正：原文写「真值来自 MIDI velocity」—— **不成立**，"
+            "数据面里没有 MIDI 通路（ingest 只解码音频，features 从音频派生）。"
+            "故力度指标是「练习相对参考的能量差」，不是「相对乐谱的绝对力度差」。"
+        ),
     ),
     PortSpec(
         port_id="rms.practice",

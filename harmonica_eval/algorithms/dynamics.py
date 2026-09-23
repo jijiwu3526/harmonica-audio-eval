@@ -96,7 +96,8 @@ def note_spans(notes: object) -> object:
     做法：第 n 个音的区间 = [onset_n, onset_{n+1})，
     最后一个音延伸到它自己的 onset + 一个默认时长（或数据末尾）。
     切分依据是 **onset**，因为 onset 是唯一跨两侧都可比的量
-    （它由 MIDI ground truth 与起音检测共同确定）。
+    （它由 `notes.*` 的 onset_sec 给出 —— ★ 那是**检测器输出**，
+    不是 MIDI 真值：数据面里没有 MIDI 通路。见 timing.detect_onsets）。
 
     两侧各自调用一次：`notes.reference` 与 `notes.practice` **分开**切。
     """

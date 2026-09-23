@@ -64,8 +64,28 @@ class AlgorithmSpec:
 
     `AlgorithmResultEnvelope.required_ports` 是同一份事实的**运行时副本** ——
     它由 C1 从本字段填入信封，用于事后追溯"这次判定依据的是哪些端口"。
-    二者**必须相等**，且该相等关系由 `assert_registry_integrity()` 检查。
-    第一版没说二者关系，实现者可能各自维护一份并逐渐分叉。
+
+    ★ 第三轮修正（§20 盲审第二轮发现）：第一版我写"二者必须相等，
+    且该相等关系由 `assert_registry_integrity()` 检查" —— **这句话是假的**。
+
+    为什么假：`assert_registry_integrity()` 是 **import 期静态检查**，
+    只读得到本元组的字段；而信封是**运行期**产物，静态检查够不着它。
+    声称一个结构上不可能执行的检查，比不写更糟 ——
+    它让读者以为这条一致性已被机械保证，从而不再人工核对。
+
+    真实情况分两种，必须分开说清：
+
+        a) C1 **填入**信封时：`required_ports` 必须**逐字复制**本字段
+           （不得自行拼接、去重、重排序）。这是 C1 的实现约定，
+           由 Build Instruction 与 Code Review 保证，**非**机械检查。
+        b) 算法**自身**若也需要一份端口清单（例如 run() 内做断言）：
+           它**不能** import 本模块（循环 import：
+           本模块 `from . import dynamics, pitch, timing`）。
+           故它只能写一份**镜像常量**，而镜像**没有任何机制保证同步**。
+
+    对 (b) 的正确态度：**不要写镜像**。算法应在运行期从
+    `surface.manifest()` 读取实际端口，只校验"我需要的在不在"，
+    而不是硬编码一份可能与注册表分叉的名单。
     """
 
     entry: Callable[[AlgorithmDataContract], AlgorithmResultEnvelope]
@@ -156,7 +176,6 @@ ALGORITHMS: tuple[AlgorithmSpec, ...] = (
             "pcm.mapped.practice",
             "notes.reference",
             "notes.practice",
-            "warp_path",
         ),
         entry=timing.run,
         label="节奏",
@@ -198,16 +217,31 @@ pitch 和 dynamics 凭什么知道"第几个音"？第一版答不出来。
     - timing   用 onset_sec 作两侧起音时刻的真值
     - dynamics 用逐音区间取能量，从而**按音配对**而非按时间轴配对
 
-★ 关于"节奏与力度用相反的轴"这条旧说法：**它已被删除。**
+★ 第三轮修正（§20 盲审第二轮发现）：**从 timing 移除 `warp_path`。**
 
-删除理由：`dynamics` 原本写 `AXIS = WARPED` 来表达"力度不关心何时吹"，
-但数据面里**不存在** WARPED 轴的 rms 端口，该约束不可满足。
-正确的表达方式不是"换一条轴"，而是"**按音聚合**"——
-两侧各自按自己的 onset 切分，再按音序配对。
-这样"何时吹"被排除，且不需要任何 WARPED 轴端口。
+理由：timing 的整个要点是"不许做任何时间归一化"
+（用归一化轴会把抢拍拖拍抹成 0），而 `warp_path` 按定义就是
+DTW 对应关系 —— 拿它把练习时刻映射到参考钟**就是**归一化。
+于是"声明需要它"与"不许用归一化映射"不可兼得，
+唯一出路是"读而不用"，那又与「每个端口都必须能回答为什么需要它」相悖。
 
-`timing.AXIS = REFERENCE` **保持不变**：它的理由是硬的（用 WARPED 会让
-抢拍拖拍恒为 0 且不报错），与 dynamics 的取舍无关。"""
+**实测确认：全项目没有任何算法消费 `warp_path`**（只有 core 生成它）。
+它不是死端口 —— 它是**证据端口**：
+保留在数据面里让审查者能重跑对齐、验证其余端口不是凭空来的
+（见 profile 的 rationale 与 core/features.py 的说明）。
+这与 `chroma.lowres.*` 属于同一类（"保留供复现，不作为计算输入"），
+见下方 assert_registry_integrity 对"端口不被消费"的刻意豁免。"""
+
+
+# ── 关于"节奏与力度用相反的轴"的沿革 ──
+#
+# 第一版：timing 用 REFERENCE、dynamics 用 WARPED，写作"刻意相反"。
+# 第二轮：dynamics 的 WARPED 约束被证明**无法满足**（数据面里没有
+#         WARPED 轴的 rms 端口），改为"按音配对"，删除其 AXIS 常量。
+# 第三轮：timing 的 `timing.AXIS = REFERENCE` **保持不变** ——
+#         它的理由是硬的（用 WARPED 会让抢拍拖拍恒为 0 且不报错），
+#         与 dynamics 的取舍无关。两者不再构成"对称设计"，
+#         因为 dynamics 的问题本来就不是"选哪条轴"。
 
 
 PAYLOAD_SCHEMAS: Mapping[str, tuple[str, ...]] = {
@@ -224,7 +258,9 @@ PAYLOAD_SCHEMAS: Mapping[str, tuple[str, ...]] = {
         "spread_ms",
         "early_ratio",
         "late_ratio",
+        "on_time_ratio",
         "n_notes_used",
+        "n_unpaired",
     ),
     "dynamics": (
         "per_note_delta_db",
