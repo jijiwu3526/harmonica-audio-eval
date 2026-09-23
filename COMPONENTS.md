@@ -51,7 +51,7 @@
                       │                 │
                       ▼                 ▼
         ┌──────────────────────┐   ┌────────────────┐
-        │  C2  Audio Core      │   │ C4 Web Cockpit │
+        │  C2  Audio Core      │   │ C4 Dev Cockpit │
         │  （唯一核心）          │   │  只读投影        │
         │                      │   └────────────────┘
         │  内部全隐藏：          │
@@ -244,7 +244,17 @@ virtual_behavior: |
   虚拟算法与真实算法遵守同一 envelope 契约。
 ```
 
-### COMP-C4 — Web Cockpit
+### COMP-C4 — Developer Cockpit（Mac 本机开发者视图）
+
+> ★ **命名更正（由下往上核对代码时发现）**：
+> 本节标题原为 **"Web Cockpit"**，但代码与负责人裁定都不是 Web：
+> - `cockpit/__init__.py`：入口 `launch_cockpit()`，产出是「**本机进程内的开发者视图**」
+> - `cockpit/app.py`：自称「**Mac 端开发者调试界面**」，函数名 `run_local_ui`
+> - 负责人裁定：「Mac 端上面只用给开发者看，会把核心彻底调试完，再移到手机端」
+>
+> `web` 是 v1 设想的残留。**组件边界没变，只是名字** ——
+> 但名字会误导实现者去找 Web 框架、加 HTTP 服务，那是 SPEC §1 边界禁止的。
+> 手机端是未来事项，不在 v0.1 范围。
 
 ```yaml
 component_id: COMP-C4
@@ -302,7 +312,7 @@ SurfaceHandle.read(port_id, range)  → BufferView          # 零拷贝或分块
 | --- | --- |
 | `PortDescriptor` | `port_id, schema_version, element_type, dimensions, units, timeline_basis, sample_rate, length, content_hash` |
 | `BufferView` | `data, element_count, element_type, stride` |
-| 强制保证 | 两份 **aligned PCM** 永远存在（mapped + warped）——§11 逃生口，算法可自行做特有预处理 |
+| 强制保证 | 两份 **aligned PCM** 永远存在（mapped + warped）——本仓自定保证，算法可自行做特有预处理 |
 | `timeline_basis` | 每端口必须声明：参考时间轴 / 归一化时间轴 |
 | **必须包含 `sample_rate`** | 实测依据：同一段音频在 22.05 kHz 下 pYIN 把 D5 判成 D4（恰好 −1200 音分），44.1 kHz 下正常。**采样率是算法结果的成因，不是元数据** |
 | 内存规则 | Core 拥有 Core 数据；算法只可借用，不得释放、不得修改、不得跨会话保存指针；结果所有权移交 Result 侧 |

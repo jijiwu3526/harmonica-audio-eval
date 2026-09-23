@@ -178,7 +178,7 @@ class BudgetSpec:
     max_surface_bytes: int = 512 * 1024 * 1024
     """数据面总量上限 512 MB。超出 → CORE_BUILD_FAILED。
 
-    依据：预生成清单（11 个端口）在 120 s 音频下实测约 10–20 MB，
+    依据：预生成清单（**12 个端口**）在 120 s 音频下实测约 10–20 MB，
     余量约 25×。放宽是为了让实现者**不必**为省内存牺牲正确性——
     内存优化不属于本轮目标（负责人裁定：Mac 先行，先跑通）。"""
 
@@ -257,7 +257,7 @@ produced_by="core.align",
         ),
     ),
 
-    # ── 两份对齐 PCM（宪章 §11 逃生口，永远存在）─────────────────
+    # ── 两份对齐 PCM（本仓自定保证，永远存在；非宪章条文）─────────
     PortSpec(
         port_id="pcm.mapped.reference",
         units="amplitude",
@@ -291,11 +291,16 @@ produced_by="core.surface",
         dimensions=("sample",),
         element_type="float32",
         timeline_basis=TimelineBasis.WARPED,
-                hop_length=0,
-produced_by="core.surface",
+        hop_length=0,
+        produced_by="core.surface",
         rationale=(
             "时间归一化后的练习演奏，与参考等长。"
-            "供音高/力度类指标使用 —— 它们关心「弹了什么」，不关心「何时弹」。"
+            "★ 更正（由下往上核对时发现）：原文写「供音高/力度类指标使用"
+            "—— 它们关心弹了什么、不关心何时弹」—— **与实测不符**："
+            "pitch 与 dynamics 都**没有**使用它，两者走的都是 notes.* / rms.* "
+            "（见 algorithms.ALGORITHMS 的 required_ports）。"
+            "它当前**无算法消费**。保留的真实理由是数据面保证："
+            "算法永远能拿到时间归一化后的 PCM 自行做特有预处理。"
         ),
     ),
 
@@ -462,7 +467,7 @@ def assert_profile_integrity() -> None:
     missing = [p for p in CORE_REQUIRED_PORTS if p not in ids]
     if missing:
         raise ValueError(
-            f"违反宪章 §11 逃生口：缺少必需端口 {missing}。"
+            f"违反数据面保证（本仓自定）：缺少必需端口 {missing}。"
             "任何 profile 都必须含两份对齐 PCM，"
             "否则算法无法自行做特有预处理。"
         )

@@ -67,7 +67,7 @@ class TimelineBasis(str, Enum):
 
 
 class AlignmentRepresentation(str, Enum):
-    """数据面必须始终提供的两份对齐 PCM（宪章 §11 逃生口）。"""
+    """数据面必须始终提供的两份对齐 PCM（本仓自定保证）。"""
 
     MAPPED = "MAPPED"     # 保留源时间
     WARPED = "WARPED"     # 时间归一化

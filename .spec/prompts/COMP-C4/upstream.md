@@ -7,7 +7,8 @@
 
 ## ROLE
 
-**Web Cockpit** —— 人类操作与观察界面。**开发者调试视图**。
+**Developer Cockpit** —— 人类操作与观察界面。**Mac 本机开发者调试视图**。
+（★ 原名 "Web Cockpit" 是 v1 残留；负责人裁定 v0.1 只在 Mac 端给开发者看，不做 Web。）
 
 ## WORKFLOW POSITION
 

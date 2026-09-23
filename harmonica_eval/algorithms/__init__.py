@@ -130,7 +130,7 @@ def assert_registry_integrity() -> None:
         a) 被算法直接消费    —— pitch.* / rms.* / notes.reference
         b) 被 Core 内部消费  —— chroma.lowres.*，align 用它建立对齐；
                                 同时保留在数据面里供审查者复现对齐过程
-        c) 宪章 §11 逃生口   —— pcm.warped.practice，算法可自行取用来做
+        c) 数据面保证（本仓自定，非宪章条文）—— pcm.warped.practice，算法可自行取用来做
                                 特有预处理，即使当前没有算法用它
 
     若强行要求"端口必须被消费"，上面 b、c 两类会被误判为死端口而删除，

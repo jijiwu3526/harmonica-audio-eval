@@ -140,7 +140,7 @@ class TimelineBasis(str, Enum):
 
 
 class AlignmentRepresentation(str, Enum):
-    """数据面**始终**包含的两份对齐 PCM（宪章 §11 逃生口）。
+    """数据面**始终**包含的两份对齐 PCM（本仓自定保证；★ 原写"宪章 §11 逃生口"是伪造引用）。
 
     因为它们永远存在，任何算法都能拿 PCM 自行做特有预处理。
     """
@@ -475,7 +475,7 @@ CORE_REQUIRED_PORTS: tuple[str, ...] = (
     "pcm.mapped.reference",
     "pcm.mapped.practice",
 )
-"""任何 profile 都**必须**包含的端口（宪章 §11 逃生口）。
+"""任何 profile 都**必须**包含的端口（本仓自定保证；原引"宪章 §11"为伪造）。
 
 其余端口可以随 profile 版本变化，但这两份对齐 PCM 永远存在：
 它们保证算法永远能自行做特有预处理，从而 profile 只决定「快不快」，

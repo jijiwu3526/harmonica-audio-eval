@@ -139,7 +139,7 @@ __init__.py          包出口
 app.py               生命周期 + 装配 + 编排（全系统唯一编排点）
 ```
 
-### C4 Web Cockpit `cockpit/`
+### C4 Developer Cockpit `cockpit/`（Mac 本机开发者视图）
 
 ```text
 __init__.py          包出口

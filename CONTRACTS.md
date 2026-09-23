@@ -121,7 +121,7 @@
 1. 端口必须声明 `timeline_basis`
 2. 端口必须声明 `sample_rate`（实测：采样率是 f0 结果的成因）
 3. 端口必须声明 `units` 与 `dimensions`
-4. 数据面**始终**含两份 aligned PCM（宪章 §11 逃生口）
+4. 数据面**始终**含两份 aligned PCM（本仓自定保证，见 COMPONENTS.md §4.2）
 
 **待 OC1**：`manifest()` / `read()` 的返回类型与副作用语义。
 

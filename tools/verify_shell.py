@@ -20,6 +20,16 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "harmonica_eval"
+CONSTITUTION = Path(
+    "/Users/Apple/.dsh/attachments/v1/files/84/"
+    "841401d7bf94ed17987bb506b14789c41110a894824f367edbf77271fcef3191/"
+    "AI_Software_Foundry_Constitution_CN.md"
+)
+"""宪章原件路径。不在库内（它是外部权威输入），故写绝对路径。
+
+若该路径不存在（换机器 / 附件被清理），检查⑪会**跳过**而非失败 ——
+缺宪章不应该让整个空壳验证红掉，但也绝不假装检查过了。
+"""
 
 # 本轮交付的 18 个文件（PLAN.md §四）
 EXPECTED = [
@@ -543,6 +553,139 @@ def check_timing_payload_consistency(r: Report) -> None:
         print("  ✅ 模块声明与冻结表逐字一致")
 
 
+def check_constitution_citations(r: Report) -> None:
+    """⑪ 引用的宪章条款必须真实存在。
+
+    ★ 被一次真实事故逼出来（由下往上核对代码时发现）：
+    8 个文件里写着「宪章 §11 逃生口」，用来论证"数据面必须永远含两份
+    aligned PCM"。但 —— **宪章 §11 是 Mission Threads**，
+    且全文 **0 次**出现 `PCM` / `逃生` / `预处理`。
+
+    即：那个引用是**伪造的**。设计保证本身合理，但它披了一件不属于它的
+    权威外衣，并传播到 profile / contract / COMPONENTS / CONTRACTS /
+    research / prompts 六处。
+
+    为什么这比"写错数字"更严重：
+      - 写错数字，读者一算就知道错；
+      - 伪造引用**无法被机械反驳**，读者会默认"宪章说过"而不再核查；
+      - 它把"我们的取舍"伪装成"上层要求"，从而免疫于正常质疑。
+
+    §22 把「无法追溯到上层意图」列为硬失败。伪造引用是它的**反面伪装**：
+    看起来可追溯，实则追溯到一个不存在的地方。
+    """
+    print()
+    print("─" * 72)
+    print("⑪ 宪章引用真实性")
+    print("─" * 72)
+
+    const = CONSTITUTION
+    if not const.exists():
+        print(f"  ⚠️  找不到宪章，跳过（{const}）")
+        return
+
+    text = const.read_text(encoding="utf-8")
+    sections = {
+        m.group(1): m.group(2).strip()
+        for m in re.finditer(r"^# (\d+)\.\s*(.+)$", text, re.M)
+    }
+
+    cited: dict[str, set[str]] = {}
+    for p in sorted(REPO.rglob("*")):
+        if not p.is_file() or "__pycache__" in str(p) or "/.git/" in str(p):
+            continue
+        if p.suffix not in (".py", ".md", ".html", ".yaml", ".txt"):
+            continue
+        if "Constitution" in p.name:
+            continue
+        try:
+            body = p.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        # 只看"宪章 §N"这种明确指向宪章的引用，
+        # 避免把 SPEC §5 / COMPONENTS §4.2 等本仓章节误判
+        for m in re.finditer(r"宪章\s*§(\d+)", body):
+            cited.setdefault(m.group(1), set()).add(
+                str(p.relative_to(REPO))
+            )
+
+    # ★ 关于"伪引用"的可检查边界（诚实声明）：
+    #
+    # 第一版我试图用正则核对"每个 §N 后面的短语是否真在该章里"。
+    # **它失败了** —— 中文散文里引用后面紧跟的常是**作者自己的评述**
+    # 而非该章的原文，例如「宪章 §20 的要求，已作废」中的"已作废"
+    # 是作者在说"我撤回了"，不是声称 §20 里有"已作废"。
+    # 结果是大量误报（一次跑出 10+ 条假警报）。
+    #
+    # 结论：**任意引用的语义真伪无法用正则机械判定**，
+    # 它需要人或有能力读原文的模型来核。硬要用正则会制造
+    # 比它要防的问题更多的噪声 —— 而噪声会让这条检查被无视。
+    #
+    # 所以本检查只做两件**可靠**的事：
+    #   (1) 章节存在性 —— 引用 §99 时必定报错（纯机械，零误报）
+    #   (2) 已知伪引用回归 —— 把真实发生过的事故钉成回归用例，
+    #       防止它悄悄复发（这也是本项目第三次同类教训的固定做法）
+    #
+    # 语义核对的责任落回 §23 跨层审计（人/强模型），工具不冒充它。
+
+    KNOWN_FALSE_CITATION_PHRASES: tuple[tuple[str, str], ...] = (
+        (
+            "宪章 §11 逃生口",
+            "§11 是 Mission Threads；宪章全文 0 次出现 PCM/逃生/预处理。"
+            "该保证是本仓自定，应按其本来身份引用。",
+        ),
+        (
+            "宪章 §11",
+            "若与『逃生口』/『PCM 自行预处理』连用即为伪引用（见上）。",
+        ),
+    )
+
+    regressions: list[str] = []
+    SELF = Path(__file__).resolve()
+    for p in sorted(REPO.rglob("*")):
+        if not p.is_file() or "__pycache__" in str(p) or "/.git/" in str(p):
+            continue
+        if p.suffix not in (".py", ".md", ".html", ".yaml", ".txt"):
+            continue
+        if "Constitution" in p.name:
+            continue
+        # 本检查器自身必然要**提到**这个伪引用串（否则无法定义检查），
+        # 故排除自己 —— 这是检查器与规则同源时的常规豁免。
+        if p.resolve() == SELF:
+            continue
+        try:
+            body = p.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lineno, line in enumerate(body.splitlines(), 1):
+            # 已标注更正的说明行不算违规（它正是在记录这个错误）
+            if any(k in line for k in ("伪造", "更正", "原写", "已作废", "本仓自定")):
+                continue
+            if "宪章 §11" in line and ("逃生" in line or "自行预处理" in line):
+                regressions.append(
+                    f"{p.relative_to(REPO)}:{lineno} 复发伪引用「宪章 §11 逃生口」"
+                )
+
+    for g in regressions:
+        print(f"  ❌ {g}")
+        r.err(g)
+
+    bad: list[str] = []
+    for sec, files in cited.items():
+        if sec not in sections:
+            for f in sorted(files):
+                bad.append(f"{f} 引用宪章 §{sec}，但宪章无此章")
+
+    for b in bad:
+        print(f"  ❌ {b}")
+        r.err(b)
+
+    if cited:
+        print(f"  宪章 {len(sections)} 章；本仓引用了 "
+              f"§{', §'.join(sorted(cited, key=int))}")
+    if not bad:
+        print("  ✅ 所有『宪章 §N』引用都落在宪章实际章节内")
+
+
 def main() -> int:
     print("=" * 72)
     print("空壳验证 · verify_shell.py")
@@ -558,6 +701,7 @@ def main() -> int:
     check_contract_signatures(r)
     check_doc_port_count(r)
     check_timing_payload_consistency(r)
+    check_constitution_citations(r)
 
     print()
     print("=" * 72)
