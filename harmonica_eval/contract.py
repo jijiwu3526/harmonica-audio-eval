@@ -418,6 +418,16 @@ class ErrorCode(str, Enum):
     INPUT_SILENT = "INPUT_SILENT"
     """归属 C2。整段静音，无法建立任何有效映射。数据面不存在。"""
 
+    INPUT_TOO_LONG = "INPUT_TOO_LONG"
+    """归属 C2。长于 profile.AUDIO.max_duration_sec（规格上限 120 s）。
+
+    ★ 这是我在写 ingest.py 时发现的自身缺口：原契约只有 TOO_SHORT，
+    没有 TOO_LONG，但规格明确有上限。缺它的后果是超长音频只能被
+    勉强归类为「不可读」，掩盖真实原因。
+
+    处理方式同样是**拒绝，不静默截断** —— 静默截断会让分析结果
+    对应到一个用户不知道的时间范围。"""
+
     CORE_BUILD_FAILED = "CORE_BUILD_FAILED"
     """归属 C2。标准化/对齐/预生成任一步失败。
     **不得部分发布**，全部资源释放。"""
@@ -515,7 +525,14 @@ class UiSeries:
     values: Sequence[float] = field(repr=False)
     unit: str
     timeline_basis: TimelineBasis
-    """**必填**：节奏类展示必须用 REFERENCE，否则会误导。"""
+    """**必填**：节奏类展示必须用 REFERENCE，否则会误导。
+
+    ★ C4 盲审发现的歧义，已裁定：**禁止把不同 timeline_basis 的曲线
+    画在同一张图上。** 两条轴的 t 物理含义不同（一条保留源时间、
+    一条已归一化），叠在一起必然误导 —— 尤其会让抢拍拖拍看起来"对齐了"。
+
+    同一 basis 的多条曲线可以叠加（如参考与练习都在 REFERENCE 上）。
+    """
     source_port: str | None = None
     """源自哪个端口（便于调试追溯）。None 表示由算法直接产出。"""
 
@@ -532,6 +549,16 @@ class UiView:
     series: Sequence[UiSeries] = ()
     scalars: Sequence[UiScalar] = ()
     progress: float | None = None
+    """构建进度。★ C4 盲审发现的歧义，已冻结。
+
+    **取值域是 0.0–1.0（比例，不是百分数）。**
+        0.0      已完成 0%
+        1.0      已完成 100%（与 state == DATA_READY 一致）
+        None     该会话**没有进度概念**（尚未开始，或已进入终态）
+
+    **界面不得自行归一化、不得推断百分比** —— 它只负责显示这个数。
+    """
+
     error_code: str | None = None
     error_detail: str | None = None
     note: str = ""
@@ -552,9 +579,40 @@ class UiCommandKind(str, Enum):
     RESET = "RESET"
 
 
+COMMAND_LEGALITY: Mapping[UiCommandKind, frozenset[SessionState]] = {
+    UiCommandKind.SET_REFERENCE: frozenset(
+        {SessionState.CREATED, SessionState.INPUT_READY}
+    ),
+    UiCommandKind.SET_PRACTICE: frozenset(
+        {SessionState.CREATED, SessionState.INPUT_READY}
+    ),
+    UiCommandKind.BUILD_SURFACE: frozenset({SessionState.INPUT_READY}),
+    UiCommandKind.RUN_ALGORITHMS: frozenset({SessionState.DATA_READY}),
+    UiCommandKind.CANCEL: frozenset(
+        {SessionState.INPUT_READY, SessionState.BUILDING, SessionState.DATA_READY}
+    ),
+    UiCommandKind.RESET: frozenset(set(SessionState)),
+}
+"""状态 × 命令的合法性矩阵。★ C4 盲审发现的缺口，已补。
+
+在此之前这张表只存在于 C1 的 `downstream.md` 里，**契约中没有** ——
+于是 C4 无法判断哪些按钮该置灰，只能一律可点、等 C1 拒绝。
+
+现在两侧对「什么状态下能做什么」有**同一个事实来源**：
+    - C1 **必须**用它校验（非法命令 → 拒绝，且**不改变状态**）
+    - C4 **可以**用它置灰按钮（纯 UI 优化，**不是**安全边界）
+
+**即使 C4 不置灰，C1 也必须校验** —— 界面不是可信输入源。
+"""
+
+
 @dataclass(frozen=True)
 class UiCommand:
-    """一条用户意图。C1 是唯一执行者与校验者。"""
+    """一条用户意图。C1 是唯一执行者与校验者。
+
+    合法性见 `COMMAND_LEGALITY`。非法命令必须被**拒绝且不改变状态**
+    （不许"尽力而为"）。
+    """
 
     kind: UiCommandKind
     payload: dict = field(default_factory=dict)
@@ -588,4 +646,5 @@ __all__ = [
     "ErrorCode", "HarmonicaError", "ContractViolation", "CoreBuildError", "AlgorithmError",
     # UI
     "UiScalar", "UiSeries", "UiView", "UiCommand", "UiCommandKind", "UiProjectionPort",
+    "COMMAND_LEGALITY",
 ]

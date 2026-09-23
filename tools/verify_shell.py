@@ -229,7 +229,19 @@ def check_layer_direction(r: Report) -> None:
 
 
 def check_forbidden_on_host(r: Report) -> None:
-    """CONTRACT-HOST-v1 上不得出现算法语义的方法名。"""
+    """CONTRACT-HOST-v1 上不得出现算法语义的方法名。
+
+    ★ 检查范围是**类方法**，不是模块级函数。
+
+    为什么（这是本工具第一版的缺陷，实测暴露）：
+        禁名单说的是「**CONTRACT-HOST-v1 上**绝不允许出现的方法名」——
+        它约束的是 Core 暴露给 C1 的**门面**。
+        而 `core/align.py` 里的模块级函数 `align()` 是 Core 的**内部实现**，
+        完全合法：C1 不该调用它，但 Core 自己必须能对齐。
+
+        第一版用 `def align(` 全局 grep，于是把合法的内部函数也判成违规 ——
+        **检查工具的假阳性会让真正的违规淹没在噪声里**，比不检查更糟。
+    """
     print()
     print("─" * 72)
     print("⑥ Host 禁名单（编排权不得泄漏进 Core）")
@@ -241,17 +253,36 @@ def check_forbidden_on_host(r: Report) -> None:
         r.err(f"无法读取 FORBIDDEN_OPERATIONS: {exc}")
         return
 
-    surface = REPO / "harmonica_eval/core"
+    # 只在「实现 HostContract 的类」里找禁名单方法
     hits = 0
-    for f in sorted(surface.rglob("*.py")):
+    classes_checked = 0
+    for f in sorted((REPO / "harmonica_eval/core").rglob("*.py")):
         src = f.read_text(encoding="utf-8")
-        for name in FORBIDDEN_OPERATIONS:
-            if re.search(rf"\bdef\s+{re.escape(name)}\s*\(", src):
-                r.err(f"禁名单违规: {f.relative_to(REPO)} 定义了 {name}()")
-                print(f"  ❌ {f.relative_to(REPO)}::{name}()")
-                hits += 1
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            bases = [ast.unparse(b) for b in cls.bases]
+            # 门面类：显式继承 HostContract 的类
+            is_host_impl = any("HostContract" in b for b in bases)
+            classes_checked += 1
+            for item in cls.body:
+                if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if item.name in FORBIDDEN_OPERATIONS:
+                    tag = "Host 契约实现" if is_host_impl else f"类 {cls.name}"
+                    r.err(
+                        f"禁名单违规: {f.relative_to(REPO)}::{cls.name}.{item.name}() "
+                        f"（{tag}）"
+                    )
+                    print(f"  ❌ {f.relative_to(REPO)}::{cls.name}.{item.name}()")
+                    hits += 1
+
+    print(f"  检查了 {classes_checked} 个类的方法集合")
     if not hits:
-        print(f"  ✅ core/ 未出现禁名单中的 {len(FORBIDDEN_OPERATIONS)} 个方法")
+        print(f"  ✅ 未出现禁名单中的 {len(FORBIDDEN_OPERATIONS)} 个方法名")
+        print("     （模块级内部函数不计入 —— 它们不是 C1 能看到的面）")
 
 
 def main() -> int:
