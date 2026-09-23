@@ -153,6 +153,34 @@
 
 ---
 
+## ★ §30 交付物完整性（阻断项）
+
+宪章 §30（L1454–1503）规定 `CAST-FREEZE-v1.0` 这个 commit 应包含 21 类虚拟资产。
+逐项对照见 **`.spec/FREEZE-DELIVERABLES.md`**。
+
+**当前 4 项完全没有，每一项都是阻断项：**
+
+| # | 缺什么 | 宪章条款 | 现状 |
+| --- | --- | --- | --- |
+| 1 | **18 份 Build Instruction** | §17 / §30 | `.spec/build/` 只有 README；18 个空壳铭牌全部悬空 |
+| 2 | **Adversarial Review Results** | §30 / §44.7 | 未产出（已有定点攻击，未成文） |
+| 3 | **Cross-Layer Audit Results** | §30 / §23 | 未做 |
+| 4 | **Prompt Quality Results** | §30 / §22 | 14 维评分未产出 |
+
+**★ 必须纠正的一个误解（我此前搞错）**：
+宪章把 `adversarial review` 放在 **Freeze 之前**，不是之后。
+证据：§30 把它列为"该 commit 应包含"的交付物（L1493）；
+§51 顺序图（L2538–2553）中"被反复攻击和校验"在 `CAST FREEZE` **上方**。
+
+铸造**之后**的保障机制宪章另有规定，共 5 件，且都**不叫**对抗审查：
+§34 渐进实体化（靠替换顺序定位故障）、
+§36 Evidence Pack（含 `Independent Source Audit` —— 这才是对已注入源码的独立审计）、
+§37 Gate Challenge Protocol（实现者反向挑战验收标准）、
+§38 MOLD BREAK（实现不了就向上爆炸，禁止 workaround）、
+§40 Staleness 自动传播。
+
+---
+
 ## 打 tag 前最后确认
 
 ```bash
@@ -161,6 +189,16 @@ python3 tools/verify_shell.py
 
 # 无未决标记
 grep -rn "TODO\|FIXME" harmonica_eval/ || echo "✅ 无未决标记"
+
+# 无悬空 Build Instruction 引用（§30 阻断项 1）
+python3 - <<'PY'
+import pathlib
+nums = ("001","002","003","004","100","101","102","103","104","105",
+        "200","201","202","203","300","301","400","401")
+gone = [f".spec/build/FILE-{n}-v1.md" for n in nums
+        if not pathlib.Path(f".spec/build/FILE-{n}-v1.md").exists()]
+print("❌ 悬空引用:", gone) if gone else print("✅ 18 份 Build Instruction 齐备")
+PY
 
 # 工作区干净
 git status --porcelain
