@@ -183,7 +183,14 @@ tree = ast.parse(src)
 imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
 defs = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
 assigns = [n for n in tree.body if isinstance(n, ast.Assign)]
-assert not imports, imports
+# ★★ 更正（⑳ 执行确认）：原写 `assert not imports` —— 恒假。 ★★
+#   骨架第 31 行有 `from __future__ import annotations`，它是**被冻结要求**的
+#   （§4.0 + INV-300-3 的符号集合里明确含 `__future__`），却被这条断言当成违规。
+#   实测：imports = [<ast.ImportFrom __future__>] → AssertionError。
+#   正确口径：允许 `__future__`，其余 import 一律为 0。
+non_future = [n for n in imports
+              if not (isinstance(n, ast.ImportFrom) and n.module == "__future__")]
+assert not non_future, non_future
 assert not defs, defs
 assert [t.id for a in assigns for t in a.targets if isinstance(t, ast.Name)] == ["__all__"], assigns
 print("③ OK 零 import / 零 def / 仅 __all__ 赋值")
@@ -199,7 +206,7 @@ python3 tools/verify_shell.py
 **验收判据**（可机械判定）：
 
 - [ ] 命令 ①–④ 全部打印 `OK`
-- [ ] `grep -c "^import\|^from" harmonica_eval/host/__init__.py` 输出 `0`
+- [ ] ★ `grep "^import\|^from" harmonica_eval/host/__init__.py | grep -v "__future__" | wc -l` 输出 `0` —— 口径是**非 future import 为 0**，不是全部 import 为 0。原写法 `grep -c "^import\|^from" ... 输出 0` 是恒假：骨架第 31 行有被冻结要求的 `from __future__ import annotations`（见上方命令 ③ 的更正）。
 - [ ] `grep -n "HostApp\|build_default_app\|MAX_PROJECTION_POINTS" harmonica_eval/host/__init__.py` 无输出
 - [ ] `history`/diff 显示本文件在注入期内零改动（sha256 前后相同）
 

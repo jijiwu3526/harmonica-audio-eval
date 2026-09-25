@@ -1,0 +1,16 @@
+=== distinct produced_by values in profile.PORTS ===
+   ['core.align', 'core.features', 'core.surface']
+   count: 3
+
+=== core/__init__ __all__ ===
+   ['ingest', 'align', 'features', 'surface', 'api']
+
+=== FILE-100 §4.5 says: __all__ declares 5 submodules 'because produced_by covers these 5' ===
+   produced_by covers: ['core.align', 'core.features', 'core.surface']
+   __all__ says      : ['ingest', 'align', 'features', 'surface', 'api']
+   set(produced_by) == set(__all__)? -> False
+   difference produced_by - __all__: {'core.features', 'core.align', 'core.surface'}
+   difference __all__ - produced_by: {'api', 'align', 'surface', 'ingest', 'features'}
+
+=== docstring line count (FILE-100 INV: == 31) ===
+   len(doc.splitlines()) = 30

@@ -1,0 +1,62 @@
+snapshot2 taken: 11:35:17
+
+######## F1 metrics.json inputs URI channel ########
+   skeleton sig: (view: 'UiView', out_path: 'Path', reference_uri: 'str', practice_uri: 'str') -> 'None'
+   BI  heading : ### 4.3 `write_metrics_json(view: UiView, out_path: Path, reference_uri: str, practice_uri: str) -> None`
+   -> AGREE: True
+
+######## F2 FILE-100 docstring line count ########
+   live len(doc.splitlines()) = 30
+   FILE-100:132: - **不变量**：`harmonica_eval.core.__doc__` 非空且 `len(harmonica_eval.core.__doc__.splitlines()) == 31`。
+   FILE-100:279: assert len(doc.splitlines()) == 31, len(doc.splitlines())
+   FILE-100:436: | docstring 行数 | `31` | 行 1–31 |
+
+######## F3 FILE-100 declared vs produced ########
+   declared: ['align', 'api', 'features', 'ingest', 'surface']
+   produced: ['align', 'features', 'surface']
+   equal   : False
+
+######## F4 FILE-203 'error=' kwarg ########
+   FILE-203:191: ★★ **本版更正（第三轮盲审 A 的 probe 08）：上表原来一律写 `error=<str>` ——
+   -> 'error=' REJECTED: AlgorithmResultEnvelope.__init__() got an unexpected keyword argument 'error'
+
+######## F5 FILE-201 summarize 5-vs-4 ########
+   FILE-201:241: **恰好 5 个键，一字不得增删**：
+   FILE-201:252: 故本函数返回**前 4 个键**，由 `run()` 补上 `sample_rate` 得到完整 5 键。
+   FILE-201:253: 若实现者选择让本函数直接收 `sample_rate` 并返回 5 键，**也允许**
+   FILE-201:254: （两种都不违反契约），但**必须在文档里写清选了哪种**。
+   skeleton sig: (deviations_cents: 'object') -> 'object'
+
+######## F17 FILE-201 compare_pitch_curves return keys ########
+   FILE-201:163: "n_paired": int,                 # 成功配对的音数
+   FILE-201:164: "n_unpaired": int,               # 未能配对的音数（★ 见下"已知缺口"）
+   FILE-201:165: }
+   PAYLOAD_SCHEMAS['pitch'] = ('per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used', 'sample_rate')
+
+######## F7/F8 FILE-203 note_spans ########
+   FILE-203:77: ### `note_spans(notes, rms_hop_length, sample_rate) -> list[tuple[int, int]]`
+   FILE-203:94: 帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+   FILE-203:96: - **最后一个音**延伸到 `frame(onset_sec_last) + 100`（默认 1 秒），或数据末尾帧，取其二者中较小。
+   notes.hop = 0  rms.hop = 256
+   +100 claim vs new formula: 1s = 172 frames
+
+######## F9/F10/F11/F12/F13 FILE-104 ########
+   FILE-104:87: - `harmonica_eval.profile` 的 **6 个名字**：
+   FILE-104:88: `PORTS`、`PORT_INDEX`、`BUDGET`、`AUDIO`、`ALIGN`、`MATERIALIZE`、`PROFILE_VERSION`。
+   FILE-104:92: `(reference, practice, sample_rate, warp_path) -> NDArray`。
+   FILE-104:121: - 禁止在模块顶层执行任何非声明语句（除 `__all__` 赋值外，不得有函数调用、
+   FILE-104:140: 实现**必须**在模块导入时用一次断言核验（`assert FIELD_LAYOUTS["notes"][0] == "onset_sec"`
+   FILE-104:160: ### 4.1 `port_prefix(port_id: str) -> str`
+   FILE-104:180: ### 4.8 `port_prefix(port_id: str) -> str`
+
+######## F14 FILE-105 stage-3 entry ########
+   FILE-105:53: - `harmonica_eval.core.surface`：且仅 `Surface`
+   FILE-105:195: - 阶段 3 `FEATURES`：调用 `harmonica_eval.core.features` 的入口，实参 = 阶段 2 的产出；产出 = profile 决定的**全部**端口缓冲（每个端口的 `PortDescriptor` 与配套数组），**一次性预生成、非惰性**。
+
+######## F15 FILE-002 stale n_points wording ########
+   FILE-002:370: - `<n>` = 该 `UiSeries` 的点数元信息（整型，`str(n)`）。
+   FILE-002:643: 4. §4 的行为规格**不足以确定唯一实现**（例如：`UiSeries` 不暴露点数元信息，而 §5 已禁止用 `len(values)` 替代）。
+
+######## F16/F19 count mismatches ########
+   FILE-002:411: 四个 `raise NotImplementedError("SHELL: FILE-002 待注入实现")` 占位（`build_parser` / `run_headless` / `render_report_markdown` / `write_metrics_json` / `main`，
+   FILE-105:51: - 本包内（穷举，恰 6 条 import 的来源）：

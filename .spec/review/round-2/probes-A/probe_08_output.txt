@@ -1,0 +1,24 @@
+=== AlgorithmResultEnvelope FIELDS (contract, authoritative) ===
+   ['algorithm_id', 'algorithm_version', 'status', 'required_ports', 'consumed_ports', 'payload', 'error_code', 'error_detail', 'elapsed_sec']
+  has 'error'?      -> False
+  has 'error_code'? -> True
+
+=== FILE-203 §5 failure table uses 'error=' kwarg ===
+  139: - **失败**：端口缺失/类型异常 → **不抛出**，返回 `AlgorithmResultEnvelope(status='FAILED', error=<str>)`。
+  148: | `rms.reference` 或 `rms.practice` 缺失 | 静默降级为不参与统计 | `AlgorithmResultEnvelope(status='FAILED', error='MISSING_RMS_PORT')` |
+  149: | `notes.reference` 或 `notes.practice` 缺失 | 无法按音配对 | `AlgorithmResultEnvelope(status='FAILED', error='MISSING_NOTES_PORT')` |
+  153: | 任何未预期异常 | 不向上抛出 | `AlgorithmResultEnvelope(status='FAILED', error=<repr 限长 128 字>)` |
+  155: ★ 宪章 §5.6：禁止静默降级为 OK。所有缺端口/类型异常必须走 `status='FAILED'`。
+
+=== instantiate envelope the way FILE-203 §5 writes it ===
+  TypeError -> AlgorithmResultEnvelope.__init__() got an unexpected keyword argument 'error'
+
+=== FILE-203 notes representation: list[dict] vs (n_note,3) ndarray ===
+  77: ### `note_spans(notes: list[dict]) -> list[tuple[int, int]]`
+  78: - **输入**：`notes.reference` 或 `notes.practice`，list，每项 dict 含 `onset_sec`（float）。
+  126: | `notes.reference` | `surface.read("notes.reference")` | `(n_note, 3)`，第 0 列 `onset_sec` |
+  130: 列号**必须**用 `descriptor.field_names.index("onset_sec")` 查，**不得**硬编码 0。
+
+=== skeleton dynamics.note_spans docstring ===
+   从 `notes.*` 端口算出每个音覆盖的帧区间。
+  (skeleton param annotation:) (notes: 'object') -> 'object'

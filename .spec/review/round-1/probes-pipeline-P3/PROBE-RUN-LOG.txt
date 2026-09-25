@@ -1,0 +1,252 @@
+################ probe1_producer_coverage.py ################
+========================================================================
+P3 probe 1 · 端口生产者覆盖
+========================================================================
+
+[1] produced_by → 端口
+    core.align       (1): ['warp_path']
+    core.features    (8): ['pitch.reference', 'pitch.practice', 'rms.reference', 'rms.practice', 'chroma.lowres.reference', 'chroma.lowres.practice', 'notes.reference', 'notes.practice']
+    core.surface     (3): ['pcm.mapped.reference', 'pcm.mapped.practice', 'pcm.warped.practice']
+
+[2] produced_by 模块可导入性 / 生产者可调用性
+    core.align       -> harmonica_eval.core.align 可导入；本模块定义的可调用: ['compute_alignment_features', 'compute_warp_path', 'assert_monotonic', 'measure_coverage', 'align']
+    core.features    -> harmonica_eval.core.features 可导入；本模块定义的可调用: ['materialize_pitch', 'materialize_rms', 'materialize_chroma', 'materialize_notes']
+    core.surface     -> harmonica_eval.core.surface 可导入；本模块定义的可调用: ['build_descriptor', 'seal', 'generate_all_ports', 'assert_budget', 'Surface', 'build_surface']
+
+[3] pcm.* 的生产者是不是 core.surface 自己？
+    core/surface.py 顶层函数: ['build_descriptor', 'seal', 'generate_all_ports', 'assert_budget', 'build_surface']
+    profile 声明 pcm.* 的 produced_by = ['core.surface']
+    -> 生产者模块 = core.surface（即 surface.py 自身）
+    surface.py 中名字含 pcm/warp/map 的函数: []
+
+[4] 全仓（harmonica_eval/）搜索 pcm 生产者候选
+     harmonica_eval/core/ingest.py:def resample_to_profile(samples: npt.NDArray, native_sr: int) -> npt.NDArray:
+     harmonica_eval/core/align.py:def compute_warp_path(
+     harmonica_eval/core/align.py:def assert_monotonic(warp_path: npt.NDArray) -> None:
+     harmonica_eval/core/align.py:def measure_coverage(warp_path: npt.NDArray, n_ref_frames: int) -> float:
+
+[结论]
+    produced_by 取值 3 个；其中 core.surface 被声明为 pcm.* 的生产者，
+    但 FILE-104 明令 surface.py 不得实现 PCM 生产、且不得硬编码端口名；
+    其余模块（features/align）均不导出 pcm.* 生产者。
+[rc=0]
+
+################ probe2_entry_reachability.py ################
+========================================================================
+P3 probe 2 · 进程入口可达性（FILE-002 → C1）
+========================================================================
+
+[1] __main__.py 实际 import： ['.contract', '__future__', 'argparse', 'pathlib', 'typing']
+    FILE-002 §3 允许清单： ['.contract', '__future__', 'argparse', 'json', 'pathlib', 'sys', 'typing']
+    越界： 无
+
+[2] contract.py 公开符号总数： 39
+    其中像「会话驱动面」的名字： ['CORE_REQUIRED_PORTS', 'CoreBuildError', 'HostContract', 'Mapping', 'SessionState']
+    contract 中的 Protocol（纯声明，无实现）： ['AlgorithmDataContract', 'HostContract', 'Protocol', 'UiProjectionPort']
+
+[3] run_headless 规格要求的两步（FILE-002 §4.2）：
+    1. 把 reference/practice 交给 C1 会话（登记）
+    2. 构建数据面（预生成 + Seal）→ 等 DATA_READY
+    这两步需要一个可调用的 C1 门面（HostApp / build_default_app）。
+    C1 门面位于 harmonica_eval/host/app.py —— 但 FILE-002 §3 禁止 import host。
+    contract.py 不导出任何 C1 门面或会话驱动符号（只有 Protocol 与 dataclass）。
+
+[4] 全仓搜索 build_default_app / HostApp 的调用点（非 .spec 文档）
+     harmonica_eval/host/app.py:43: HostApp —— 同时实现 HostContract 的消费方与 UiProjectionPort
+     harmonica_eval/host/app.py:70: class HostApp(UiProjectionPort):
+     harmonica_eval/host/app.py:106: session_id，因为 C2 是多会话的；`HostApp`（C1 的门面）不需要，
+     harmonica_eval/host/app.py:109: ★ 若将来 C1 要支持多会话，`HostApp` 的方法**必须**加 session_id ——
+     harmonica_eval/host/app.py:243: def build_default_app() -> HostApp:
+    非 host/app.py 的引用点： 无（没有任何调用方）
+
+[结论]
+    入口 → C1 的边在「FILE-002 只准 import .contract」与
+    「C1 门面住在 host/app.py」之间断开：contract 无驱动面，
+    host 被禁止 import，build_default_app 无人调用。
+[rc=0]
+
+################ probe3_producer_convention.py ################
+========================================================================
+P3 probe 3 · 生产者调用约定 vs 实际生产者签名
+========================================================================
+
+[1] profile 声明的 produced_by 是模块路径，不是可调用名：
+    warp_path                  produced_by='core.align'
+    pcm.mapped.reference       produced_by='core.surface'
+    pcm.mapped.practice        produced_by='core.surface'
+    pcm.warped.practice        produced_by='core.surface'
+    pitch.reference            produced_by='core.features'
+    pitch.practice             produced_by='core.features'
+    rms.reference              produced_by='core.features'
+    rms.practice               produced_by='core.features'
+    chroma.lowres.reference    produced_by='core.features'
+    chroma.lowres.practice     produced_by='core.features'
+    notes.reference            produced_by='core.features'
+    notes.practice             produced_by='core.features'
+
+[2] 各生产者模块里，能生成端口数据的候选函数签名：
+    FILE-104 §4.4 step 4 冻结的调用约定: (reference, practice, sample_rate, warp_path) -> NDArray
+    features .materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+    features .materialize_rms(samples: 'npt.NDArray') -> 'npt.NDArray'
+    features .materialize_chroma(samples: 'npt.NDArray') -> 'npt.NDArray'
+    features .materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+    align    .align(reference: 'npt.NDArray', practice: 'npt.NDArray') -> 'npt.NDArray'
+    align    .compute_alignment_features(samples: 'npt.NDArray') -> 'npt.NDArray'
+    align    .compute_warp_path(ref_features: 'npt.NDArray', prac_features: 'npt.NDArray') -> 'npt.NDArray'
+    surface  .generate_all_ports(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Mapping[str, npt.NDArray]'
+    surface  .build_surface(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Surface'
+
+[3] 8 个 produced_by='core.features' 的端口 → 4 个函数，且没有任何映射表
+    端口数 8: ['pitch.reference', 'pitch.practice', 'rms.reference', 'rms.practice', 'chroma.lowres.reference', 'chroma.lowres.practice', 'notes.reference', 'notes.practice']
+    core/features.py 顶层可调用: ['materialize_pitch', 'materialize_rms', 'materialize_chroma', 'materialize_notes']
+    profile.PortSpec 字段: ['port_id', 'units', 'dimensions', 'element_type', 'timeline_basis', 'produced_by', 'rationale', 'field_names', 'hop_length']
+    -> PortSpec 没有任何字段把 port_id 映射到具体函数；
+       produced_by 只到模块粒度（'core.features' 覆盖 8 个端口）。
+
+[4] 逐端口检查：4 参数调用约定是否可能满足
+    - materialize_notes(pitch, rms, sample_rate)：需要 pitch/rms 两个**中间特征**，而 4 参约定只给 (reference, practice, sample_rate, warp_path)，无 pitch/rms → notes.* 无法按该约定生成
+    - materialize_pitch(samples, sample_rate) / materialize_rms(samples)：只接受**一路** samples，而 4 参约定同时给 reference 与 practice，无法区分该产出 pitch.reference 还是 pitch.practice
+    - align.align(reference, practice)：只接受 2 参，与 4 参约定不符
+    - pcm.mapped.* / pcm.warped.practice 的 produced_by='core.surface'：指向 surface.py 自身，而 FILE-104 §7 明令该文件不实现 PCM 生成/重采样
+
+[5] FILE-104 的禁止条款（INV-104-1 / §7）
+    含 '不得**硬编码端口名': True
+    含 '不实现任何特征提取': True
+    含 '不做 `WARPED` 轴的 PCM 重采样': True
+    含 '不做音频解码、重采样、下混': False
+
+[结论]
+    生产者解析到「模块」为止，没有任何 port_id → 可调用对象的映射表；
+    8 个 features 端口共用 4 个签名不同的函数，且 notes.* 需要的中间特征
+    不在冻结调用约定里；pcm.* 的生产者模块被明令禁止生产 PCM。
+[rc=0]
+
+################ probe4_cross_file_mismatch.py ################
+========================================================================
+P3 probe 4 · 跨文件契约 vs 实现
+========================================================================
+
+[A] FILE-105 build_surface 的阶段入口约定 vs 实际签名
+  FILE-105 §4.5 step 1 (INGEST): 实参 (reference_uri, practice_uri, profile_version)
+      -> 产出『两路 mono/float32 PCM 与其 AudioFormat』
+  实际 ingest.ingest: ingest(uri: 'str') -> 'npt.NDArray'
+      -> docstring: 只返回样本，不返回采样率（FILE-101 §4.5）
+  FILE-105 §4.5 step 2 (ALIGN): 产出『REFERENCE/WARPED 两份对齐 PCM + warp 路径点』
+  实际 align.align: align(reference: 'npt.NDArray', practice: 'npt.NDArray') -> 'npt.NDArray'
+      -> 只返回 warp_path（FILE-102 §align）
+  FILE-105 §4.5 step 3 (FEATURES): 产出『全部端口缓冲（每端口的 PortDescriptor 与配套数组）』
+  实际 features 顶层函数: ['materialize_pitch', 'materialize_rms', 'materialize_chroma', 'materialize_notes']
+      -> 只返回裸 ndarray，不返回 PortDescriptor；且只覆盖 8 个 features 端口
+
+[B] FILE-105 §4.5 step 6 用 `except HarmonicaError`
+  文本含 'except HarmonicaError': True
+  FILE-105 §3 允许从 contract import 的名字: ['HostContract', 'SessionState', 'ContractViolation', 'CoreBuildError', 'ErrorCode']
+  其中是否含 HarmonicaError: False
+  contract.HarmonicaError 实际存在: True
+  ContractViolation 是 HarmonicaError 子类: True
+
+[C] FILE-104 INV-104-12 引用 PortSpec.sample_rate
+  PortSpec 字段: ['port_id', 'units', 'dimensions', 'element_type', 'timeline_basis', 'produced_by', 'rationale', 'field_names', 'hop_length']
+  'sample_rate' in PortSpec 字段: False
+  PortDescriptor 字段: ['port_id', 'schema_version', 'element_type', 'dimensions', 'shape', 'units', 'field_names', 'timeline_basis', 'hop_length', 'sample_rate', 'content_hash']
+  FILE-104 含 'PORT_INDEX[p].sample_rate': True
+
+[D] FILE-002 要求 UiSeries.n_points
+  contract.UiSeries 字段: ['key', 'label', 't', 'values', 'unit', 'timeline_basis', 'source_port']
+  'n_points' in UiSeries: False
+  FILE-002 含 n_points: True
+  FILE-002 §5: 投影缺 n_points → 停止上报；且禁止用 len(values) 替代: True
+  FILE-003 §4.13 是否定义 n_points: False
+
+[E] warp_path hop_length vs FILE-104 read() 时间窗换算
+  profile warp_path.hop_length = 0
+  profile warp_path.dimensions = ('warp_point', 'axis')
+  FILE-104 §4.6.2 warp_path 上界公式 '(n - 1) * hop / sr': True
+  -> hop=0 ⇒ 上界恒为 0.0；任何 t1>0 的 warp_path 读取都抛 ContractViolation
+
+[结论] A–E 均为跨文件对不上；详见报告 FINDING。
+[rc=0]
+
+################ probe5_contract_vs_impl.py ################
+========================================================================
+P3 probe 5 · 跨文件字段/签名/枚举/能力对不上（第二批）
+========================================================================
+
+[F · FILE-002 inputs vs write_metrics_json 签名]
+    123: ### 4.2 `run_headless(reference_uri: str, practice_uri: str, out_path: Path) -> UiView`
+    125: - **输入**：`reference_uri` 参考演奏路径（原样字符串，不做 URI 解析、不做 glob、不做相对路径归一化）；`practice_uri` 练习演奏路径（同上）；`out_path` `metrics.json` 的落点。
+    128: 1. 登记两段输入：把 `reference_uri`、`practice_uri` 交给 C1 会话（登记顺序：先参考、后练习）。
+    144: 2. 构造顶层对象，键序**固定**为：`schema_version` → `inputs` → `state` → [`error_code`] → [`error_detail`] → `scalars` → `series`。方括号内两键**仅在投影对应字段非 `None` 且非空串时出现**；不补 `null
+    145: 3. `inputs` 固定为 `{"reference": <reference_uri 原样>, "practice": <practice_uri 原样>}`，键序固定。
+    170: - 参考：<reference_uri>
+    171: - 练习：<practice_uri>
+    208: ### 4.6 `describe_inputs(reference_uri: str, practice_uri: str) -> str`
+    212: `输入：参考=<reference_uri>；练习=<practice_uri>`
+    215: - **不变量**：输出中两个路径与原输入逐字符相同（`out == f"输入：参考={reference_uri}；练习={practice_uri}"`）。
+    353: assert top[:3] == ["schema_version", "inputs", "state"], top
+    355: assert set(top) <= {"schema_version","inputs","state","error_code","error_detail","scalars","series"}, top
+    357: assert list(d["inputs"].keys()) == ["reference", "practice"]
+    contract.UiView 字段: ['session_id', 'state', 'series', 'scalars', 'progress', 'error_code', 'error_detail', 'note']
+    -> UiView 不含 reference/practice；签名也不收 → inputs 无法按 §4.3 step3 写出
+
+[G · FILE-201 status 字面量]
+    297: status             = "SUCCEEDED" | "FAILED"
+    357: | `run()` 两侧音全配不上 | **成功信封** | `status="SUCCEEDED"`，`n_notes_used=0` |
+    contract 冻结取值域: None
+
+[H · FILE-203 surface.<port> 属性访问 / envelope(error=...)]
+    118: - `surface.rms.reference`（`list[float]`）
+    120: - `surface.notes.reference`（`list[dict]`，含 `onset_sec`）
+    130: - **失败**：端口缺失/类型异常 → **不抛出**，返回 `AlgorithmResultEnvelope(status='FAILED', error=<str>)`。
+    139: | `rms.reference` 或 `rms.practice` 缺失 | 静默降级为不参与统计 | `AlgorithmResultEnvelope(status='FAILED', error='MISSING_RMS_PORT')` |
+    140: | `notes.reference` 或 `notes.practice` 缺失 | 无法按音配对 | `AlgorithmResultEnvelope(status='FAILED', error='MISSING_NOTES_PORT')` |
+    144: | 任何未预期异常 | 不向上抛出 | `AlgorithmResultEnvelope(status='FAILED', error=<repr 限长 128 字>)` |
+    contract.AlgorithmDataContract 公开成员: ['manifest', 'read']
+    contract.AlgorithmResultEnvelope 字段: ['algorithm_id', 'algorithm_version', 'status', 'required_ports', 'consumed_ports', 'payload', 'error_code', 'error_detail', 'elapsed_sec']
+
+[I · FILE-203 期望 notes.* 是 list[dict]]
+    77: ### `note_spans(notes: list[dict]) -> list[tuple[int, int]]`
+    78: - **输入**：`notes.reference` 或 `notes.practice`，list，每项 dict 含 `onset_sec`（float）。
+    120: - `surface.notes.reference`（`list[dict]`，含 `onset_sec`）
+    121: - `surface.notes.practice`（`list[dict]`，含 `onset_sec`）
+    contract.FIELD_LAYOUTS['notes'] = ('onset_sec', 'f0_hz', 'rms')
+    contract.PortDescriptor.dimensions 示例（notes）见 profile.PORT_INDEX
+
+[J · FILE-203 summarize 输出键 vs PAYLOAD_SCHEMAS]
+    112: - **输出 dict key**：`median_db, spread_db, n_notes_used, n_unpaired`
+    PAYLOAD_SCHEMAS['dynamics'] = ('per_note_delta_db', 'median_db', 'spread_db', 'n_notes_used', 'n_unpaired')
+    FILE-203 全段静音分支 payload 键: ['payload={...}', "payload={'median_db':0.0,'spread_db':0.0,'n_notes_used':0,'n_unpaired':<count>}"]
+
+[K · FILE-202 except HarmonicaError vs §3 允许清单]
+    44: `TimelineBasis`, `AlgorithmError`）
+    173: except HarmonicaError as e  → FAILED, error_code = e.code.value
+
+[L · FILE-301 build_view 的 series 规则]
+    5: > UiSeries / UiCommand / UiCommandKind / COMMAND_LEGALITY / COMMAND_EFFECTS /
+    195: 2. 每条 `UiSeries` **必须**声明 `timeline_basis`
+    197: 3. **禁止**把不同 `timeline_basis` 的曲线放进同一个视图
+    253: | INV-301-6 | 投影内所有曲线的 `timeline_basis` 一致 | 断言 |
+    265: - **不读端口缓冲区内容**（`surface.read()` 不归 C1 调）
+    PAYLOAD_SCHEMAS 全键（有无时间坐标）:
+        pitch: ('per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used', 'sample_rate')
+        timing: ('per_note_onset_ms', 'median_onset_ms', 'spread_ms', 'early_ratio', 'late_ratio', 'on_time_ratio', 'n_notes_used', 'n_unpaired')
+        dynamics: ('per_note_delta_db', 'median_db', 'spread_db', 'n_notes_used', 'n_unpaired')
+    -> 无 onset_sec / 绝对时刻；UiSeries 需要 t: Sequence[float]
+
+[M · 缺失模块（FILE-102 §3 允许清单 / §8 验证脚本）]
+    4: > 生成依据：`harmonica_eval/profile.py`（常量 `WARP_PATH_MIN_COVERAGE`、`MONOTONICITY_TOLERANCE`）；`harmonica_eval/contract.py`（`FIELD_LAYOUTS`）；`harmonica_eval
+    20: **你的权限**：只实现本文件 `align.py` 内的 4 个公开符号。不得修改 `profile.py`、`contract.py`、`exceptions.py` 或任何上游文件。不得增减输入输出端口。不得引入除 §3 列出的依赖以外的任何包。
+    42: - `harmonica_eval.exceptions`（`CoreBuildError`、`ALIGNMENT_UNRECOVERABLE`、`ContractViolation`）
+    170: from harmonica_eval.exceptions import CoreBuildError, ContractViolation
+    264: | `ALIGNMENT_UNRECOVERABLE` | — | `exceptions.py` |
+    265: | `ContractViolation` | — | `exceptions.py` |
+    harmonica_eval/exceptions.py 存在: False
+    harmonica_eval/pipeline.py 存在: False
+    harmonica_eval/evaluator.py 存在: False
+    harmonica_eval/score.py 存在: False
+
+[N · assert_registry_integrity 模块级调用]
+    模块末尾出现独立调用 'assert_registry_integrity()': False
+    FILE-200:193: 模块末尾必须恰有**一次**模块级语句 `assert_registry_integrity()`，位置在所有定义之后（`PAYLOAD_SCHEMAS` 赋值之后）。配置错误由此在 import 时立刻暴露。
+[rc=0]
+

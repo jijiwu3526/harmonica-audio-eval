@@ -1,0 +1,20 @@
+=== FILE-002 line 305 claims: '这是 C4 侧也做的校验，见 FILE-401 §4.x' ===
+  305: - 断言 `len(s.t) == len(s.values)`（这是 C4 侧也做的校验，见 FILE-401 §4.x），
+
+=== search FILE-401 for len(t)/len(values) validation of UiSeries ===
+  237: - `t: Sequence[float]` —— 时间轴，单位**秒**，长度与 `values` 相同
+  256: 6. **数据长度校验**：`assert len(series.t) == len(series.values)`，不满足 → `AssertionError`。令 `n = len(series.t)`。
+  263: 10. **折线输出**：把连续有限点切成若干段，每段长度 ≥ 2 时输出一个 `<polyline fill="none" stroke="#333" stroke-width="1" points="x,y x,y …"/>`（坐标按 `f"{v:.3f}"` 格式化，点之间一个空格），同一段内
+  305: - **输出**：`str`。空输入 → **零长度字符串** `""`（无占位文案、无换行）。非空 → 每个标量一行，用 `"\n"` 连接，**行尾不带换行**。
+  369: - **输出**：`list`（**不是** tuple），长度恰等于 `len(view.series)`，与 `view.series` **同序**，第 `i` 个元素恒等于 `render_series_plot(view.series[i])` 的返回值。`view.series` 为空 
+  373: - 单条曲线 → 长度 1 的 `list`。
+  374: - `render_series_plot` 抛 `AssertionError`（如 `len(t) != len(values)`）→ **原样向上传播**，不捕获、不跳过该条、不返回部分结果。
+  489: | `render_series_plot` 收到 `len(series.t) != len(series.values)` | 显式失败，**不**截断到较短者 | 抛 `AssertionError`；向上传播到 `build_plots` → `_render_page` → 归约为启动失败
+  578: assert len(set(app.COMMAND_LABELS.values())) == 6
+  664: pass                                                # t / values 长度不符：不截断，抛错
+  671: assert len(got) == 2 and got[0] == sa and got[1] == sb
+  787: # 期望 stdout 以：CORE SURVIVES WITHOUT C4 3 开头（3 = expected 列表长度）；若本仓尚无 core/api.py 等模块，
+  853: - [ ] **禁止静默降级的证据**：命令 (2) 中断言 `app.render_series_plot` 遇到未知 `timeline_basis` 时返回含 `UNKNOWN（` 的文本而**不抛异常也不按 REFERENCE 处理**；断言 `app.render_series_plot`
+
+=== search FILE-401 for 'n_points' ===
+  (none above => FILE-002's cross-reference to FILE-401 §4.x is unverifiable)

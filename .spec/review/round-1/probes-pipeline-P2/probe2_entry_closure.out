@@ -1,0 +1,43 @@
+========================================================================
+[A] contract.py 的 __all__（FILE-002 §3 声称它导出'会话驱动符号'）
+    ['SessionState', 'TimelineBasis', 'AlignmentRepresentation', 'AudioFormat', 'PortDescriptor', 'BufferView', 'SurfaceManifest', 'AlgorithmResultEnvelope', 'FIELD_LAYOUTS', 'AlgorithmDataContract', 'CORE_REQUIRED_PORTS', 'HostContract', 'FORBIDDEN_OPERATIONS', 'ErrorCode', 'HarmonicaError', 'ContractViolation', 'CoreBuildError', 'AlgorithmError', 'UiScalar', 'UiSeries', 'UiView', 'UiCommand', 'UiCommandKind', 'UiProjectionPort', 'COMMAND_LEGALITY', 'COMMAND_EFFECTS', 'UI_PAYLOAD_KEYS', 'CONTENT_HASH_MAGIC', 'UNITS_VOCABULARY']
+    含 driver/app/core/factory 的名字: ['CORE_REQUIRED_PORTS', 'CoreBuildError']
+
+[B] contract 里可实例化的具体类（非 Protocol / 非 Enum / 非 dataclass 值类型）
+    SessionState                 Enum
+    TimelineBasis                Enum
+    AlignmentRepresentation      Enum
+    AudioFormat                  class
+    PortDescriptor               class
+    BufferView                   class
+    SurfaceManifest              class
+    AlgorithmResultEnvelope      class
+    AlgorithmDataContract        Protocol
+    HostContract                 Protocol
+    ErrorCode                    Enum
+    HarmonicaError               class
+    ContractViolation            class
+    CoreBuildError               class
+    AlgorithmError               class
+    UiScalar                     class
+    UiSeries                     class
+    UiView                       class
+    UiCommand                    class
+    UiCommandKind                Enum
+    UiProjectionPort             Protocol
+    -> HostContract / UiProjectionPort 都是 Protocol（不可实例化）
+    -> 无任何 '会话驱动' 具体实现或工厂
+
+[C] __main__.py 的真实 import 集合
+    ['.contract', '__future__', 'argparse', 'pathlib', 'typing']
+    -> 只到 .contract；够不到 host.app（FILE-301 的 build_default_app）
+
+[D] 宿主 C1 的可构造入口
+    host.app.build_default_app: () -> 'HostApp'
+    host.app.HostApp.__init__ : (self, core: 'object') -> 'None'
+    -> 唯一工厂在 host.app，而 FILE-002 §3 禁止 __main__ import 它
+
+[E] FILE-002 与 FILE-301 的口径冲突（原文摘录）
+    [FILE-002 §3 允许清单] | 本包内 | `.contract`（`UiView` / `UiScalar` / `UiSeries`） | 投影契约（**只读数据结构**） |
+    [FILE-002 §3 禁止清单] 并把「本包内除 `.contract` 之外的任何模块」列入**禁止**。
+    [FILE-301 §4.2 build_default_app] - 本函数是 `__main__.py` 与 `cockpit` 的共同入口。

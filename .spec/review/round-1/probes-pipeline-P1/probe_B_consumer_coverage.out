@@ -1,0 +1,24 @@
+== 每个算法的 required_ports 是否都在权威清单里 ==
+  pitch     required=('pitch.reference', 'pitch.practice', 'notes.reference', 'notes.practice')
+            missing_from_profile=[]
+  timing    required=('pcm.mapped.reference', 'pcm.mapped.practice', 'notes.reference', 'notes.practice')
+            missing_from_profile=[]
+  dynamics  required=('rms.reference', 'rms.practice', 'notes.reference', 'notes.practice')
+            missing_from_profile=[]
+
+== 端口 -> 消费者 / 生产者 ==
+  warp_path                  produced_by=core.align     consumers=NONE
+  pcm.mapped.reference       produced_by=core.surface   consumers=['timing']
+  pcm.mapped.practice        produced_by=core.surface   consumers=['timing']
+  pcm.warped.practice        produced_by=core.surface   consumers=NONE
+  pitch.reference            produced_by=core.features  consumers=['pitch']
+  pitch.practice             produced_by=core.features  consumers=['pitch']
+  rms.reference              produced_by=core.features  consumers=['dynamics']
+  rms.practice               produced_by=core.features  consumers=['dynamics']
+  chroma.lowres.reference    produced_by=core.features  consumers=NONE
+  chroma.lowres.practice     produced_by=core.features  consumers=NONE
+  notes.reference            produced_by=core.features  consumers=['pitch', 'timing', 'dynamics']
+  notes.practice             produced_by=core.features  consumers=['pitch', 'timing', 'dynamics']
+
+== 无算法消费者的端口 ==
+   ['chroma.lowres.practice', 'chroma.lowres.reference', 'pcm.warped.practice', 'warp_path']

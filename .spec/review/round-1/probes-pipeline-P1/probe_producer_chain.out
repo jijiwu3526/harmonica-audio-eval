@@ -1,0 +1,42 @@
+[PASS] P1-01 produced_by 取值集合
+        实际 = ['core.align', 'core.features', 'core.surface']
+[PASS] P1-02 produced_by 指名的 4 参数生成者
+        找到 ['core.surface.generate_all_ports', 'core.surface.build_surface']；但 profile 声明 12 个端口需要 3 个生产者模块
+[PASS] P1-03 pcm.warped.practice 的生产者函数存在性
+        port 声明 produced_by='core.surface'；core.surface 公开符号 = ['annotations', 'Mapping', 'npt', 'AlgorithmDataContract', 'AudioFormat', 'BufferView', 'PortDescriptor', 'SurfaceManifest', 'build_descriptor', 'seal', 'generate_all_ports', 'assert_budget', 'Surface', 'build_surface']；疑似生产函数 = ['Mapping']
+[FAIL] P1-04 PortSpec.sample_rate 属性存在性
+        PortSpec 字段 = ['port_id', 'units', 'dimensions', 'element_type', 'timeline_basis', 'produced_by', 'rationale', 'field_names', 'hop_length']；FILE-104 INV-104-12 断言 profile.PORT_INDEX[p].sample_rate
+[FAIL] P1-05 `port in PORTS`（FILE-200 C2 冻结口径）
+        12 个 port_id 全部 `in PORTS` = False；PORTS 类型=tuple，元素类型=PortSpec
+[FAIL] P1-06 ingest 签名 vs FILE-105 三实参调用
+        实际签名 ingest(uri: 'str') -> 'npt.NDArray'（1 个参数）；FILE-105:149 以 (reference_uri, practice_uri, profile_version) 三个实参调用
+[FAIL] P1-07 align() 的调用者
+        除 align.py 自身外的调用点 = 无；FILE-105:150 只说「调用 align 的入口」，未冻结其签名
+[FAIL] P1-08 无算法消费者的端口
+        未被任何算法 required_ports 声明的端口 = ['warp_path', 'pcm.warped.practice', 'chroma.lowres.reference', 'chroma.lowres.practice']
+[FAIL] P1-09 FILE-201 的 status 取值 vs 契约冻结三元
+        契约取值域=['FAILED', 'INCOMPATIBLE', 'OK']（contract.py:380）；FILE-201-v1.md 出现 'SUCCEEDED' = True
+[FAIL] P1-10 FILE-203 使用的 envelope.error= 字段
+        契约字段 = ['algorithm_id', 'algorithm_version', 'status', 'required_ports', 'consumed_ports', 'payload', 'error_code', 'error_detail', 'elapsed_sec']；FILE-203-v1.md:130/139 构造 AlgorithmResultEnvelope(status='FAILED', error=...)
+[FAIL] P1-11 FILE-203 `surface.rms.reference` 属性式访问
+        契约只有 ['manifest', 'read'] 两个操作；FILE-203-v1.md:118-121 用 surface.rms.reference / surface.notes.practice 属性式访问
+[FAIL] P1-12 FILE-102 引用的 harmonica_eval.exceptions
+        /Users/Apple/Desktop/dsh-archive/harmonica-eval/harmonica_eval/exceptions.py 存在 = False；FILE-102 第 42/170 行 import 它
+[FAIL] P1-13 FILE-002 依赖的 contract『会话驱动符号』
+        contract 中的疑似会话驱动符号 = 无；FILE-002 §3 允许 import『.contract 及该模块导出的会话驱动符号』
+[FAIL] P1-14 SPEC §3 指标的生产者
+        {'tempo_ratio': [], 'mean_abs_warp_sec': [], 'pitch_cents_mae': []}
+
+========================================================================
+合计 14 条：PASS 3 · FAIL 11
+  FAIL: P1-04 PortSpec.sample_rate 属性存在性
+  FAIL: P1-05 `port in PORTS`（FILE-200 C2 冻结口径）
+  FAIL: P1-06 ingest 签名 vs FILE-105 三实参调用
+  FAIL: P1-07 align() 的调用者
+  FAIL: P1-08 无算法消费者的端口
+  FAIL: P1-09 FILE-201 的 status 取值 vs 契约冻结三元
+  FAIL: P1-10 FILE-203 使用的 envelope.error= 字段
+  FAIL: P1-11 FILE-203 `surface.rms.reference` 属性式访问
+  FAIL: P1-12 FILE-102 引用的 harmonica_eval.exceptions
+  FAIL: P1-13 FILE-002 依赖的 contract『会话驱动符号』
+  FAIL: P1-14 SPEC §3 指标的生产者

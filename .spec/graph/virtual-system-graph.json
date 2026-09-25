@@ -1,0 +1,1154 @@
+{
+  "schema": "virtual-system-graph/v1",
+  "generated_by": "tools/build_virtual_graph.py",
+  "note": "★ 本文件由脚本生成，不要手改 —— 手改会在下次生成时丢失。能从代码推导的都推导；只有代码里不存在的才写在 overlay.json。",
+  "decomposition": {
+    "system": "harmonica-eval",
+    "components": [
+      {
+        "component_id": "COMP-C1",
+        "is_component": true,
+        "file_count": 2,
+        "files": [
+          {
+            "file_id": "FILE-300",
+            "path": "harmonica_eval/host/__init__.py",
+            "role": "C1 的包出口：声明 Framework / Host 的公开面。",
+            "build_instruction": ".spec/build/FILE-300-v1.md",
+            "public_symbols": []
+          },
+          {
+            "file_id": "FILE-301",
+            "path": "harmonica_eval/host/app.py",
+            "role": "应用生命周期 + 组件装配 + 算法编排 + 失败归一化 + 投影生成。",
+            "build_instruction": ".spec/build/FILE-301-v1.md",
+            "public_symbols": [
+              "HostApp",
+              "MAX_PROJECTION_POINTS",
+              "build_default_app"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "COMP-C2",
+        "is_component": true,
+        "file_count": 6,
+        "files": [
+          {
+            "file_id": "FILE-100",
+            "path": "harmonica_eval/core/__init__.py",
+            "role": "C2 的包出口：声明 Audio Core 的公开面。",
+            "build_instruction": ".spec/build/FILE-100-v1.md",
+            "public_symbols": []
+          },
+          {
+            "file_id": "FILE-102",
+            "path": "harmonica_eval/core/align.py",
+            "role": "建立两段演奏之间的时间映射（warp path）—— 全系统唯一的时间对齐发生地。",
+            "build_instruction": ".spec/build/FILE-102-v1.md",
+            "public_symbols": [
+              "MONOTONICITY_TOLERANCE",
+              "WARP_PATH_MIN_COVERAGE",
+              "align",
+              "assert_monotonic",
+              "compute_alignment_features",
+              "compute_warp_path",
+              "measure_coverage"
+            ]
+          },
+          {
+            "file_id": "FILE-105",
+            "path": "harmonica_eval/core/api.py",
+            "role": "实现 CONTRACT-HOST-v1 的 **7 个操作**，持有会话状态机与资源生命周期。",
+            "build_instruction": ".spec/build/FILE-105-v1.md",
+            "public_symbols": [
+              "HostCore",
+              "INTERNAL_STAGES"
+            ]
+          },
+          {
+            "file_id": "FILE-103",
+            "path": "harmonica_eval/core/features.py",
+            "role": "预生成算法所需的全部逐帧/逐音特征：音高曲线、能量包络、低分辨率 chroma、",
+            "build_instruction": ".spec/build/FILE-103-v1.md",
+            "public_symbols": [
+              "MIN_STABLE_NOTE_SEC",
+              "VOICED_CONFIDENCE_FLOOR",
+              "materialize_chroma",
+              "materialize_notes",
+              "materialize_pitch",
+              "materialize_rms"
+            ]
+          },
+          {
+            "file_id": "FILE-101",
+            "path": "harmonica_eval/core/ingest.py",
+            "role": "把任意可解码音频文件变成全系统统一的 PCM 表示。",
+            "build_instruction": ".spec/build/FILE-101-v1.md",
+            "public_symbols": [
+              "SILENCE_RMS_THRESHOLD",
+              "assert_not_silent",
+              "decode_to_mono",
+              "ingest",
+              "resample_to_profile",
+              "validate_duration"
+            ]
+          },
+          {
+            "file_id": "FILE-104",
+            "path": "harmonica_eval/core/surface.py",
+            "role": "把各模块产出的数据装配成一个**自描述、只读、已 Seal** 的数据面，",
+            "build_instruction": ".spec/build/FILE-104-v1.md",
+            "public_symbols": [
+              "CONTENT_HASH_MAGIC",
+              "Key4",
+              "PRODUCER_DISPATCH",
+              "Surface",
+              "assert_budget",
+              "build_descriptor",
+              "build_surface",
+              "generate_all_ports",
+              "port_prefix",
+              "seal"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "COMP-C3",
+        "is_component": true,
+        "file_count": 7,
+        "files": [
+          {
+            "file_id": "FILE-200",
+            "path": "harmonica_eval/algorithms/__init__.py",
+            "role": "插件契约的类型出口与 re-export；只说明算法应遵守什么形状，不保存算法清单。",
+            "build_instruction": ".spec/build/FILE-200-v1.md",
+            "public_symbols": []
+          },
+          {
+            "file_id": "FILE-206",
+            "path": "harmonica_eval/algorithms/bootstrap.py",
+            "role": "**唯一物理装配根**：全系统唯一一处 import 具体算法实现模块的地方。",
+            "build_instruction": ".spec/build/FILE-206-v1.md",
+            "public_symbols": [
+              "ALGORITHM_INPUTS",
+              "DYNAMICS_REQUIRED_PORTS",
+              "PITCH_REQUIRED_PORTS",
+              "REGISTRATION_ORDER",
+              "TIMING_REQUIRED_PORTS",
+              "build_default_registry",
+              "build_plugin_specs"
+            ]
+          },
+          {
+            "file_id": "FILE-203",
+            "path": "harmonica_eval/algorithms/dynamics.py",
+            "role": "力度对比：比较参考与练习的逐音能量，输出动态差异。",
+            "build_instruction": ".spec/build/FILE-203-v1.md",
+            "public_symbols": [
+              "ALGORITHM_ID",
+              "ALGORITHM_VERSION",
+              "DB_FLOOR",
+              "LABEL",
+              "align_by_note",
+              "compute_deltas",
+              "note_spans",
+              "run",
+              "summarize_deltas",
+              "to_db"
+            ]
+          },
+          {
+            "file_id": "FILE-201",
+            "path": "harmonica_eval/algorithms/pitch.py",
+            "role": "音准对比：比较参考与练习的**绝对音高**，输出可定位到具体音的偏差。",
+            "build_instruction": ".spec/build/FILE-201-v1.md",
+            "public_symbols": [
+              "ALGORITHM_ID",
+              "ALGORITHM_VERSION",
+              "LABEL",
+              "MAX_CENTS_DEVIATION",
+              "MIN_STABLE_NOTE_SEC",
+              "PITCH_HOP_LENGTH",
+              "PITCH_REQUIRED_PORTS",
+              "compare_pitch_curves",
+              "hz_to_cents",
+              "run",
+              "summarize_deviations"
+            ]
+          },
+          {
+            "file_id": "FILE-204",
+            "path": "harmonica_eval/algorithms/registry.py",
+            "role": "显式算法注册表，只回答「系统里有哪些插件」；装配期注册，运行期只读。",
+            "build_instruction": ".spec/build/FILE-204-v1.md",
+            "public_symbols": [
+              "Registry"
+            ]
+          },
+          {
+            "file_id": "FILE-205",
+            "path": "harmonica_eval/algorithms/runtime.py",
+            "role": "执行期输入解析与结果校验；只回答插件能否使用当前数据面、结果是否诚实。",
+            "build_instruction": ".spec/build/FILE-205-v1.md",
+            "public_symbols": [
+              "InputResolution",
+              "ResolvedSurface",
+              "resolve_inputs",
+              "validate_result"
+            ]
+          },
+          {
+            "file_id": "FILE-202",
+            "path": "harmonica_eval/algorithms/timing.py",
+            "role": "节奏对比：比较参考与练习的**起音时刻**，输出抢拍/拖拍。",
+            "build_instruction": ".spec/build/FILE-202-v1.md",
+            "public_symbols": [
+              "ALGORITHM_ID",
+              "ALGORITHM_VERSION",
+              "AXIS",
+              "LABEL",
+              "ONSET_DEADBAND_SEC",
+              "ONSET_MATCH_TOLERANCE_SEC",
+              "TIMING_REQUIRED_PORTS",
+              "compute_deviations",
+              "detect_onsets",
+              "match_onsets",
+              "run",
+              "summarize_deviations"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "COMP-C4",
+        "is_component": true,
+        "file_count": 3,
+        "files": [
+          {
+            "file_id": "FILE-400",
+            "path": "harmonica_eval/cockpit/__init__.py",
+            "role": "cockpit 包的出口：声明 C4 对外的**唯一**入口点 launch_cockpit()。",
+            "build_instruction": ".spec/build/FILE-400-v1.md",
+            "public_symbols": [
+              "launch_cockpit"
+            ]
+          },
+          {
+            "file_id": "FILE-401",
+            "path": "harmonica_eval/cockpit/app.py",
+            "role": "Mac 端开发者调试界面：把 C1 的只读投影画出来，并把 6 种意图下发回 C1。",
+            "build_instruction": ".spec/build/FILE-401-v1.md",
+            "public_symbols": [
+              "COMMAND_LABELS",
+              "EXIT_OK",
+              "EXIT_START_FAILED",
+              "LOCAL_BIND_HOST",
+              "build_command",
+              "build_plots",
+              "render_error",
+              "render_progress",
+              "render_scalars",
+              "render_series_plot",
+              "render_status",
+              "run_local_ui",
+              "solicit_asset_uri",
+              "submit_command"
+            ]
+          },
+          {
+            "file_id": "FILE-401-P",
+            "path": "harmonica_eval/cockpit/preview.py",
+            "role": "把**已冻结的契约层**可视化成一张结构预览页。它**不显示任何音频分析结果**",
+            "build_instruction": ".spec/build/FILE-401-P-v1.md",
+            "public_symbols": [
+              "BIND_HOST",
+              "BIND_PORT",
+              "HTML_PATH",
+              "build_contract_payload",
+              "main"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "COMP-CONFIG",
+        "is_component": false,
+        "file_count": 1,
+        "files": [
+          {
+            "file_id": "FILE-004",
+            "path": "harmonica_eval/profile.py",
+            "role": "CORE_PROFILE_V0.1 —— 全部冻结参数 + **封闭端口清单**的唯一定义处。",
+            "build_instruction": ".spec/build/FILE-004-v1.md",
+            "public_symbols": [
+              "ALIGN",
+              "AUDIO",
+              "AlignSpec",
+              "AudioSpec",
+              "BUDGET",
+              "BudgetSpec",
+              "MATERIALIZE",
+              "MaterializeSpec",
+              "PORTS",
+              "PORT_INDEX",
+              "PROFILE_VERSION",
+              "PortSpec",
+              "SAMPLE_RATE_FREE_PREFIXES",
+              "assert_profile_integrity",
+              "port_prefix"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "COMP-CONTRACT",
+        "is_component": false,
+        "file_count": 1,
+        "files": [
+          {
+            "file_id": "FILE-003",
+            "path": "harmonica_eval/contract.py",
+            "role": "跨组件共享的全部类型、枚举、错误码与契约 Protocol。纯声明，无行为。",
+            "build_instruction": ".spec/build/FILE-003-v1.md",
+            "public_symbols": [
+              "AlgorithmDataContract",
+              "AlgorithmError",
+              "AlgorithmResultEnvelope",
+              "AlignmentRepresentation",
+              "AudioFormat",
+              "BufferView",
+              "COMMAND_EFFECTS",
+              "COMMAND_LEGALITY",
+              "CONTENT_HASH_MAGIC",
+              "CORE_REQUIRED_PORTS",
+              "ContractViolation",
+              "CoreBuildError",
+              "ErrorCode",
+              "FIELD_LAYOUTS",
+              "FORBIDDEN_OPERATIONS",
+              "HarmonicaError",
+              "HostContract",
+              "InputRequirement",
+              "PORT_HOP_LENGTHS",
+              "PluginSpec",
+              "PortDescriptor",
+              "ResolutionView",
+              "SessionState",
+              "SurfaceManifest",
+              "TimelineBasis",
+              "UI_PAYLOAD_KEYS",
+              "UNITS_VOCABULARY",
+              "UiCommand",
+              "UiCommandKind",
+              "UiProjectionPort",
+              "UiScalar",
+              "UiSeries",
+              "UiView",
+              "hop_of"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "COMP-PKG",
+        "is_component": false,
+        "file_count": 2,
+        "files": [
+          {
+            "file_id": "FILE-001",
+            "path": "harmonica_eval/__init__.py",
+            "role": "harmonica_eval 包的出口：声明包版本与包的公开面（6 个子模块）。",
+            "build_instruction": ".spec/build/FILE-001-v1.md",
+            "public_symbols": [
+              "PUBLIC_SUBMODULES"
+            ]
+          },
+          {
+            "file_id": "FILE-002",
+            "path": "harmonica_eval/__main__.py",
+            "role": "无头命令行入口：两段音频 → 跑完整流程（建数据面 → 跑算法）→ 落 metrics.json 与数值报告。",
+            "build_instruction": ".spec/build/FILE-002-v1.md",
+            "public_symbols": [
+              "DEFAULT_METRICS_FILENAME",
+              "DEFAULT_OUT_DIR",
+              "EXIT_FAILED",
+              "EXIT_OK",
+              "EXIT_USAGE",
+              "REPORT_FILENAME",
+              "build_parser",
+              "describe_inputs",
+              "main",
+              "render_report_markdown",
+              "run_headless",
+              "summarize_series",
+              "write_metrics_json"
+            ]
+          }
+        ]
+      },
+      {
+        "component_id": "进程装配层",
+        "is_component": true,
+        "file_count": 1,
+        "files": [
+          {
+            "file_id": "FILE-499（进程装配点；不是 C1/C2/C3/C4 任何一层）",
+            "path": "harmonica_eval/serve_ui.py",
+            "role": "唯一同时 import `host`（取 `UiProjectionPort`）与 `cockpit`（启动 UI）的模块",
+            "build_instruction": "",
+            "public_symbols": [
+              "main"
+            ]
+          }
+        ]
+      }
+    ],
+    "unassigned_files": []
+  },
+  "dependency": {
+    "import_edges": [
+      {
+        "from": "harmonica_eval/__main__.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/__main__.py",
+        "to": "harmonica_eval/host/app.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/__init__.py",
+        "to": "harmonica_eval/algorithms/registry.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/__init__.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/bootstrap.py",
+        "to": "harmonica_eval/algorithms.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/bootstrap.py",
+        "to": "harmonica_eval/algorithms/registry.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/bootstrap.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/bootstrap.py",
+        "to": "harmonica_eval/profile.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/dynamics.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/pitch.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/registry.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/runtime.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/algorithms/timing.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/cockpit/__init__.py",
+        "to": "harmonica_eval/cockpit.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/cockpit/__init__.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/cockpit/app.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/cockpit/preview.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/align.py",
+        "to": "harmonica_eval.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/align.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/api.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/api.py",
+        "to": "harmonica_eval/core.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/api.py",
+        "to": "harmonica_eval/core/surface.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/api.py",
+        "to": "harmonica_eval/profile.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/features.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/features.py",
+        "to": "harmonica_eval/profile.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/ingest.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/ingest.py",
+        "to": "harmonica_eval/profile.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/surface.py",
+        "to": "harmonica_eval.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/surface.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/surface.py",
+        "to": "harmonica_eval/core/align.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/core/surface.py",
+        "to": "harmonica_eval/core/features.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/host/app.py",
+        "to": "harmonica_eval/algorithms/bootstrap.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/host/app.py",
+        "to": "harmonica_eval/algorithms/registry.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/host/app.py",
+        "to": "harmonica_eval/algorithms/runtime.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/host/app.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/host/app.py",
+        "to": "harmonica_eval/core/api.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/profile.py",
+        "to": "harmonica_eval/contract.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/serve_ui.py",
+        "to": "harmonica_eval/cockpit.py",
+        "kind": "import"
+      },
+      {
+        "from": "harmonica_eval/serve_ui.py",
+        "to": "harmonica_eval/host/app.py",
+        "kind": "import"
+      }
+    ],
+    "ports": [
+      {
+        "port_id": "warp_path",
+        "produced_by": "core.align",
+        "timeline_basis": "REFERENCE",
+        "units": "index",
+        "hop_length": 0,
+        "consumed_by": [],
+        "is_evidence_only": true
+      },
+      {
+        "port_id": "pcm.mapped.reference",
+        "produced_by": "core.surface",
+        "timeline_basis": "REFERENCE",
+        "units": "amplitude",
+        "hop_length": 0,
+        "consumed_by": [
+          "timing"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "pcm.mapped.practice",
+        "produced_by": "core.surface",
+        "timeline_basis": "REFERENCE",
+        "units": "amplitude",
+        "hop_length": 0,
+        "consumed_by": [
+          "timing"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "pcm.warped.practice",
+        "produced_by": "core.surface",
+        "timeline_basis": "WARPED",
+        "units": "amplitude",
+        "hop_length": 0,
+        "consumed_by": [],
+        "is_evidence_only": true
+      },
+      {
+        "port_id": "pitch.reference",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "hz",
+        "hop_length": 2048,
+        "consumed_by": [
+          "pitch"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "pitch.practice",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "hz",
+        "hop_length": 2048,
+        "consumed_by": [
+          "pitch"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "rms.reference",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "rms",
+        "hop_length": 256,
+        "consumed_by": [
+          "dynamics"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "rms.practice",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "rms",
+        "hop_length": 256,
+        "consumed_by": [
+          "dynamics"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "chroma.lowres.reference",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "chroma",
+        "hop_length": 2048,
+        "consumed_by": [],
+        "is_evidence_only": true
+      },
+      {
+        "port_id": "chroma.lowres.practice",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "chroma",
+        "hop_length": 2048,
+        "consumed_by": [],
+        "is_evidence_only": true
+      },
+      {
+        "port_id": "notes.reference",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "index",
+        "hop_length": 0,
+        "consumed_by": [
+          "pitch",
+          "timing",
+          "dynamics"
+        ],
+        "is_evidence_only": false
+      },
+      {
+        "port_id": "notes.practice",
+        "produced_by": "core.features",
+        "timeline_basis": "REFERENCE",
+        "units": "index",
+        "hop_length": 0,
+        "consumed_by": [
+          "pitch",
+          "dynamics"
+        ],
+        "is_evidence_only": false
+      }
+    ],
+    "algorithms": [
+      {
+        "algorithm_id": "pitch",
+        "version": "1.0.0",
+        "required_ports": [
+          "pitch.reference",
+          "pitch.practice",
+          "notes.reference",
+          "notes.practice"
+        ]
+      },
+      {
+        "algorithm_id": "timing",
+        "version": "1.0.0",
+        "required_ports": [
+          "pcm.mapped.reference",
+          "pcm.mapped.practice",
+          "notes.reference"
+        ]
+      },
+      {
+        "algorithm_id": "dynamics",
+        "version": "1.0.0",
+        "required_ports": [
+          "rms.reference",
+          "rms.practice",
+          "notes.reference",
+          "notes.practice"
+        ]
+      }
+    ],
+    "profile_version": "CORE_PROFILE_V0.1"
+  },
+  "traceability": {
+    "schema": "virtual-system-graph-overlay/v1",
+    "note": [
+      "★ 本文件是**手写**的部分 —— 代码里不存在、因而无法推导的事实。",
+      "与 virtual-system-graph.json（脚本生成）分开存放，",
+      "使『哪些是我推导的、哪些是我声称的』一眼可辨。",
+      "手写内容会漂移，故每条都附依据；无依据的条目不写。"
+    ],
+    "component_intent": {
+      "COMP-C1": {
+        "why_exists": "全系统唯一的编排点。去掉它必然发生两件事之一：C2 得知道有哪些算法（深组件被破坏，Core 变成插件需求的函数），或 C4 直接调 C2/C3（界面进入计算路径，UI 崩溃会污染数据面）。故它不是转发层，它拥有编排权。",
+        "traces_to": "SPEC.md §1（双音频对比 → 客观数值指标）· COMPONENTS.md §4 · 宪章 §8（责任单元）",
+        "not_responsible_for": "不做 DSP；不实现算法；不读端口内容；不持有 C4 之外的平台依赖"
+      },
+      "COMP-C2": {
+        "why_exists": "把两段音频编译成一份与算法无关的、不可变的分析数据面。它是『深组件』的兑现处：算法只见 manifest + read 两个操作，看不见 Core 内部的模块划分、DAG、缓存或存储策略，故 Core 可在不破坏任何算法的情况下重组内部实现。",
+        "traces_to": "SPEC.md §5/§6/§7 · COMPONENTS.md §4.2 · 宪章 §9（可执行契约）",
+        "not_responsible_for": "不知道有哪些算法；不因算法缺端口就去生成数据；不做 UI；不判断吹得好不好"
+      },
+      "COMP-C3": {
+        "why_exists": "把数据面翻译成『这个音准不准 / 这个音早了晚了 / 这个音强弱差多少』的可定位数值。每个算法是一个独立可替换的责任单元，只依赖端口契约，互不感知。",
+        "traces_to": "SPEC.md §1（只到数值层）· COMPONENTS.md §4 · 宪章 §8",
+        "not_responsible_for": "不做时间对齐（Core 的职责）；不生成自然语言反馈或教学结论（SPEC §1 边界）；不改数据面"
+      },
+      "COMP-C4": {
+        "why_exists": "让开发者能看见并驱动前三个组件。v0.1 只服务一个开发者、一台 Mac；它必须在 C4 缺席时全流程仍可跑通（不变量 F），故它不得进入计算路径。",
+        "traces_to": "负责人裁定（Mac 端只给开发者看，核心调完再移手机端）· COMPONENTS.md §5 不变量 F",
+        "not_responsible_for": "不进入计算热路径；不保存 Core 状态；不直接读数据面；不解释算法内部"
+      }
+    },
+    "component_derivation": {
+      "note": [
+        "★ 本节是「由下往上」的登记结果：先看代码能聚成什么坨，再与上面的 component_intent 对照。",
+        "推导**不使用**铭牌的 COMPONENT 字段作输入（见 tools/derive_clusters.py）。",
+        "verdict 三值：CONFIRMED（机械证据支持）/ PARTIAL（部分支持）/ NOT-CONFIRMED（证据不足以支持，不等于错）。",
+        "★ 为什么会有 NOT-CONFIRMED：空壳期函数体全是 raise，真实调用边尚未写出，",
+        "  故『编排关系』这类信息在代码里根本不存在。这是信号缺失，不是设计错误。"
+      ],
+      "method": {
+        "tool": "tools/derive_clusters.py",
+        "signals": [
+          "S1 import 边（空壳期残缺）",
+          "S2 端口生产 profile.PORTS[*].produced_by（空壳期完整）",
+          "S3 算法消费 algorithms.ALGORITHMS[*].required_ports（空壳期完整）",
+          "S4 契约符号足迹：文件引用 contract.py 的哪些符号（空壳期完整）"
+        ],
+        "algorithm": "Jaccard 平均连接层次聚类 + Tarjan 割点分析",
+        "honest_limitation": [
+          "阈值敏感性实测：从 1 坨摆到 18 坨，**没有稳定平台** →",
+          "  空壳期代码不足以决定组件边界。故本节的结论只取『跨全部阈值稳健』的部分，",
+          "  其余一律标 NOT-CONFIRMED，不假装推导出了边界。"
+        ]
+      },
+      "stable_findings": [
+        {
+          "pair": [
+            "harmonica_eval.algorithms.dynamics",
+            "harmonica_eval.algorithms.timing"
+          ],
+          "stability": "7/7 阈值",
+          "jaccard": 0.35,
+          "reading": "同层算法共享契约签名与『按音配对』口径"
+        },
+        {
+          "pair": [
+            "harmonica_eval.algorithms.dynamics",
+            "harmonica_eval.algorithms.pitch"
+          ],
+          "stability": "6/7 阈值",
+          "jaccard": 0.316,
+          "reading": "同上"
+        },
+        {
+          "pair": [
+            "harmonica_eval.algorithms.pitch",
+            "harmonica_eval.algorithms.timing"
+          ],
+          "stability": "6/7 阈值",
+          "jaccard": 0.3,
+          "reading": "同上"
+        },
+        {
+          "pair": [
+            "harmonica_eval.__main__",
+            "harmonica_eval.cockpit.app"
+          ],
+          "stability": "6/7 阈值",
+          "jaccard": 0.3,
+          "reading": "★ 两者是同一类东西：都是 UiView/UiSeries 的**消费者**。一个是无头落盘，一个是图形界面。这从代码层证实了不变量 F 的前提 —— 无头入口与 C4 处在内核之外的对等位置，故『删掉 C4 内核仍跑通』是结构性的，不是补丁。"
+        }
+      ],
+      "port_coupling": {
+        "note": "端口供需图在空壳期**完整**（它由 profile.PORTS 与 ALGORITHMS 决定，与函数体无关）",
+        "producers": {
+          "core.align": [
+            "warp_path"
+          ],
+          "core.features": [
+            "chroma.lowres.*",
+            "notes.*",
+            "pitch.*",
+            "rms.*"
+          ],
+          "core.surface": [
+            "pcm.mapped.*",
+            "pcm.warped.practice"
+          ]
+        },
+        "consumers": {
+          "pitch": [
+            "notes.*",
+            "pitch.*"
+          ],
+          "timing": [
+            "notes.*",
+            "pcm.mapped.*"
+          ],
+          "dynamics": [
+            "notes.*",
+            "rms.*"
+          ]
+        },
+        "shared_vocabulary": "notes.*（三个算法**全部**需要）",
+        "unconsumed_families": [
+          "chroma.lowres.*",
+          "warp_path"
+        ],
+        "reading": [
+          "core.features 是产出枢纽：12 个端口里它产 8 个。",
+          "notes.* 是唯一的全算法共享词汇 → 它是 C2/C3 之间的**实际接口重心**，",
+          "  而不是 pitch.*/rms.*/pcm.*。这解释了为什么 MOLD BREAK 必须把 notes.practice 补上：",
+          "  缺了它，三个算法里有两个拿不到逐音索引。",
+          "chroma.lowres.* 与 warp_path 无算法消费 —— 二者是**证据端口**（供审查者复现对齐），",
+          "  不是死端口。derive_clusters 不对它们报警，正是 profile 的刻意豁免。"
+        ]
+      },
+      "articulation_point": {
+        "node": "harmonica_eval.contract",
+        "degree": 11,
+        "reading": [
+          "全图唯一的割点。删掉它，11 个文件的依赖同时断裂。",
+          "★ 这从机械上证实了 COMPONENT-CONTRACT 铭牌的声明：",
+          "  「四个组件之间的分界线，本身不是组件」。",
+          "  一个既连接所有人、又谁的内部都不属于的节点，正是『契约』的定义。"
+        ]
+      },
+      "per_component": {
+        "COMP-C1": {
+          "verdict": "NOT-CONFIRMED",
+          "evidence": "host.app 只 import contract；它与任何文件都不构成稳健黏连。",
+          "why_not_confirmed": "C1 的存在理由是『编排』，而编排边（谁调谁、按什么顺序）在空壳期**不存在** —— 函数体是 raise。故机械推导看不见它。这是信号缺失。",
+          "design_comparison": "不与现有设计冲突，但**也未被证实**。要证实它需要实现落地后重跑本工具。",
+          "risk_if_wrong": "低。C1 的边界由契约（CONTRACT-HOST-v1 的 7 个操作）定义，而非由耦合度定义。"
+        },
+        "COMP-C2": {
+          "verdict": "PARTIAL",
+          "evidence": "端口生产图把 core.align / core.features / core.surface 区分为三个不同生产者，三者互不共享端口族。core.api 是唯一 import core.surface 的文件。",
+          "why_partial": [
+            "机械推导支持『C2 是一个内聚单元』，但**不能**推出其内部 5 路切分",
+            "（ingest / align / features / surface / api）。",
+            "因为那 5 路是一条**数据流链**（解码→对齐→物化→装配→编排），",
+            "而数据流写在 docstring 里，不写在代码里。"
+          ],
+          "design_comparison": "一致。且推导独立复现了『core.api 是唯一对外门面』：它是 core 内部唯一被 import 的文件。",
+          "risk_if_wrong": "低。内部切分是 C2 的私有实现细节，深组件保证它不外泄。"
+        },
+        "COMP-C3": {
+          "verdict": "CONFIRMED",
+          "evidence": "三个算法两两稳健黏连（7/7、6/7、6/7），共享 AlgorithmDataContract / AlgorithmResultEnvelope / needs:notes / run / summarize。",
+          "design_comparison": "一致，且是本次推导**最强**的一条结论。",
+          "risk_if_wrong": "极低。"
+        },
+        "COMP-C4": {
+          "verdict": "PARTIAL",
+          "evidence": "cockpit 与 cockpit.app 只 import contract，与 C2/C3 零耦合 —— 机械证实了『C4 不进计算路径』。",
+          "extra_finding": "★ 推导还发现 __main__ 与 cockpit.app 是同一类（见 stable_findings）。设计里二者分属 COMP-PKG 与 COMP-C4，但它们在**结构角色**上对等：都是内核之外的结果消费者。",
+          "design_comparison": "与不变量 F 一致，且为该不变量提供了代码层证据。",
+          "risk_if_wrong": "低。"
+        }
+      }
+    },
+    "mission_threads": [
+      {
+        "id": "MT-001",
+        "title": "主流程：两段音频 → 客观指标（无头）",
+        "components": [
+          "COMP-C1",
+          "COMP-C2",
+          "COMP-C3"
+        ],
+        "end_to_end": true,
+        "world_change": "无（正常世界）",
+        "verifies": [
+          "不变量 F（C4 缺席仍跑通）",
+          "不变量 B（换算法 Core 零修改）"
+        ]
+      },
+      {
+        "id": "MT-002",
+        "title": "有界面：开发者调试流程",
+        "components": [
+          "COMP-C4",
+          "COMP-C1",
+          "COMP-C2",
+          "COMP-C3"
+        ],
+        "end_to_end": true,
+        "world_change": "无",
+        "verifies": [
+          "C4 只经 UiProjectionPort 与 C1 对话"
+        ]
+      },
+      {
+        "id": "MT-003",
+        "title": "输入是坏的",
+        "components": [
+          "COMP-C2"
+        ],
+        "end_to_end": false,
+        "world_change": "输入文件不可解码 / 过短 / 全静音",
+        "verifies": [
+          "宪章 §5.6 无静默降级",
+          "错误码显式"
+        ]
+      },
+      {
+        "id": "MT-004",
+        "title": "对齐无法建立",
+        "components": [
+          "COMP-C2"
+        ],
+        "end_to_end": false,
+        "world_change": "两段音频毫无共同结构（如一段是噪声）",
+        "verifies": [
+          "宪章 §5.6：不得退化成逐点硬比",
+          "ErrorCode.ALIGNMENT_UNRECOVERABLE"
+        ]
+      },
+      {
+        "id": "MT-005",
+        "title": "一个算法失败，其余必须继续",
+        "components": [
+          "COMP-C1",
+          "COMP-C3"
+        ],
+        "end_to_end": true,
+        "world_change": "某个算法抛异常 / 返回 NaN",
+        "verifies": [
+          "不变量 D（故障隔离）"
+        ]
+      },
+      {
+        "id": "MT-006",
+        "title": "算法死循环（v0.1 已知缺口）",
+        "components": [
+          "COMP-C3",
+          "COMP-C1"
+        ],
+        "end_to_end": false,
+        "world_change": "算法永不返回",
+        "verifies": [
+          "★ 已知缺口：v0.1 会挂住整个 rack，无超时机制"
+        ],
+        "known_gap": true
+      },
+      {
+        "id": "MT-007",
+        "title": "界面断开 / 缺席",
+        "components": [
+          "COMP-C4",
+          "COMP-C1"
+        ],
+        "end_to_end": true,
+        "world_change": "C4 进程被杀 / 从未启动",
+        "verifies": [
+          "不变量 F",
+          "ErrorCode.COCKPIT_DETACHED（v0.1 不产出）"
+        ]
+      },
+      {
+        "id": "MT-008",
+        "title": "命令时序非法",
+        "components": [
+          "COMP-C1"
+        ],
+        "end_to_end": false,
+        "world_change": "在 DATA_READY 之前触发算法 / 重复 build",
+        "verifies": [
+          "状态机单调推进",
+          "COMMAND_LEGALITY"
+        ]
+      },
+      {
+        "id": "MT-009",
+        "title": "重复构建与销毁",
+        "components": [
+          "COMP-C2"
+        ],
+        "end_to_end": false,
+        "world_change": "同会话 build 两次 / destroy 后继续用",
+        "verifies": [
+          "会话生命周期",
+          "Seal 后不可变"
+        ]
+      },
+      {
+        "id": "MT-010",
+        "title": "同输入可复现",
+        "components": [
+          "COMP-C2"
+        ],
+        "end_to_end": true,
+        "world_change": "无（同 build 两次运行）",
+        "verifies": [
+          "不变量 A（回归断言）",
+          "content_hash 一致"
+        ]
+      }
+    ],
+    "known_gaps": [
+      {
+        "id": "GAP-1",
+        "what": "算法死循环会挂住整个 rack",
+        "why_not_fixed": "v0.1 无超时/隔离机制；加它需要契约变更（谁负责 kill、超时算哪种失败）",
+        "affects": [
+          "MT-006"
+        ],
+        "owner_decision_needed": true
+      },
+      {
+        "id": "GAP-2",
+        "what": "ErrorCode.COCKPIT_DETACHED 在 v0.1 永不产出",
+        "why_not_fixed": "它需要 C4 主动上报断连，而 v0.1 的 C4 只是本机进程内视图，没有独立的连接生命周期",
+        "affects": [
+          "MT-007"
+        ],
+        "owner_decision_needed": false
+      },
+      {
+        "id": "GAP-3",
+        "what": "progress 是粗粒度的",
+        "why_not_fixed": "平滑进度需要契约变更（Core 要在计算中回调），当前只在状态切换时更新",
+        "affects": [
+          "MT-002"
+        ],
+        "owner_decision_needed": true
+      },
+      {
+        "id": "GAP-4",
+        "what": "数据集只有 1 首歌",
+        "why_not_fixed": "02–10 的批量构建暂停，等负责人听过 01 的产出",
+        "affects": [
+          "MT-001"
+        ],
+        "owner_decision_needed": false
+      },
+      {
+        "id": "GAP-5",
+        "what": "虚拟组件目前不可执行（宪章 §10 要求可端到端跑）",
+        "why_not_fixed": "18 个空壳全部 raise NotImplementedError；尚无 stub/mock 实现层。§10 要求『一行真实业务实现都没有时，系统应已经能跑关键 Mission Thread』—— 这需要一层『虚拟实现』，目前不存在",
+        "affects": [
+          "MT-001",
+          "MT-002",
+          "MT-005",
+          "MT-010"
+        ],
+        "owner_decision_needed": true
+      },
+      {
+        "id": "GAP-6",
+        "what": "音高引擎选型未冻结，SPEC §7.5 要求的对照实验尚未进行",
+        "why_not_fixed": "SPEC.md@v2.1 §7.5 明令「引擎选型不在此处冻结」，并要求最终选定前必须有一次用数据决定选型的对照实验（候选：librosa.pyin 传统 DSP / torchcrepe 神经网络）。实验未做。★ 此前 FILE-103-v1.md 把「估计器为 librosa.pyin」写成了冻结规格，事实上取消了这场实验 —— 那是把「待定」偷偷变成「已定」并伪装成权威，与早先那次「伪造宪章引用」属同一族缺陷。已改为「首选实现 + 引擎不冻结」。",
+        "affects": [
+          "FILE-103",
+          "MT-003"
+        ],
+        "owner_decision_needed": true,
+        "current_default": "librosa.pyin（首选实现，非冻结选型）",
+        "unblocks": "不阻塞代码注入；阻塞「引擎选型冻结」这一决定本身",
+        "where_documented": ".spec/build/FILE-103-v1.md §11"
+      }
+    ]
+  }
+}

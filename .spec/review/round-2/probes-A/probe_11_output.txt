@@ -1,0 +1,30 @@
+=== profile.py: produced_by for pcm.* (CONFIG AUTHORITY) ===
+  pcm.mapped.reference     produced_by='core.surface' basis=REFERENCE
+  pcm.mapped.practice      produced_by='core.surface' basis=REFERENCE
+  pcm.warped.practice      produced_by='core.surface' basis=WARPED
+
+=== every file that claims to produce pcm.* ===
+  .spec/build/FILE-004-v1.md:29: | **上游（谁调用我）** | ① `core.surface` —— 用 `PORT_INDEX` 驱动端口的生成与校验（`PORT_INDEX` 的 docstring 原文：「surface.py 用它来驱动生成与校验」）。② `core.features` —— 消费 
+  .spec/build/FILE-004-v1.md:35: `profile.py` 是「数据面里有什么」的**唯一定义处**。数据面身份 = `f(reference, practice, PROFILE_VERSION)`。端口清单是封闭集合：本文件列出的 12 个端口在 Seal 时全部生成；本文件未列出的端口永不存在。算法需要额外
+  .spec/build/FILE-004-v1.md:44: 2. **数据面无从生成。** 12 个端口的定义（`port_id` / `units` / `dimensions` / `field_names` / `element_type` / `timeline_basis` / `hop_length` / `produced_
+  .spec/build/FILE-004-v1.md:290: - **单元素**：`PORTS` 只有一个端口 → 若它是 `notes.reference` 则检查 7 抛对称性破裂；若是 `pcm.mapped.reference` 则检查 2 抛（缺 `pcm.mapped.practice`）。
+  .spec/build/FILE-004-v1.md:362: | INV-4-15 | `produced_by` 取自 3 个值，且与 `produced_by` 计数一致 | 派生（§4.7） | 断言：`warp_path.produced_by == "core.align"`；`{pcm.mapped.reference, pcm
+  .spec/build/FILE-004-v1.md:370: | INV-4-23 | 端口清单外端口**永不存在**；`chroma.lowres.*` 不作为评分依据；节奏指标只在 `REFERENCE` 轴算 | 派生（DESIGN-RULING + SPEC §5.5） | 审查层：`produced_by` 只出现 3 个值（无第
+  .spec/build/FILE-004-v1.md:651: 判据：9 个改坏场景各自抛 `ValueError`，且消息含表中片段（`空 rationale` → `未说明存在理由`；删 `notes.practice` → `对称性破裂`；`pitch.reference` 的 `hop_length` 置 0 → `未声明 hop_l
+  .spec/build/FILE-101-v1.md:17: | 下游 | 直接：调用方 `core/api.py` 取走返回值 `npt.NDArray`（float32 / 单声道 / 44100 Hz）。数据的最终去处（**本模块不调用它们中的任何一个**，输出方式是返回值，不是端口）：`core/surface.py` 用它物化 `
+  .spec/build/FILE-102-v1.md:30: `pcm.warped.practice` 无从装配，`pitch` 的按音配对失去依据，
+  .spec/build/FILE-103-v1.md:23: **★ 共享词汇定位（必读）**：`notes.*` 字段（`onset_sec` / `f0_hz` / `rms`）是**全部三个算法共享的词汇**。三个算法彼此不共享中间结果，只共享本文件产出的端口数据。因此 `notes` 的字段语义（单位、时间基准、字段顺序、未发声处理
+  .spec/build/FILE-104-v1.md:164: 例：`"pcm.mapped.reference"` → `"pcm"`；`"warp_path"` → `"warp_path"`；
+  .spec/build/FILE-104-v1.md:876: | INV-104-1 | **MUST：由 `profile.PORTS` 驱动生成（穷举），不得硬编码端口名。** 数据面的键集合恒等于 `set(profile.PORT_INDEX.keys())` | `assert set(build_surface(ref, pra
+  .spec/build/FILE-104-v1.md:889: | INV-104-14 | `read` 的时间窗语义：秒、左闭右开 `[t0, t1)` | 对 `pcm.mapped.reference`（44100 Hz）读 `(0.0, 0.001)` → `element_count == 44`（`floor(0.001 * 4
+  .spec/build/FILE-104-v1.md:890: | INV-104-15 | `read` 的越界语义：`t0 >= t1` 或 `t1` 超出该端口时长 → `ContractViolation` | `for tr in [(1.0, 1.0), (2.0, 1.0), (-0.1, 1.0), (0.0, upper +
+  .spec/build/FILE-104-v1.md:943: - **不做 `WARPED` 轴的 PCM 重采样。** `pcm.warped.practice` 等端口的生成
+  .spec/build/FILE-202-v1.md:165: notes.reference → notes.practice → pcm.mapped.reference → pcm.mapped.practice
+  .spec/build/FILE-202-v1.md:168: 若某侧为空 → detect_onsets(对应 pcm.mapped.*, sr)
+  harmonica_eval/algorithms/__init__.py:205: timing   → pcm.mapped.* / notes.reference / warp_path
+  harmonica_eval/contract.py:122: → **不要**把它读成"参考演奏专属的轴"：练习侧的 `pcm.mapped.practice`
+
+=== FILE-102 align: does it produce any PCM? ===
+  30: `pcm.warped.practice` 无从装配，`pitch` 的按音配对失去依据，
+  61: - **输入**：`samples` — `float32` 1-D 数组，单声道 PCM，有取值域 [-1.0, 1.0]。
+  114: - **输入**：`reference`、`practice` — `float32` 1-D 单声道 PCM。

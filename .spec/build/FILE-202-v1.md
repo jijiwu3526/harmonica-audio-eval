@@ -2,7 +2,7 @@
 
 > BUILD-INSTRUCTION v1 · 目标文件：`harmonica_eval/algorithms/timing.py`
 > 生成依据：`contract.py`（AlgorithmDataContract / AlgorithmResultEnvelope）·
-> `profile.py@CORE_PROFILE_V0.1` · `algorithms/__init__.py`（PAYLOAD_SCHEMAS）·
+> `profile.py@CORE_PROFILE_V0.1` · 自描述 `UiScalar` / `UiSeries` payload 契约 ·
 > `SPEC.md §5` · `COMPONENTS.md §4`
 > ★ 本文件是**冻结产物**（宪章 §30）。实现者**不得**修改本文件。
 
@@ -61,8 +61,7 @@ ALGORITHM_ID: str = "timing"
 ALGORITHM_VERSION: str = "1.0.0"
 AXIS = TimelineBasis.REFERENCE     # ★ 硬约束，不得改为 WARPED
 ONSET_MATCH_TOLERANCE_SEC: float = 0.100
-ONSET_DEADBAND_MS: float = 23.0
-MS_PER_SEC: float = 1000.0
+ONSET_DEADBAND_SEC: float = 0.023
 ```
 
 `REQUIRED_PORTS` / `CONSUMED_PORTS`：**不要写镜像常量**。
@@ -111,7 +110,7 @@ while i < len(ref) and j < len(prac):
    "n_ref": int, "n_prac": int, "n_unpaired": int}
   ```
 - **★ 音数不等**：漏音与多音**不参与任何偏差统计**
-  （把 5 秒的错位当成"拖了 5000 毫秒"是荒谬的），
+  （把 5 秒的错位当成"拖了 5 秒"是荒谬的），
   但**必须计数上报** `n_unpaired`。
 - `tolerance_sec` 默认值**必须**引用模块常量，不得写字面量。
 
@@ -119,34 +118,49 @@ while i < len(ref) and j < len(prac):
 
 ### 4.3 `compute_deviations(matched) -> list[float]`
 
-- 对 `pairs` **按参考侧音序**取 `(prac_t - ref_t) * MS_PER_SEC`
+- 对 `pairs` **按参考侧音序**取 `prac_t - ref_t`（秒减秒）
 - **带符号**：负 = 抢拍（早），正 = 拖拍（晚）
 - 返回 Python 原生 `float` 列表（**JSON 可序列化**）
 
 ---
 
-### 4.4 `summarize_deviations(deviations_ms) -> dict`
+### 4.4 `summarize_deviations(deviations_sec, n_unpaired) -> dict`
 
-**必须恰好产出 8 个键**，与 `algorithms.PAYLOAD_SCHEMAS["timing"]`
-**逐字一致**（键名以那张表为唯一权威）：
+★★ **本版更正（第三轮盲审 A 的 probe 07）：`n_unpaired` 原来没有可达通道。** ★★
+
+历史 `PAYLOAD_SCHEMAS["timing"]` 契约的 8 个键里有 `n_unpaired`，
+而本节表格把它标为「来自 `match_onsets`」——
+但 §4.5 的流程是
+`payload = summarize_deviations(compute_deviations(matched))`，
+而 §4.3 冻结 `compute_deviations(matched) -> list[float]`。
+**`match_onsets` 的返回值在这一步已经被丢掉了** ——
+`summarize_deviations` 只收到一个 `list[float]`，
+它**没有任何办法**知道有多少音没配上。
+
+**本版冻结**：`n_unpaired` 由 `run` 从 `matched["n_unpaired"]` 取出后
+**显式传入**。`run` 手里同时有 `matched` 和 `deviations`，是唯一能传的地方。
+
+**必须恰好产出 8 个结果指标**（逐音序列 1 个 `UiSeries`，其余 7 个 `UiScalar`），
+字段名由各对象的 `key` 自描述，框架不维护中央 payload 表：
 
 | 键 | 口径 |
 | --- | --- |
-| `per_note_onset_ms` | 逐音偏差，长度 **必须等于** `n_notes_used` |
-| `median_onset_ms` | `median(d)`（带符号） |
-| `spread_ms` | `median(abs(d - median(d)))` —— **MAD about median**，不是 `median(abs(d))` |
-| `early_ratio` | `count(d < -ONSET_DEADBAND_MS) / n` |
-| `late_ratio` | `count(d > +ONSET_DEADBAND_MS) / n` |
-| `on_time_ratio` | `count(abs(d) <= DEADBAND) / n` |
+| `per_note_onset_sec` | 逐音偏差（秒），长度 **必须等于** `n_notes_used` |
+| `median_onset_sec` | `median(d)`（带符号，秒） |
+| `spread_sec` | `median(abs(d - median(d)))` —— **MAD about median**，不是 `median(abs(d))` |
+| `early_ratio` | `count(d < -ONSET_DEADBAND_SEC) / n` |
+| `late_ratio` | `count(d > +ONSET_DEADBAND_SEC) / n` |
+| `on_time_ratio` | `count(abs(d) <= ONSET_DEADBAND_SEC) / n` |
 | `n_notes_used` | `len(d)` |
-| `n_unpaired` | 来自 `match_onsets` |
+| `n_unpaired` | **由调用方传入**（`run` 从 `matched["n_unpaired"]` 取；见本节开头的签名更正） |
 
 - **★ 三者关系**：`early_ratio + late_ratio + on_time_ratio == 1.0`。
   必须三个都报 —— 只报前两个的话，用户看到它们加起来不到 1 会以为是 bug，
   而实际上那是"测量精度不足以判定"的部分。
   `on_time_ratio` 的含义是**无法判定**早或晚，**不等于**"演奏准确"。
-- **边界**：`n == 0` → 返回 OK + 全零 payload（`per_note=[]`, `n_notes_used=0`）。
-  理由：`n` 本身是 payload 键，"报告样本量为 0"优于"抛异常"。
+- **边界**：`n == 0` → 返回 OK + 8 个自描述对象（`per_note_onset_sec=[]`,
+  `n_notes_used=0`，其余 7 个为 0.0）。理由：`n_notes_used` 必须作为
+  `UiScalar` 存在，以明确报告“样本量为 0”而不是伪装成普通成功结果。
 
 ---
 
@@ -158,26 +172,60 @@ try:
     mf = surface.manifest()
     若 not mf.sealed                     → 失败
     missing = 需要的端口 - mf.ports       → 非空则 INCOMPATIBLE / PLUGIN_INCOMPATIBLE
-    对每个 consumed 端口断言 descriptor.timeline_basis is AXIS(REFERENCE)
+    对每个 consumed 端口断言 descriptor.timeline_basis is AXIS
                                          不符 → 失败
     sr = mf.audio_format.sample_rate
     固定顺序读（time_range=None，整段）：
-        notes.reference → notes.practice → pcm.mapped.reference → pcm.mapped.practice
+        surface.read("notes.reference").data → surface.read("notes.practice").data
+        → surface.read("pcm.mapped.reference").data → surface.read("pcm.mapped.practice").data
     c = descriptor.field_names.index("onset_sec")   # ★ 不得硬编码列号
     取列、滤非有限值、升序
-    若某侧为空 → detect_onsets(对应 pcm.mapped.*, sr)
+    若某侧为空 → detect_onsets(surface.read("对应 pcm.mapped.*").data, sr)
     matched = match_onsets(ref, prac, ONSET_MATCH_TOLERANCE_SEC)
-    payload = summarize_deviations(compute_deviations(matched))
-    断言 payload 全有限（NaN/inf → 失败）
-    返回 Envelope(OK, payload, required_ports=注册表副本, consumed_ports=..., elapsed_sec)
+    deviations = compute_deviations(matched)
+    summary = summarize_deviations(deviations, matched["n_unpaired"])  # ★ n_unpaired 显式传入
+    断言 summary 全有限（NaN/inf → 失败）
+    summary["per_note_onset_sec"] 转 UiSeries(key=..., label=..., t=onset_sec,
+        values=summary["per_note_onset_sec"], unit="seconds", timeline_basis=REFERENCE)
+    其余 7 个标量各转 UiScalar（key / label / value / unit；unit 分别用
+        seconds / ratio / count，且必须在 UNITS_VOCABULARY 内）
+    payload = Sequence[UiScalar | UiSeries]（上述 8 个对象）
+    返回 Envelope(OK, payload, required_ports=插件规格副本,
+                  consumed_ports=..., elapsed_sec)
 except HarmonicaError as e  → FAILED, error_code = e.code.value
 except Exception            → FAILED, error_code = "ALGORITHM_FAILED"
 ```
 
-- **失败信封的 payload 也填全零 8 键** —— 防止 C1 对 FAILED 也做 schema
-  校验时误判 `ALGORITHM_RESULT_INVALID`。失败语义由 `status` / `error_code` 承担。
+★★ **本版更正（第四轮盲审）：`AXIS(REFERENCE)` 这个写法不存在。** ★★
+
+原写 `descriptor.timeline_basis is AXIS(REFERENCE)`。但 §4.0 已冻结
+`AXIS = TimelineBasis.REFERENCE` —— `AXIS` 是一个**模块级常量**（值
+`TimelineBasis.REFERENCE`），**不是可调用对象**。实测：
+`from harmonica_eval.algorithms.timing import AXIS; AXIS()`
+→ `TypeError: 'TimelineBasis' object is not callable`。
+`REFERENCE` 也不是本模块可见的名字（只有 `AXIS` 是）。
+**本版冻结**：直接与常量比较 —— `descriptor.timeline_basis is AXIS`。
+本文件其余出现 `AXIS` 的地方（§6 INV-202-2、§4.0 常量表）本就是常量用法，无需改。
+
+★★ **本版更正（第四轮盲审）：`read()` 的返回值没解包。** ★★
+
+原写「固定顺序读：`notes.reference → notes.practice → pcm.mapped.reference →
+pcm.mapped.practice`」，并把读到的值直接当 ndarray 用（取列、送进
+`detect_onsets`）。但 `AlgorithmDataContract.read()` 的返回类型是
+**`BufferView`**（见 `contract.py`：`read(self, port_id, time_range=None)
+-> BufferView`，`BufferView` 是含 `data / element_count / element_type`
+的只读借用视图），**不是** ndarray。
+**本版冻结**：每处读取都取 `.data` 得 ndarray，共 4 处端口读取 + 1 处兜底读取：
+`read()` 返回 `BufferView`，取 `.data` 得 ndarray；
+`surface.read("notes.reference").data`、`surface.read("notes.practice").data`、
+`surface.read("pcm.mapped.reference").data`、`surface.read("pcm.mapped.practice").data`，
+兜底 `detect_onsets` 处同样传 `surface.read(...).data`。
+（措辞与 FILE-203 §run 的 `read().data` 一致。）
+
+- **失败信封的 payload 必须为 `()`** —— 不再伪造全零指标；C1 按 `FAILED` 校验，
+  失败语义由 `status` / `error_code` / `error_detail` 承担。
 - **不抛异常到调用方**、**不改 surface**、**不持跨会话状态**。
-- `required_ports` 必须**逐字复制**注册表中 timing 的那一项，不得自行拼接/重排。
+- `required_ports` 必须**逐字复制**当前 `PluginSpec` 输入要求的端口投影，不得自行拼接/重排。
 
 ---
 
@@ -203,8 +251,8 @@ except Exception            → FAILED, error_code = "ALGORITHM_FAILED"
 | --- | --- | --- |
 | INV-202-1 | 全部时间数学用**秒**，不乘除 hop | grep：不得出现 `2048` / `256` 字面量参与换算 |
 | INV-202-2 | 使用 REFERENCE 轴 | grep `AXIS`；启动时断言端口轴 |
-| INV-202-3 | payload 键**恰好** 8 个 | 与 `PAYLOAD_SCHEMAS["timing"]` 比对 |
-| INV-202-4 | `len(per_note_onset_ms) == n_notes_used` | 运行时断言 |
+| INV-202-3 | payload 含 8 个自描述结果对象（1 个 `UiSeries` + 7 个 `UiScalar`） | 断言 `len(payload) == 8`、元素类型合法且 `key` 唯一 |
+| INV-202-4 | `len(per_note_onset_sec) == n_notes_used` | 运行时断言 |
 | INV-202-5 | 三比例之和 == 1.0（n>0 时） | 运行时断言，容差 1e-9 |
 | INV-202-6 | 未配对音不进入偏差统计 | 构造漏音用例验证 |
 | INV-202-7 | `run` 不抛异常到调用方 | 注入异常验证 |
@@ -233,20 +281,159 @@ except Exception            → FAILED, error_code = "ALGORITHM_FAILED"
 python3 tools/verify_shell.py            # 空壳期：应通过
 python3 tools/verify_stubs_raise.py      # 空壳期：74/74
 python3 tools/build_virtual_graph.py --check
+
+python3 - <<'PY'
+# ★ 判据 1 · 死区边界（ONSET_DEADBAND_SEC 的等号语义）
+# ★ 这条现在就能跑：它只依赖模块级常量，不依赖被注入的函数体。
+from harmonica_eval.algorithms.timing import ONSET_DEADBAND_SEC
+
+assert ONSET_DEADBAND_SEC == 0.023, ONSET_DEADBAND_SEC   # 23.0 ms 换算，不得取整
+
+def classify(d: float) -> str:
+    """镜像 early/late/on_time 的判定语义。"""
+    if d < -ONSET_DEADBAND_SEC:
+        return "early"
+    if d > ONSET_DEADBAND_SEC:
+        return "late"
+    return "on_time"
+
+# 死区是闭区间：|d| <= deadband 记 on_time
+assert classify(0.023) == "on_time", classify(0.023)
+assert classify(-0.023) == "on_time", classify(-0.023)
+# 越界 0.0001 即翻转 —— 这对边界必须敏感
+assert classify(0.0231) == "late", classify(0.0231)
+assert classify(-0.0231) == "early", classify(-0.0231)
+assert classify(0.05) == "late" and classify(-0.05) == "early"
+assert classify(0.0) == "on_time"
+print("OK 死区边界：±0.023 含于 on_time，±0.0231 翻转")
+PY
+
+python3 - <<'PY'
+# ★ 判据 2 · 比例守恒 early + late + on_time == 1.0
+# ★ 判据 3 · 确定性：同一输入两次运行 payload 完全相等
+# ★ 这两条依赖 summarize_deviations —— 未注入时按设计报 SHELL 失败。
+import sys
+from harmonica_eval.algorithms import timing
+
+DEVIATIONS = [0.05, 0.0, 0.2, -0.1, 0.023, 0.0231, -0.0231]
+
+payload = timing.summarize_deviations(list(DEVIATIONS), n_unpaired=0)
+
+# ★ §4.4 冻结 summarize_devisions 的返回是 dict（键→值）；
+# ★ UiScalar/UiSeries 的组装在 §4.5 的 run() 里做，不在本函数内。
+# ★ 旧判据按「payload 是可迭代的 UiScalar 对象序列」写，与 §4.4 冲突 ——
+# ★ 迭代 dict 得到的是键名，取 p.key 会抛 KeyError。
+scalars = {k: v for k, v in payload.items() if not isinstance(v, (list, tuple))}
+total = scalars["early_ratio"] + scalars["late_ratio"] + scalars["on_time_ratio"]
+assert abs(total - 1.0) < 1e-12, (scalars["early_ratio"], scalars["late_ratio"], scalars["on_time_ratio"], total)
+
+again = timing.summarize_deviations(list(DEVIATIONS), n_unpaired=0)
+assert payload == again, "两次运行结果不一致"
+print("OK 比例守恒 + 两次运行结果完全相等")
+PY
+
+python3 - <<'PY'
+# ★ 判据 4 · 黄金向量（配对顺序 + 数值正确性）
+# ★ 判据 5 · 漏音不被静默出数
+# ★ 判据 6 · 轴错必须显式失败
+# ★ 这三条依赖 match_onsets / compute_deviations —— 未注入时按设计报 SHELL 失败。
+# ★ 注意签名：match_onsets(ref_onsets, prac_onsets, tolerance_sec=...)
+#            compute_deviations(matched)  ← 只收一个实参
+import sys
+from harmonica_eval.algorithms import timing
+
+# 黄金向量：参考 [0,1,2]，练习 [0.05,1.0,2.08] → 偏差 [0.05, 0.0, 0.08]
+# ★ 更正（2026-09-24）：原写练习 [0.05,1.0,2.2]、期望偏差 0.2，与 §4.2 配对规则冲突 ——
+#   |d| <= ONSET_MATCH_TOLERANCE_SEC(0.100)，而 0.2 是容差的 2 倍，必然不配对
+#   （实测：pairs 只有 2 个，n_unpaired=2）。
+# ★ 为什么改向量而不改容差：容差 0.100 有推导依据，不是随手定的
+#   ——对齐噪声 ±0.023 秒 + 最短音长一半 0.150/2 = 0.075 → 合计 0.098 ≈ 0.100；
+#   而 0.2 只是示例数据。改有依据的常量去迁就示例，是本末倒置。
+# ★ 0.08 仍刻意偏离 on_time 死区 0.023 足够远（>3 倍），
+#   保留「能测出明显偏差」的意图，只是让它在容差内可配对。
+ref = [0.0, 1.0, 2.0]
+prac = [0.05, 1.0, 2.08]
+matched = timing.match_onsets(ref, prac)
+devs = timing.compute_deviations(matched)
+got = list(devs)
+# ★ 用容差比较，不用 ==：2.08-2.0 在 IEEE754 下是 0.08000000000000007，
+# ★ 直接 == 会因浮点尾差误判。判据要测「数值正确」而不是「浮点恰好相等」。
+assert len(got) == 3, got
+assert all(abs(a - b) < 1e-9 for a, b in zip(got, [0.05, 0.0, 0.08])), got
+assert matched["n_unpaired"] == 0, matched["n_unpaired"]
+
+# 漏音：练习删掉第 2 音（1.0）→ 恰好只有被删的那个参考音落单，
+#        其余两音仍应正确配对并产出偏差
+#
+# ★★ 历史记录（保留供追溯，★ 不要再把下面那段观测当成正确行为）：
+#   曾有一版判据写「旧断言 len(vals2) == 2 恒假」，并记录
+#   「实测 n_unpaired=3、只配出 1 对」。
+#   ★★ 那个「实测」是在**有 bug 的实现**上测出来的 ——
+# ★★ match_onsets 的 d<0 / d>0 两个分支与 §4.2 写反了，
+# ★★ 导致第 3 音 2.08 本该配到 ref 2.0（差 0.08 ≤ tol）却被误判落单。
+# ★★ 该 bug 已于 2026-09-24 修正（timing.py 的两个分支 + 注释）。
+# ★★ ★ 教训：把错误实现的行为写成「实测」等于把 bug 写成了规格。
+#
+# ★ 正确预期（判据本意「漏检不能静默出数」，且不能牺牲正确配对）：
+#   ref=[0,1,2], prac=[0.05,2.08] → 第1音配(0,0)、第3音配(2,1)，
+#   只有被删的 ref 1.0 落单 → n_unpaired == 1，偏差 2 个：[0.05, 0.08]
+matched2 = timing.match_onsets(ref, [0.05, 2.08])
+n_unpaired = matched2["n_unpaired"] if isinstance(matched2, dict) else matched2.n_unpaired
+vals2 = list(timing.compute_deviations(matched2))
+# ★ 恰好一个参考音落单（被删的 1.0），不多不少
+assert n_unpaired == 1, f"应恰好 1 个音落单（被删的 ref 1.0），实得 {n_unpaired}: {matched2}"
+# ★ 落单的是 ref 侧，不是 prac 侧 —— 这条直接锁住 §4.2 的分支方向
+assert matched2["unmatched_ref"] == [1.0], matched2["unmatched_ref"]
+assert matched2["unmatched_prac"] == [], matched2["unmatched_prac"]
+# ★ 仍正确配出两对 → 偏差 2 个，不是 1 个
+assert len(matched2["pairs"]) == 2, matched2["pairs"]
+assert len(vals2) == 2, f"漏一音后应配出 2 对、2 个偏差，实得 {vals2}"
+# ★ 且每个产出的偏差都必须来自真实配对，不得凭空多出
+assert len(vals2) <= len(matched2["pairs"]), (vals2, matched2["pairs"])
+# ★★ 时间轴必须逐对取自配对结果，不得切 ref 的前缀 ★★
+#   ★ 旧实现曾用 ref_onsets[: len(deviations)]，那只在「配对的参考索引恰为
+#   ★ 连续前缀」时成立。本例 ref=[0,1,2] 配到 (0,0) 与 (2,1) —— 索引不连续，
+#   ★ 切片会给出 [0.0, 1.0]，把偏差 0.08 错标在【被删音 1.0】上。
+# ★ ★ 该缺陷在前一个 bug 修好前不可见（那时只配 1 对，切片长度 1 恰好正确），
+# ★ ★ 属「被前一个 bug 掩盖的 bug」—— 判据必须显式锁住，否则会假绿。
+expected_t2 = [pair[2] for pair in matched2["pairs"]]
+assert expected_t2 == [0.0, 2.0], expected_t2
+# ★ 被删的 1.0 绝不能出现在时间轴里
+assert 1.0 not in expected_t2, expected_t2
+
+# 轴错：WARPED 端口必须显式失败，不得静默出数
+class FakeWarped:
+    timeline_basis = "WARPED"
+    def read(self, port_id): return None
+
+try:
+    timing.match_onsets(ref, FakeWarped())
+except Exception as exc:
+    print(f"OK 轴错显式失败：{type(exc).__name__}")
+else:
+    print("FAIL 轴错未失败：WARPED 数据被静默接受", file=sys.stderr)
+    sys.exit(1)
+PY
 ```
 
 **实现后**（§35 `Real ⊑ Virtual`）必须额外跑：
 - 合成用例：参考 `[0, 1, 2]`，练习 `[0.05, 1.0, 2.2]` →
-  `per_note_onset_ms == [50.0, 0.0, 200.0]`（**黄金向量**）
-- 死区用例：差值 `23.0` → 落 `on_time_ratio`；`23.1` → 落 `late_ratio`
-- 漏音用例：练习删掉第 2 音 → `n_unpaired >= 1` 且该音**不出现**在 `per_note_onset_ms`
+  `per_note_onset_sec == [0.05, 0.0, 0.2]`（**黄金向量**，★ 已在脚本 4 中机器化）
+- 死区用例：差值 `0.023` → 落 `on_time_ratio`；`0.0231` → 落 `late_ratio`
+  （★ 已在脚本 1 中机器化，且**不依赖注入**）
+- 漏音用例：练习删掉第 2 音 → `n_unpaired >= 1` 且该音**不出现**在 `per_note_onset_sec`
+  （★ 已在脚本 4 中机器化）
 - 轴错用例：把某端口伪造成 WARPED → 必须**显式失败**（不得静默出数）
+  （★ 已在脚本 4 中机器化）
 
 **验收判据**：
-- [ ] 8 个 payload 键名与注册表逐字一致
-- [ ] `early + late + on_time == 1.0`
+- [ ] 8 个 payload 对象的 `key` 唯一且类型符合 `UiScalar` / `UiSeries`
+      —— ★ **机器不可执行**：需要 `summarize_deviations` 真实返回后才能遍历其结构；
+      当前为 SHELL，写成脚本只会得到 `NotImplementedError`，不构成判据。
+- [ ] `early + late + on_time == 1.0`（★ 已在脚本 2 中机器化）
 - [ ] 漏音场景下中位数**不被**巨大假偏差污染
-- [ ] 两次运行 `payload` 完全相等
+      —— ★ **机器不可执行**：需要真实 payload 才能构造该场景；保留为人工核验项
+- [ ] 两次运行 `payload` 完全相等（★ 已在脚本 2 中机器化）
 
 ---
 
@@ -264,12 +451,12 @@ python3 tools/build_virtual_graph.py --check
 **必须停止的情形**：
 
 1. 你认为需要**新增一个阈值/口径**而 §4 没写
-2. 你认为 `ONSET_MATCH_TOLERANCE_SEC = 0.100` 或 `ONSET_DEADBAND_MS = 23.0`
-   **量级不对**（它们是从"对齐精度 ±23ms"与"最短音长 150ms"推导的，
+2. 你认为 `ONSET_MATCH_TOLERANCE_SEC = 0.100` 或 `ONSET_DEADBAND_SEC = 0.023`
+   **量级不对**（它们是从"对齐精度 ±0.023 秒"与"最短音长 0.150 秒"推导的，
    若你发现推导前提有误，**上报，不要自行改**）
 3. 你发现 §4 的规格**不足以确定唯一实现**
 4. 你需要 `notes.practice` 之外的数据源
-5. 你发现 `PAYLOAD_SCHEMAS["timing"]` 与本文冲突
+5. 你发现插件自描述 payload 契约与本文冲突
 
 **上报格式**（宪章 §37）：
 ```
@@ -291,8 +478,8 @@ GATE CHALLENGE
 
 | 常量 | 值 | 来源 |
 | --- | --- | --- |
-| `ONSET_MATCH_TOLERANCE_SEC` | `0.100` | 由 ±23ms 对齐噪声与 150ms 最短音长推导 |
-| `ONSET_DEADBAND_MS` | `23.0` | = 对齐帧级精度 ±hop/2 @ hop=2048 |
+| `ONSET_MATCH_TOLERANCE_SEC` | `0.100` | 由 ±0.023 秒对齐噪声与 0.150 秒最短音长推导 |
+| `ONSET_DEADBAND_SEC` | `0.023` | = 23.0 / 1000，即对齐帧级精度 ±hop/2 @ hop=2048 |
 | `MIN_STABLE_NOTE_SEC` | `0.150` | `features.py` |
 | `MATERIALIZE.rms_frame_length` | `1024` | `profile.py` |
 | `MATERIALIZE.rms_hop_length` | `256` | `profile.py` |

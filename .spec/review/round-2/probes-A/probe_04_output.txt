@@ -1,0 +1,28 @@
+BI         symbol                                                         status
+----------------------------------------------------------------------------------------------------
+FILE-203   harmonica_eval.core.ingest.SILENCE_RMS_THRESHOLD               OK
+FILE-203   harmonica_eval.core.ingest.frame                               MISSING -> module harmonica_eval.core.ingest ok but attr missing: module 'harmonica_eval.core.ingest' has no attribute 'frame'
+FILE-203   harmonica_eval.core.ingest.SILENCE_RMS_THRESHOLD               OK
+FILE-200   harmonica_eval.algorithms.pitch.ALGORITHM_ID                   OK
+FILE-200   harmonica_eval.algorithms.timing.ALGORITHM_ID                  OK
+FILE-200   harmonica_eval.algorithms.dynamics.ALGORITHM_ID                OK
+FILE-200   harmonica_eval.algorithms.pitch.ALGORITHM_VERSION              OK
+FILE-200   harmonica_eval.algorithms.timing.ALGORITHM_VERSION             OK
+FILE-200   harmonica_eval.algorithms.dynamics.ALGORITHM_VERSION           OK
+FILE-200   harmonica_eval.algorithms.pitch.run                            OK
+FILE-200   harmonica_eval.algorithms.timing.run                           OK
+FILE-200   harmonica_eval.algorithms.dynamics.run                         OK
+FILE-301   harmonica_eval.host.app.build_default_app                      OK
+FILE-301   harmonica_eval.host.build_default_app                          MISSING -> module harmonica_eval.host ok but attr missing: module 'harmonica_eval.host' has no attribute 'build_default_app'
+FILE-301   harmonica_eval.host.app.HostApp                                OK
+FILE-400   harmonica_eval.cockpit.app.LOCAL_BIND_HOST                     OK
+FILE-400   harmonica_eval.cockpit.app.run_local_ui                        OK
+FILE-400   harmonica_eval.cockpit.launch_cockpit                          OK
+FILE-104   harmonica_eval.core.surface.generate_all_ports                 OK
+FILE-104   harmonica_eval.core.surface.port_prefix                        MISSING -> module harmonica_eval.core.surface ok but attr missing: module 'harmonica_eval.core.surface' has no attribute 'port_prefix'
+FILE-104   harmonica_eval.core.surface.build_surface                      OK
+FILE-104   harmonica_eval.core.surface.Surface                            OK
+FILE-105   harmonica_eval.core.api.HostCore                               OK
+FILE-105   harmonica_eval.core.api.INTERNAL_STAGES                        OK
+FILE-003   harmonica_eval.contract.UI_PAYLOAD_KEYS                        OK
+FILE-004   harmonica_eval.profile.PORT_INDEX                              OK

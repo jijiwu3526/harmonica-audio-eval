@@ -1,0 +1,13 @@
+INTERNAL_STAGES = {<SessionState.BUILDING: 'BUILDING'>: ('INGESTING', 'ALIGNING', 'MATERIALIZING', 'SEALING')}
+   FILE-105:47: - `typing`（仅 `Mapping`，`INTERNAL_STAGES` 的注解用）
+   FILE-105:216: - **禁止**：返回 `INTERNAL_STAGES` 里的任何字符串（`INGESTING` / `ALIGNING` / `MATERIALIZING` / `SEALING`）；返回 `str` 字面量而非枚举成员；把 `BUILDING` 细化成子阶段；为任何状态计算百分比。
+   FILE-105:260: | `INTERNAL_STAGES` | module constant | `Mapping[SessionState, tuple[str, ...]]`，键**只有** `SessionState.BUILDING`，值**恒为** `("INGESTING", "ALIGNING", "MATERIALIZING", "SEAL
+   FILE-105:262: **公开成员恰为上述 8 行**：`HostCore` 上除 `__init__` 与下划线开头的名字外，方法名集合必须恰好等于上表 7 个方法名。`INTERNAL_STAGES` 只被本模块的审查/断言使用，**不得**成为任何返回值的取值来源。
+   FILE-105:282: | 内部阶段名（禁止外泄） | `INTERNAL_STAGES[SessionState.BUILDING]` = `("INGESTING", "ALIGNING", "MATERIALIZING", "SEALING")` | 只用于断言，绝不返回 |
+   FILE-105:321: | INV-105-2 | **`status()` 只返回 `SessionState` 的六个值之一**（铭牌 MUST）；内部阶段 `INGESTING` / `ALIGNING` / `MATERIALIZING` / `SEALING` 不得外泄 | `assert isinstance(core.status(sid), Se
+   FILE-105:329: | INV-105-10 | **公开操作面恰好 7 个 + 1 个模块常量 `INTERNAL_STAGES`**：类上除 `__init__` 与下划线开头的名字外无非方法属性 | 断言 `{n for n in dir(HostCore) if not n.startswith("_")} == {"create_session",
+   FILE-105:362: python -c "import harmonica_eval.core.api as m; assert {n for n in dir(m.HostCore) if not n.startswith('_')} == {'create_session','set_reference','set_practice','build_su
+   FILE-105:397: from harmonica_eval.core.api import HostCore, INTERNAL_STAGES
+   FILE-105:416: assert c.status(sid).value not in INTERNAL_STAGES[S.BUILDING]
+   FILE-105:475: - [ ] 命令 1 输出 `OK facade=7+1`：`{n for n in dir(HostCore) if not n.startswith('_')}` 恰好等于 7 个操作名，且 `set(INTERNAL_STAGES) == {SessionState.BUILDING}`
+   FILE-105:478: - [ ] 命令 4 输出 `OK state machine`：`CREATED`（登记一段后仍为 `CREATED`）→ `INPUT_READY` → `BUILDING` → `FAILED` 全链成立；`CoreBuildError.__cause__ is not None`；`FAILED` 后 `acquire_surfa

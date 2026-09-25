@@ -64,7 +64,7 @@
 - [ ] `contract.py` 的全部类型被下游正确引用（无孤岛）
 - [ ] `profile.PORTS` 的 12 个端口都有 `produced_by` 指向真实模块
 - [ ] `CORE_REQUIRED_PORTS` 在 `profile.PORTS` 中全部存在（import 时已自检）
-- [ ] `algorithms.ALGORITHMS` 的 `required_ports` 都是 `profile.PORTS` 子集
+- [ ] `algorithms.registry.Registry` 中显式注册的 `PluginSpec.required_inputs` 都是 `profile.PORTS` 子集
 - [ ] **不存在任何 TODO / FIXME / 未决标记**
 
 **验证**：`grep -rn "TODO\|FIXME\|XXX\|待定" harmonica_eval/`

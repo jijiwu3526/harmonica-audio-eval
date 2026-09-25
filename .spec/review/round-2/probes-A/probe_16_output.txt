@@ -1,0 +1,46 @@
+=== FILE-105 stage 2 / 3 / 4 (verbatim) ===
+  167: 规范化（SPEC §7.4 授权的重采样点唯一地在这里）。
+  168: - 阶段 2 `ALIGN`：调用 `harmonica_eval.core.align` 的入口，实参 = 阶段 1 的产出；
+  169: 产出 = **warp 路径点**（`warp_path`，一个 `(n_ref_frames, 2)` 的 `int32` 数组）。
+  170: 
+  171: ★★ **更正（负责人裁定 `pcm.*` 归属后同步）：上一版这里说 ALIGN 产出
+  172: 「两份对齐 PCM」—— 与实测不符，也与裁定冲突。** ★★
+  173: 
+  174: 实测：`core.align.align(reference, practice)` 的返回注解是
+  175: `npt.NDArray`，**只返回 `warp_path`**，不产任何 PCM。
+  176: 
+  177: 裁定后 `pcm.*` 的归属是：
+  178: - `pcm.mapped.reference` / `pcm.mapped.practice` —— 阶段 4（`core.surface`）
+  179: **纯转发**阶段 1 的规范化 PCM（零计算）；
+  180: - `pcm.warped.practice` —— 阶段 4 按 `warp_path` 做**索引重排**。
+  181: 
+  182: ⇒ 阶段 2 只负责**算对齐**；PCM 的登记与装配**全部**在阶段 4。
+  183: 本阶段**不得**产出任何 PCM（否则同一份数据有两个生产者）。
+  184: - 阶段 3 `FEATURES`：调用 `harmonica_eval.core.features` 的入口，实参 = 阶段 2 的产出；产出 = profile 决定的**全部**端口缓冲（每个端口的 `PortDescriptor` 与配套数组），**一次性预生成、非惰性**。
+  185: - 阶段 4 `SURFACE`：调用 `harmonica_eval.core.surface` 的入口装配并按 surface.py 冻结的口径 Seal，使 `SurfaceManifest.sealed is True`；每个端口的 `content_hash` 按 `contract.PortDescriptor.content
+  186: - 四个阶段的**入口签名以各自 BUILD-INSTRUCTION 冻结的规格为准**；本文件不内联四阶段的任何逻辑，不做任何数值计算，不接触音频字节。
+
+=== stage 2 output type (what stage 3 receives as '实参') ===
+   align.align (reference: 'npt.NDArray', practice: 'npt.NDArray') -> 'npt.NDArray' -> NDArray (warp_path, int32 (N,2))
+
+=== every callable in core.features and its FIRST parameter ===
+   materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'   first_param=samples
+   materialize_rms(samples: 'npt.NDArray') -> 'npt.NDArray'   first_param=samples
+   materialize_chroma(samples: 'npt.NDArray') -> 'npt.NDArray'   first_param=samples
+   materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'   first_param=pitch
+
+   => NO function takes 'warp_path' / '阶段 2 的产出' as first param.
+   => NO function returns 'profile 决定的全部端口缓冲'.
+
+=== who actually produces all 12 ports? ===
+   core.surface.generate_all_ports(reference, practice, sample_rate, warp_path)
+   FILE-104 §4.7 step 5: build_surface() calls generate_all_ports() itself.
+   => stage 4 rebuilds ALL ports; stage 3's output has no consumer.
+
+=== FILE-105 §3 whitelist: which core.surface names may api.py import? ===
+  51: - 本包内（穷举，恰 6 条 import 的来源）：
+  52: - `harmonica_eval.contract`：且仅这 5 个名字 —— `HostContract`, `SessionState`, `ContractViolation`, `CoreBuildError`, `ErrorCode`
+  53: - `harmonica_eval.core.surface`：且仅 `Surface`
+  54: - `harmonica_eval.core.ingest`、`harmonica_eval.core.align`、`harmonica_eval.core.features`：仅作为 build_surface 的阶段入口调用（入口签名以各自 BUILD-INSTRUCTION 冻结的规格为准，本文件不内联其任何逻辑）
+  55: 
+   => only 'Surface'. build_surface / generate_all_ports are NOT importable by api.py.

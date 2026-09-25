@@ -60,12 +60,118 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 | 标准库 | `sys` | `sys.argv`、`sys.stderr` |
 | 标准库 | `pathlib`（`Path`） | 输出路径与落盘 |
 | 标准库 | `typing`（`Sequence`） | 签名注解 |
-| 本包内 | `.contract`（`UiView` / `UiScalar` / `UiSeries` 及该模块导出的会话驱动符号） | 投影契约与 C1 会话驱动面 |
+| 本包内 | `.contract`（`UiView` / `UiScalar` / `UiSeries`） | 投影契约（**只读数据结构**） |
+| 本包内 | `.host.app`（`build_default_app`，见下方 ★ 更正） | **C1 门面**：`run_headless` 必须能驱动会话 |
+| 本包内 | `.profile`（只取 `PROFILE_VERSION`，见下方 ★★ 再更正） | **数据面版本常量**：`run_headless` 建会话时把它作为 `create_session(profile_version)` 的实参交给 C1（数据面内容 = `f(reference, practice, PROFILE_VERSION)`） |
+
+★★ **更正（本版，这是一处会导致入口完全无法工作的缺陷）** ★★
+
+**上一版写的是**：`.contract`（…「及该模块导出的**会话驱动符号**」），
+并把「本包内除 `.contract` 之外的任何模块」列入**禁止**。
+
+**实测证明这两条合起来使 `run_headless` 无法实现**：
+
+1. **`contract.py` 里没有任何"会话驱动符号"。** 实测其全部 31 个导出：
+   - 3 个 `Protocol`：`AlgorithmDataContract` / `HostContract` / `UiProjectionPort`
+     —— **Protocol 不能实例化**（实测 `HostContract()` → `TypeError`），
+     只能作类型注解，**无法驱动任何会话**；
+   - 5 个 `Enum`、12 个 `dataclass`、4 个异常类、2 个常量元组；另有 1 个 `HarmonicaError` 异常数据类，故本次实测的 dataclass 总数为 **13**。新增的普通 dataclass 是 `ResolutionView`（只读解析视图，定义见 `harmonica_eval/contract.py:390-413`）。
+   `contract.py` 自己的 ROLE 也写着「**纯声明，无行为**」。
+2. **真正的 C1 门面在 `host/app.py`**：`class HostApp`（:70）与
+   `build_default_app()`（:243）。实测**全仓没有任何调用方**。
+3. **而上一版禁止 import `host`。** 于是：
+   - §4.2 要求 `run_headless` 「把 `reference_uri`、`practice_uri` 交给 C1 会话」、
+     「必须等到 `state == DATA_READY`」；
+   - 但唯一能驱动会话的对象在 `host`，而 `host` 被禁；
+   - `contract` 里又没有可驱动的东西。
+   ⇒ **入口 → C1 的这条边在 import 层面是断的。**
+   实现者只能二选一：违反 §3 去 import `host`，或者违反 §4.2 不驱动会话。
+   **两者都是缺陷**，且这正是 §10 定义的「本文件与任何上游工件冲突」。
+
+**本版冻结的修正**：**允许** `from harmonica_eval.host.app import build_default_app`。
+
+★ **第二版再更正（P2 管线审查 F1）**：上一版我写的是「允许 import `.host`」——
+**那仍然跑不通**。实测：
+
+```
+>>> from harmonica_eval.host import build_default_app
+ImportError: cannot import name 'build_default_app' from 'harmonica_eval.host'
+```
+
+因为 `host/__init__.py` 的 `__all__ = ["app"]` **只声明子模块名**，
+并不把 `build_default_app` 绑成包属性（见 FILE-300 §4.1 的 E2/E3 讨论）。
+唯一能跑的写法是 `from harmonica_eval.host.app import build_default_app`，
+其 AST 键是 **`.host.app`**（三段），不是 `.host`。
+上一版把白名单写成 `.host`，于是「允许 import 的东西」与
+「唯一能跑通的写法」**差一个层级** —— 实现者仍被卡死。
+
+**这条正是本轮的教训**：`produced_by` / `__all__` / import 路径三者
+各自都"看起来对"，只有真跑一次才知道哪条能通。
+
+- `run_headless` **必须**通过 `build_default_app()` 取得 C1 门面，
+  再依次调用其 `HostContract` 消费方方法完成四步。
+- **仍然禁止** import：`cockpit`（不变量 F 的判定线不变）、C2 / C3 的**实现模块**
+  （`core.*` / `algorithms.*`）—— 入口只与 C1 门面与 `contract` 对话。
+- **依赖方向仍然正确**：`__main__` → `host.app` → (`core`, `algorithms`)。
+  `host` 是装配点，入口依赖装配点是正常的（入口本就在最外层）。
+- §8 的 import 闭包断言与 §6 的 INV-002-1 相应放宽为：
+  `import 闭包 ⊆ {__future__, argparse, json, sys, pathlib, typing, .contract, .host.app, .profile}`，
+  且**仍须断言 `cockpit` 不在闭包内**（这才是不变量 F 的真正判据）。
+
+★ **诚实记录**：`FILE-002` 与 `FILE-105`（`api.py`）之间原本还有一处不一致 ——
+`FILE-105` 说 C1 经 `HostCore` 的 7 个操作驱动，而 `FILE-002` 说 C1 门面在
+`contract` 里。本更正后，**唯一**的 C1 门面是 `host.app.build_default_app`，
+`FILE-105` 的 `HostCore` 是 C2 侧实现 `HostContract` 的对象（**被 C1 持有**），
+两者是「调用方 / 实现方」关系，不再冲突。
+
+★★ **本版再更正（P2 管线审查 BLOCK-18，与上一条同源）：`.profile` 也必须允许** ★★
+
+**上一版写的是**：`ALLOWED = {"__future__", "argparse", "json", "sys", "pathlib",
+"typing", ".contract", ".host.app"}`（§8 判据 2，原文见下）。
+
+**实测证明它与 §4.2 / §4.7 互斥**：
+
+1. §4.2 第 2、3 步要求比较 `state == DATA_READY`（`SessionState` 可从
+   `.contract` 取，这一半不是 import 问题）；
+2. 但 §4.2 第 1 步要求建会话，而 `HostApp.create_session(profile_version)`
+   （`host/app.py:124`；契约面见 `contract.HostContract.create_session`）
+   **需要一个 `profile_version` 实参**，其 docstring 原文写着
+   「`profile_version` 必须显式传入 —— 没有它，「同一对输入」不成立
+   （数据面内容是 `(reference, practice, profile_version)` 的函数）」；
+3. 而 `profile_version` / `PROFILE_VERSION` 在上一版全文出现 **0 次**：
+   规格**从未说明它从哪来**。唯一合理来源是 `profile.py` 的
+   `PROFILE_VERSION`（实测 `harmonica_eval/profile.py:56` =
+   `"CORE_PROFILE_V0.1"`，是 `__all__` 的第一个导出名），
+   而 `.profile` **不在 `ALLOWED` 里**。
+
+实测：把 `.profile` 加进 import，AST 判据立刻报
+`AssertionError: 非法 import: ['.profile']`。
+实现者只能二选一：违反 §3/§8 去 import `.profile`，或违反 §4.2 不建会话
+（硬编码版本字面量 / 传空串都是自造规定，同样违规）。
+
+**本版冻结的修正**：**允许** `from harmonica_eval.profile import PROFILE_VERSION`，
+其 AST 键是 **`.profile`**（见上表新增行）。§8 判据 2、§6 的 INV-002-1、
+§8 的验收判据步骤 2 同步放宽。
+
+**为什么选「允许 `.profile`」而不是「让 C1 内部承担默认版本」**：
+后者要把 `HostApp.create_session(profile_version)` 改成可省略（或加默认值），
+那是 `.contract` / FILE-301 的**契约变更**，
+须由负责人另行裁定；而前者**不改任何契约** ——
+`HostContract.create_session(profile_version)` 的签名与语义逐字不变，
+只是在调用点把版本来源从「规格未说明」补成「`.profile.PROFILE_VERSION`」。
+且 `profile.py` 本就是「数据面版本」的唯一定义处（FILE-004 §4.1），
+入口依赖它是**正确**的依赖方向：`__main__` → `profile`（纯常量模块，
+`profile.py` 的 MUST NOT 里明确写了不 import core / host / algorithms / cockpit，
+不存在反向依赖或循环）。
+
+★ 边界：本更正**只**允许从 `.profile` 取 `PROFILE_VERSION` 这一个名字。
+C1 内部**不做**版本比对（FILE-105 已冻结「阶段 1 不做任何版本比对」），
+`__main__` 也**不得**自行比对、解析或改写该字符串 —— 它只被原样转交。
 
 **禁止 import**（逐条列举）：
 
 - `harmonica_eval.cockpit`、任何名字以 `cockpit` 开头的模块、任何 UI / 图形 / 终端渲染依赖。**这是不变量 F 的判定线。**
-- 本包内除 `.contract` 之外的任何模块（含 `__init__`、C2 / C3 的实现模块、任何 pipeline / ingest / align / features / metrics 实现模块）。
+- 本包内除 `.contract`、`.host.app` 与 `.profile` 之外的任何模块（含 `__init__`、C2 / C3 的实现模块 `core.*` / `algorithms.*`、任何 pipeline / ingest / align / features / metrics 实现模块）。**★ 本版更正：`.host` 已从禁止改为允许，`.profile` 已从禁止改为允许**（见上表下方的 ★★ 更正）。
 - 第三方数值与音频栈：`numpy`、`scipy`、`soundfile`、`librosa`、`audioread`、`resampy`、`pandas`、`matplotlib`、`plotly`。
 - 网络与进程：`requests`、`urllib`、`http`、`socket`、`subprocess`、`multiprocessing`、`concurrent`、`asyncio`。
 - 噪声与不确定性来源：`logging`、`warnings`、`random`、`time`、`datetime`、`uuid`、`os.environ` 的任何读取、`platform`、`getpass`。
@@ -125,8 +231,8 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 - **输入**：`reference_uri` 参考演奏路径（原样字符串，不做 URI 解析、不做 glob、不做相对路径归一化）；`practice_uri` 练习演奏路径（同上）；`out_path` `metrics.json` 的落点。
 - **输出**：C1 的最终投影 `UiView`（含 `state` / `scalars` / `series` / `error_code` / `error_detail`）。
 - **算法口径**（固定四步，顺序不可变；除第 1 步与第 3 步的 gate 判定外不插入任何逻辑）：
-  1. 登记两段输入：把 `reference_uri`、`practice_uri` 交给 C1 会话（登记顺序：先参考、后练习）。
-  2. 构建数据面：预生成 + Seal。**必须等到 `state == DATA_READY`**。
+  1. 登记两段输入：用 `.profile` 的 `PROFILE_VERSION` 建会话 —— **`create_session(PROFILE_VERSION)`**（实参写死为 `PROFILE_VERSION` 这个名字，**不得**传字面量、空串、`None` 或其它推导值；契约要求见 `contract.HostContract.create_session` 的 docstring：没有它「同一对输入」不成立）。再把 `reference_uri`、`practice_uri` 交给该会话（登记顺序：先参考、后练习）。
+  2. 构建数据面：预生成 + Seal。**必须等到 `state == DATA_READY`**（`SessionState` 取自 `.contract`）。
   3. Gate 判定：`state == DATA_READY` → 触发算法；`state != DATA_READY` → **不触发算法**，直接返回当前视图。
   4. 取视图：返回 C1 的最终投影 `UiView`。
 - **`out_path` 的用途冻结**：仅供 C1 会话记录「本次运行的输出落点」（是否接受该信息由 `contract` 的会话驱动面决定）。本函数**不创建目录、不打开文件、不做存在性检查、不写任何字节**。若实现者判定该参数在 `contract` 的驱动面上无对应位置，保留签名即可，**不得为了「用上它」而新增任何行为**。
@@ -135,17 +241,175 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 - **禁止**：函数体内不出现 `try` / `except`（算法级失败由 C1 归一化为 `error_code`，本函数如实转述）。不归一化、不翻译、不包装 `error_code`。不重算任何数值。
 - **不变量**：返回后，`view` 的每个字段都与 C1 发布的内容逐位相同；除 C1 会话自身的副作用外，本函数不产生任何文件系统副作用。
 
-### 4.3 `write_metrics_json(view: UiView, out_path: Path) -> None`
+### 4.3 `write_metrics_json(view: UiView, out_path: Path, reference_uri: str, practice_uri: str) -> None`
+
+★★ **签名更正（第三轮盲审 A 发现，本版修正）：本函数原来只收 `(view, out_path)`，
+**无法**产出 §4.3 第 3 步要求的 `inputs` —— 这是一个**死路**。** ★★
+
+真实缺陷：`inputs` 固定为 `{"reference": <reference_uri 原样>, "practice": <practice_uri 原样>}`，
+但 `UiView` 的 8 个字段是
+`session_id / state / series / scalars / progress / error_code / error_detail / note`
+—— **没有任何字段携带 URI**（实测：`UiScalar` 无、`UiSeries` 无）。
+而本文件 §3 禁止 import `core.*`，故本函数**也不能**去问 C1 的会话要。
+⇒ 原来的签名下，第 3 步**无法实现**，实现者只能自己发明一个通道。
+
+**修法**：`main` 手里同时有 `args.reference` / `args.practice` 和 `view`，
+由**调用方显式传入**，不新增任何数据通道。
+这**不动 `contract.py` 一行** —— 这两个函数都是 `__main__` 的私有函数，
+不在任何契约里。同样更正适用于 §4.4 `render_report_markdown`（见该节）。
+
+★ 这是**同一根因的第三次出现**：投影（`UiView`）不携带写盘方需要的量，
+而写盘方拿不到别的通道。前两次是 F8 的 `meta.duration_*` 与
+`alignment.*`。三次都指向同一个结论：**「谁能看见什么」必须在设计时逐项对齐，
+不能默认「反正是同一个进程」**。
+
+---
+
+★★ **关于 SPEC §3 的 `metrics.json` 结构 —— 已裁定（负责人 2026-09-24 批准）** ★★
+
+`SPEC.md §3` 给出了一份**不同的**顶层结构：
+`meta` / `alignment` / `global` / `sections[]`。
+本文件冻结的是 `schema_version` / `inputs` / `state` / `scalars` / `series`。
+**两者此前没有任何映射关系**（P1 审查 F8 / P2 审查 F9 独立发现）。
+
+**裁定**：**以本文件的结构为准**；SPEC §3 的 JSON 片段**降级为示意**，
+不是冻结契约。理由逐条可查：
+
+1. **SPEC §3 的键没有可计算的来源。** 实测全仓检索：
+   `in_tune_ratio` / `pitch_bias_cents` / `voiced_ratio` 三个键
+   **定义数 = 0**（除 SPEC 自身）；
+   `pitch_cents_mae` / `timing_mae_ms` / `energy_db_delta` 各只有 **1 处**，
+   且都在 `research/02-landscape-research.md`（**调研笔记，非规格**）。
+   SPEC §3 只给了字段名与 `0.0` 占位，**没有给任何一个键的计算口径**。
+   按它实现 = 让实现者自己发明口径 —— 那正是 SPEC 自己禁止的。
+2. **`alignment` 只保留两项可由 `warp_path` 派生的数值。**
+   `method` 与 `alignment.confidence` 没有数据来源，删除；`warp_path` 只提供
+   `(reference_frame, practice_frame)` 路径，不提供方法名或全局对齐置信度，
+   `align()` 也只返回该路径（`harmonica_eval/core/align.py:122-132`）。
+   源码精确名检索中，`mean_abs_warp_sec` / `tempo_ratio` 各 **0** 命中；`confidence` 虽在
+   `pitch.reference` / `pitch.practice` 的 `field_names` 中各出现 1 次
+   （`harmonica_eval/profile.py:309-326`；契约布局见
+   `harmonica_eval/contract.py:184-191`），但它是**逐帧音高置信度**，
+   不是全局对齐置信度，不能重命名为 `alignment.confidence`。
+   负责人裁定：`method` 与 `alignment.confidence` 删除，不新增端口。
+   ★ `mean_abs_warp_sec` / `tempo_ratio` **可从 `warp_path` 派生**，
+   不属于端口字段缺失；★ **本口径由本轮裁定补充**，避免不同实现者各算各的：
+   ```text
+   mean_abs_warp_sec = mean_i |practice_frame_i - reference_frame_i|
+                       × profile.ALIGN.hop_length / sample_rate
+   tempo_ratio       = (practice_frame_n - practice_frame_1)
+                       / (reference_frame_n - reference_frame_1)
+   ```
+   **退化边界（两项分别判断，不得用一项的数值替另一项补默认值）**：
+
+   ```text
+   A. warp_path 行数 = 0:
+      mean_abs_warp_sec = null
+      tempo_ratio = null
+      理由：对空集求均值无定义；速度比也无法从退化路径导出。
+
+   B. warp_path 行数 = 1:
+      mean_abs_warp_sec = |practice_frame_1 - reference_frame_1|
+                          × profile.ALIGN.hop_length / sample_rate
+      tempo_ratio = null
+      理由：单行路径上的均值有定义，但速度比无法从退化路径导出。
+
+   C. warp_path 行数 >= 2 且 reference_frame_n == reference_frame_1
+      （两端 reference_frame 相同，跨度为 0）:
+      mean_abs_warp_sec = mean_i |practice_frame_i - reference_frame_i|
+                          × profile.ALIGN.hop_length / sample_rate
+      tempo_ratio = null
+      理由：此时 tempo_ratio 分母为 0，速度比无法从退化路径导出。
+   ```
+
+   `tempo_ratio` 的 `null` 口径与 `.spec/build/FILE-102-v1.md:203`
+   「`warp_path` 行数 < 2 → 不抛，返回 `None`（单点路径天然单调）」一致。
+   落盘时相应 `UiScalar.value` 为 `None`，由 §4.3 如实序列化为 JSON `null`；
+   `null` 表示无定义 / 不可导出，**不得**以 `0`、`1.0` 或任何默认值代替。
+   两列均为帧号（`harmonica_eval/profile.py:246-249`；
+   `harmonica_eval/core/align.py:98-100`；`.spec/build/FILE-102-v1.md:230-240`）。
+   换算必须取 `profile.ALIGN.hop_length`（当前 2048，
+   `harmonica_eval/profile.py:92-110`）与 `sample_rate`（当前 44100，
+   `harmonica_eval/profile.py:64-70`）；**不得**取该端口自己的
+   `PortSpec.hop_length`（当前 0，`harmonica_eval/profile.py:246-253`，含义是路径点表
+   不按帧栅格等间隔寻址，不是否定两列的帧时间单位）。这两项是由 C3 从
+   现有端口派生的结果，**不要求新增端口**。
+3. **SPEC §3 的 `sections[]` 依赖 SPEC §6，而 §6 尚未确认。**
+   `SPEC.md:208` 仍是 `- [ ] 负责人确认 §6 分段方式`。
+   按 AGENTS.md 铁律 3「未确认项不得实现」，**不得**写入主流程。
+
+**SPEC §3 的意图如何保留**：它要的每个量，在**本文件的结构**里都有落点 ——
+通过插件产出的 `UiScalar` / `UiSeries` 对象表达；字段名的唯一权威是
+对象自身的 `key` 字段。下表「例如可产出」只说明应表达的指标，**不是**从
+某张框架侧冻结表抄录：每个标量最终成为一个 `UiScalar`，逐音序列成为一个
+`UiSeries`。★ C3 插件化已删除旧的 payload 字段名冻结表；结果现在
+自描述，新增插件无需改本文件：
+
+| SPEC §3 的键 | 本结构里的落点 | 来源 |
+| --- | --- | --- |
+| `global.pitch_cents_mae` | `scalars["median_abs_cents"]` | `pitch` payload |
+| `global.in_tune_ratio` | `scalars["off_pitch_ratio"]` 的补（`1 - x`）★ **口径待定，见下** | `pitch` payload |
+| `global.timing_mae_sec` | `scalars["median_onset_sec"]` | `timing` payload |
+| ★ 上行键名已由 `timing_mae_ms` 改为 `timing_mae_sec` | —— | ★ 负责人裁定 timing 链路统一用 seconds；值与单位同步由 `median_onset_sec` 提供，**不做隐式换算** |
+| `global.energy_db_delta` | `scalars["median_db"]` | `dynamics` payload |
+| `meta.sr` | `scalars["sample_rate"]`（`pitch` payload 已含） | `pitch` payload |
+| `meta.duration_ref` / `duration_user` | ★ **无落点，见下** | —— |
+| `alignment.method` | ★ **删除**（无数据来源、不可验证的实现描述） | —— |
+| `alignment.mean_abs_warp_sec` | `scalars` 中一个自描述 `UiScalar`（最终 `key` 由产出对象自带） | ★ C3 从 `warp_path` 按本节开头本轮补充的公式派生 |
+| `alignment.tempo_ratio` | `scalars` 中一个自描述 `UiScalar`（最终 `key` 由产出对象自带） | ★ C3 从 `warp_path` 按本节开头本轮补充的公式派生 |
+| `alignment.confidence` | ★ **删除**（无数据来源；`pitch.confidence` 是音高置信度，不得冒充） | —— |
+| `sections[]` | ★ **不做**（§6 未确认） | —— |
+
+★ **`in_tune_ratio` 的口径未定，本文件不发明**：
+`pitch` payload 只有 `off_pitch_ratio`（偏离音比例），
+SPEC 要的是 `in_tune_ratio`（在音比例）。二者是否互补取决于
+`off_pitch_ratio` 的分母口径 —— 而该口径**未冻结**。
+故本文件**不写**这个换算，实现者若需要须先由负责人裁定。
+
+★ **`meta.duration_*` 无落点**：实测 `UiView` 的字段是
+`session_id / state / series / scalars / progress / error_code / error_detail / note`
+—— **没有**采样率、没有时长。而 `__main__` 只拿得到 `UiView`（拿不到 `SurfaceManifest`）。
+故 `duration_ref` / `duration_user` 若要出现在产物里，
+**必须先有人把它们放进投影**（`UiScalar` 或 `UiSeries`）—— 那是 C1 的改动，
+不是本文件的。本文件**不得**自行去问 C2 要 manifest（那会破坏
+「入口只与 C1 门面对话」的分层，见 §3）。
+
+> **这是 SPEC 与模具之间唯一一处**由负责人明确裁定的降级。
+> 已登记在 `.spec/review/round-1/DISPOSITION.md` §5（F8）。
+
+---
 
 - **输入**：`view` C1 投影；`out_path` 目标文件路径。
 - **输出**：`None`（副作用：写出 `out_path`）。
 - **算法口径**（固定，不得增删键、不得改键序）：
   1. `out_path.parent.mkdir(parents=True, exist_ok=True)`（`out_path` 无父目录时，`Path(".")` 的 `mkdir` 必须成功）。
   2. 构造顶层对象，键序**固定**为：`schema_version` → `inputs` → `state` → [`error_code`] → [`error_detail`] → `scalars` → `series`。方括号内两键**仅在投影对应字段非 `None` 且非空串时出现**；不补 `null`、不写空串。
-  3. `inputs` 固定为 `{"reference": <reference_uri 原样>, "practice": <practice_uri 原样>}`，键序固定。
+  3. `inputs` 固定为 `{"reference": reference_uri, "practice": practice_uri}`，键序固定。★ 两个值取自**本函数的入参**（见本节开头的签名更正），**不得**从 `view` 里翻找、不得新增 `UiScalar` 键去承载路径。★ C3 插件化后，插件结果字段名的唯一权威是插件产出对象的 `key` 字段；框架不再保存 URI 类键的白名单，本函数也**不得自造** URI 类 `UiScalar`。
   4. `state` = 投影 `state` 的枚举名：若 `getattr(state, "name", None)` 是 `str` 则取该值，否则取 `str(state)`。不映射、不翻译。
   5. `scalars` = 按投影原序的列表，每个元素键序固定为：`key` → `label` → `value` → `unit` → [`threshold`]。`threshold` 仅在投影携带该字段时出现（原样写出，不判定、不与 `value` 比较、不生成布尔结论）。
-  6. `series` = 按投影原序的列表，每个元素键序固定为：`key` → `label` → `unit` → `timeline_basis` → `n_points`。`timeline_basis` 写成枚举名（规则同第 4 步），取值必须落在 `{"REFERENCE", "WARPED"}`。`n_points` 取投影 `UiSeries` 的**点数元信息**（整型），不遍历、不统计 `values`。
+  6. `series` = 按投影原序的列表，每个元素键序固定为：`key` → `label` → `unit` → `timeline_basis` → `n_points`。`timeline_basis` 写成枚举名（规则同第 4 步），取值必须落在 `{"REFERENCE", "WARPED"}`。
+
+     ★★ **第四版更正（P2 管线审查 F4）：`n_points` 不是 `UiSeries` 的字段。** ★★
+
+     上一版要求 `n_points` 取「投影 `UiSeries` 的点数**元信息**（整型），
+     不遍历、不统计 `values`」，并在 §5 禁止用 `len(values)` 替代。
+     **实测**：`contract.UiSeries` 的字段恰好 7 个 ——
+     `key, label, t, values, unit, timeline_basis, source_port`；
+     `hasattr(UiSeries, "n_points")` 为 **False**，全仓 `n_points` 命中数 **0**。
+     于是上一版把实现者逼进死胡同：**要一个不存在的字段，
+     又禁止唯一能算出它的办法**。
+
+     **本版冻结的口径**：`n_points` = `len(s.t)`（`t` 是 `UiSeries` 的
+     **公开具体字段**，`Sequence[float]`，不是惰性对象）。
+     - 断言 `len(s.t) == len(s.values)`（这是 C4 侧也做的校验 —— 见
+       `FILE-401-v1.md` **§4.7 `render_series_plot`** 第 6 步
+       「数据长度校验：`assert len(series.t) == len(series.values)`」；
+       ★ 更正：原文写「见 FILE-401 §4.x」是个**占位符**，没有可查的节号 ——
+       盲审 probe 14 实测 FILE-401 中不存在名为 `§4.x` 的节），
+       不等 → 停止并上报（§10），**不得**截断到较短者。
+     - `n_points` 是**本文件算出来的派生子**，不是从投影读来的字段。
+     - §5 的原禁令相应收窄为：**不得**用 `len(s.values)` 之外的途径"估算"点数
+       （例如按时间跨度除以某个 hop 猜）；`len(s.t)` 是**唯一**正确来源。
   7. 序列化：`json.dump(obj, fh, ensure_ascii=_JSON_ENSURE_ASCII, indent=_JSON_INDENT, separators=_JSON_SEPARATORS, sort_keys=_JSON_SORT_KEYS, allow_nan=_JSON_ALLOW_NAN)`；随后显式写入一个 `"\n"`。
   8. 打开方式固定：`open(out_path, "w", encoding=_TEXT_ENCODING, newline=_TEXT_NEWLINE)`。
 - **数值口径（写死）**：
@@ -157,18 +421,19 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 - **异常**：`out_path` 不可写、父目录无法创建、磁盘满 → `OSError` 抛出，不吞、不降级、不换落点。
 - **不变量**：落盘后，`json.load` 得到的 `scalars` / `series` 的长度与顺序与投影**逐位相同**；产物中不存在投影里没有的量。
 
-### 4.4 `render_report_markdown(view: UiView) -> str`
+### 4.4 `render_report_markdown(view: UiView, reference_uri: str, practice_uri: str) -> str`
 
-- **输入**：C1 投影。
+- **输入**：C1 投影 + 本次运行的两个输入路径字符串。★ **签名更正**（与 §4.3 同因）：
+  报告正文要求写出「参考 / 练习」两行，而 `UiView` **不携带 URI** ——
+  原签名 `(view)` 同样无法产出这两行。由调用方 `main` 显式传入。
 - **输出**：Markdown 文本（`str`），**以单个 `"\n"` 结尾**，无尾部空行。
 - **算法口径**（骨架固定；`[]` 表示该行仅在条件成立时出现）：
 
 ```markdown
-# 数值报告
+# 口琴双音频对比 · 数值报告
 
-- 状态：<state>
-- 参考：<reference_uri>
-- 练习：<practice_uri>
+输入：参考 = <reference_uri>；练习 = <practice_uri>
+会话状态：<state>
 [- 错误码：<error_code>]
 [- 错误详情：<error_detail>]
 
@@ -181,7 +446,7 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 - <label>：单位 <unit>，时间基准 <basis>（<basis 注解>），采样点 <n>，t 轴单位：秒
 ```
 
-- `state` 文本规则同 §4.3 第 4 步。参考 / 练习两行取本次运行的输入路径字符串，由调用方经 `describe_inputs` 提供（`render_report_markdown` 从投影或调用参数取得，二者取其一，全文件只允许一个来源）。
+- `state` 文本规则同 §4.3 第 4 步。参考 / 练习两行的值**取自本函数的 `reference_uri` / `practice_uri` 入参**（与 §4.3 第 3 步同源，均为 `main` 的 `args.reference` / `args.practice`）；`describe_inputs` 只用于 CLI 用法回显（§4.6），**不得**在此处被调用 —— 本函数**禁止** import 或调用 `describe_inputs`（避免出现第二个来源）。
 - `error_code` / `error_detail` 两行：投影对应字段非 `None` 且非空串时写出，**如实写，不美化、不翻译、不省略**。
 - **`value` 格式化（写死）**：`int`（非 `bool`）→ `str(v)`；`float` → `repr(v)`；`bool` → `"true"` / `"false"`；`str` → 原样；`None` → `"N/A"`。禁止使用 `:.2f`、`%`、千分位、科学计数法重写。
 - **`unit` 格式化（写死）**：`unit` 为 `None` 或空串时，省略` <unit>` 整段（不留多余空格）。`threshold` 为 `None` 时写 `（阈值 N/A）`。
@@ -200,7 +465,14 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
   `- <label>：单位 <unit>，时间基准 <basis>（<basis 注解>），采样点 <n>，t 轴单位：秒`
   - `<basis>` ∈ `{"REFERENCE", "WARPED"}`；`<basis 注解>` 取 `_BASIS_GLOSS[<basis>]`。
   - `<unit>` 为 `None` 或空串时写 `单位 未标注`（不写空段、不留双空格）。
-  - `<n>` = 该 `UiSeries` 的点数元信息（整型，`str(n)`）。
+  - `<n>` = `len(s.t)`（本文件算出的派生子，见 §4.3 第 6 步），整型，格式化用 `str(n)`。
+
+    ★★ **本版更正：原写「该 `UiSeries` 的点数元信息（整型，`str(n)`）」—— 该元信息不存在。** ★★
+
+    `contract.UiSeries` 的字段恰好 7 个：`key, label, t, values, unit, timeline_basis, source_port`；
+    **没有** `n_points`，也没有任何「点数」字段。原文会让实现者去找一个不存在的字段。
+    正确来源已由 §4.3 第 6 步冻结：`n_points = len(s.t)`（并先断言 `len(s.t) == len(s.values)`，
+    不等则停止并上报）。本行据此改写。
 - **算法口径**：只读元信息。**不重新采样、不统计 `values`、不计算任何数值**。
 - **边界**：单元素列表 → 一行；`series` 中某条缺 `timeline_basis` → 见 §5（上报，不猜）。
 - **不变量**：返回值中每条曲线**必须**写明 `timeline_basis`。REFERENCE = 保留源时间（抢拍拖拍可见）；WARPED = 时间归一化（抢拍拖拍已被抹掉）。轴的含义不标出来，图就会被误读。
@@ -221,10 +493,11 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
   1. `args = build_parser().parse_args(None if argv is None else list(argv))`。
   2. `out_path = Path(args.out) if args.out else Path(DEFAULT_OUT_DIR) / DEFAULT_METRICS_FILENAME`。
   3. `view = run_headless(args.reference, args.practice, out_path)`。
-  4. `write_metrics_json(view, out_path)`。
-  5. `report_path = out_path.parent / REPORT_FILENAME`；以 `_TEXT_ENCODING` / `_TEXT_NEWLINE` 写入 `render_report_markdown(view)`。
+  4. `write_metrics_json(view, out_path, args.reference, args.practice)`。
+  5. `report_path = out_path.parent / REPORT_FILENAME`；以 `_TEXT_ENCODING` / `_TEXT_NEWLINE` 写入 `render_report_markdown(view, args.reference, args.practice)`。
   6. 退出码：`EXIT_FAILED` ⟺ 投影 `error_code` 非 `None` 且非空串；否则 `EXIT_OK`。
   7. **失败时照样走完第 4、5 步**：失败也必须落两份产物（可读报告里如实写 `error_code`）。
+- **`create_session` 的版本实参（★ 本版补写，见 §3 的 ★★ 再更正）**：建会话发生在第 3 步的 `run_headless` 内部，实参固定为 `PROFILE_VERSION` —— 即 `create_session(PROFILE_VERSION)`，该名字由 `from harmonica_eval.profile import PROFILE_VERSION` 取得（`.profile` 已在 §3 白名单内）。`main` **不**自行取版本、**不**新增命令行选项来传版本、**不**比对或改写该字符串；它只经 `run_headless` 间接完成。
 - **异常处理（写死）**：捕获 `OSError` 与 `ValueError`（含 `json` 的 `allow_nan=False` 触发的 `ValueError`）→ 向 `sys.stderr` 写**一行** `error: <异常类名>: <异常消息>` → 返回 `EXIT_FAILED`。除这两类之外的异常不捕获、不包装。
 - **用法错误**：交给 `argparse` 自身报错并以 `EXIT_USAGE`（2）退出；`main` **不捕获** `SystemExit`。
 - **输出纪律**：无论成功失败，**不把堆栈或诊断写到 stdout**（可读报告走 `report.md`；一行诊断走 stderr）。不打印进度条、不打印指标表。
@@ -241,7 +514,52 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 
 `DEFAULT_OUT_DIR`、`DEFAULT_METRICS_FILENAME`、`REPORT_FILENAME`、`EXIT_OK`、`EXIT_FAILED`、`EXIT_USAGE`、`build_parser`、`run_headless`、`render_report_markdown`、`write_metrics_json`、`main`、`summarize_series`、`describe_inputs`。
 
-四个 `raise NotImplementedError("SHELL: FILE-002 待注入实现")` 占位（`build_parser` / `run_headless` / `render_report_markdown` / `write_metrics_json` / `main`，共 5 处）必须被真实实现替换。文件末尾的 `if __name__ == "__main__": raise SystemExit(main())` 必须原样保留。
+★ `__main__.py` 已注入完成，**SHELL 占位数 = 0**。7 个函数
+（`build_parser` / `run_headless` / `render_report_markdown` / `write_metrics_json` /
+`main` / `summarize_series` / `describe_inputs`）各 1 处，均已被真实实现替换。
+文件末尾的 `if __name__ == "__main__": raise SystemExit(main())` 必须原样保留。
+
+★★ **本条已从「阶段态判据」改为「永续判据」★★
+原判据写的是「应有 7 处 `raise NotImplementedError("SHELL: …")` 占位」——
+它只在**注入前**成立，注入完成的那一刻就必然失效（本项目真的踩过：
+`check_counts` 报「声明 7，实际 0」）。判据不能只在一个阶段有意义。
+
+**现判据（永续）：`__main__.py` 内不得残留任何 SHELL 占位。**
+判据形态：对 `harmonica_eval/__main__.py` 做 AST 扫描，
+统计含 `"SHELL"` 字面量的 `ast.Raise` 节点数，**必须为 0**。
+
+★ 为什么这个形态更好：
+```
+· 注入前 → 7 ≠ 0，红（正确：还没实现）
+· 注入后 → 0 = 0，绿（正确：已实现）
+· ★ 任何阶段都成立，且阶段推进不会让它失效
+★ ★ 反过来，「必须有 7 处占位」在注入后永远红，且红得毫无信息量
+```
+
+★ 另一条永续约束（不随阶段变化）：**成功退出必须真的产出指标。**
+`main()` 返回 `EXIT_OK` 的充要条件是 `scalars` 或 `series` 非空；
+指标为空时必须非零退出并把 `error_code` / `error_detail` 写到 stderr。
+★ 这条治的是「rc=0 但 metrics.json 的 scalars 为空」那种假绿
+（本项目真的发生过：三个算法全 INCOMPATIBLE，命令却返回 0）。
+
+★★ 历史留档（★ 不是判据，仅记录）：★★
+```
+注入前的实测（对 `harmonica_eval/__main__.py` 做 AST 扫描，统计含 "SHELL" 字面量的 ast.Raise）：
+
+SHELL 占位数 = 7
+  build_parser           (lineno=72)
+  run_headless           (lineno=86)
+  render_report_markdown (lineno=113)
+  write_metrics_json     (lineno=138)
+  main                   (lineno=162)
+  summarize_series       (lineno=183)
+  describe_inputs        (lineno=199)
+```
+
+即 **7 个函数各 1 处，共 7 处**。原文漏掉了第二节（§4.5 / §4.6）的
+`summarize_series` 与 `describe_inputs` 两个函数，且「四个」这个数在原文里
+连括号清单（5 个名字）都对不上。
+函数名清单亦补齐为 §4.9 公开符号闭合表中的 7 个函数。
 
 ---
 
@@ -257,7 +575,7 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 | `state != DATA_READY` 但 `error_code` 为空 | **合同冲突**：不猜、不自造错误码、不写 `"UNKNOWN"` | 停止并上报（§10） |
 | 投影含 `NaN` / `Infinity` | 显式失败：`allow_nan=False` 拒绝写出非法 JSON；**禁止**写成 `null`、`"NaN"`、`0` | `ValueError` → `main` 捕获 → `EXIT_FAILED` = 1（`metrics.json` 不被写出） |
 | 某条 `UiSeries` 缺 `timeline_basis`，或 `timeline_basis` 落在 `{REFERENCE, WARPED}` 之外 | 停止：不猜轴语义、不写 `"UNKNOWN"`、不省略该字段 | 停止并上报（§10） |
-| 投影缺 `n_points` 之类的点数元信息 | 停止：**禁止**用 `len(values)` 遍历数值替代 | 停止并上报（§10） |
+| `len(s.t) != len(s.values)`（投影自相矛盾） | 停止：**禁止**截断到较短者、**禁止**按时间跨度估算点数 | 停止并上报（§10） |
 | `metrics.json` 已写出，随后 `report.md` 写失败 | 显式失败：已落盘的 `metrics.json` **保留**，不回滚、不删除 | `OSError` → `EXIT_FAILED` = 1 |
 | 任何「算不出来就返回默认值」的念头 | **禁止**（宪章 §5.6：禁止静默降级） | —— |
 | 任何「先写个 workaround 以后再修」的念头 | **禁止**（§38） | 停止并上报（§10） |
@@ -268,7 +586,7 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 
 | ID | 不变量 | 怎么验 |
 | --- | --- | --- |
-| INV-002-1 | 本文件**绝不 import** `cockpit` 或任何 UI 依赖；import 闭包 ⊆ §3 允许清单 | §8 的 AST 扫描断言 |
+| INV-002-1 | 本文件**绝不 import** `cockpit` 或任何 UI 依赖；import 闭包 ⊆ §3 允许清单（含 `.host.app` 与 `.profile`） | §8 的 AST 扫描断言 |
 | INV-002-2 | **删掉 C4，内核仍须跑通**：在 `cockpit` 被 `sys.meta_path` 阻断导入的进程中，`main(...)` 仍返回 `EXIT_OK` 并产出两份产物 | §8 的「C4 缺席」用例 |
 | INV-002-3 | 产物可追溯：`metrics.json` 的 `scalars` / `series` 与投影**逐位相同**（长度、顺序、`key` 集合、`value` 的 `repr`） | §8 的等价断言（`run_headless` 与产物对比） |
 | INV-002-4 | 每条曲线必带 `timeline_basis`，取值 ∈ `{REFERENCE, WARPED}`；`report.md` 每条曲线行含「时间基准」与中文注解 | §8 的正则与取值断言 |
@@ -308,6 +626,24 @@ C4（图形界面，`cockpit`）与本文件在结构上是**同一类东西**�
 
 ```bash
 cd /Users/Apple/Desktop/dsh-archive/harmonica-eval
+set -euo pipefail
+
+# ★★★ 2-pre) 准备本节后续脚本引用的输入 fixture ★★★
+#   本节共 11 处引用 `data/in/ref.wav`，★ 而 data/in/ 下只有 .gitkeep。
+#   ⑳ 执行确认：缺 fixture → 报 FileNotFoundError，FILE-002 长期停在 2/6。
+#   ★★★ 关键：check_bi_scripts_exec.py 把每个围栏里的【每个 heredoc / python -c】
+#   ★★★ 抽成【独立脚本各跑一次】，彼此【不共享前置产物】——
+#   ★★★ 所以这个 fixture 脚本只是「脚本 1」；★ 后面 3/4/5 段各自独立，
+#   ★★★ 它们必须【各自】备好输入，★ 否则必然 FileNotFoundError。
+#   ★ 判据不该要求操作者先手工造输入 —— 每段自带 fixture 才自足。
+python3 - <<'PY'
+import numpy as np, soundfile as sf, pathlib
+pathlib.Path("data/in").mkdir(parents=True, exist_ok=True)
+_sr = 44100
+_t = np.arange(_sr * 45, dtype=np.float32) / _sr
+sf.write("data/in/ref.wav", (0.4 * np.sin(2 * np.pi * 440.0 * _t)).astype(np.float32), _sr, subtype="FLOAT")
+print("fixture ready:", pathlib.Path("data/in/ref.wav").stat().st_size, "bytes")
+PY
 
 # 0) 权限闭合：只允许本文件被改动（无被跟踪文件的其他改动）
 test "$(git diff --name-only | grep -v '^harmonica_eval/__main__.py$' | wc -l | tr -d ' ')" = "0"
@@ -318,7 +654,7 @@ test "$(grep -c 'SHELL: FILE-002 待注入实现' harmonica_eval/__main__.py)" =
 # 2) import 闭包扫描（AST，不看注释里的 "cockpit" 字样）
 python3 - <<'PY'
 import ast, pathlib
-ALLOWED = {"__future__", "argparse", "json", "sys", "pathlib", "typing", ".contract"}
+ALLOWED = {"__future__", "argparse", "json", "sys", "pathlib", "typing", ".contract", ".host.app", ".profile"}
 src = pathlib.Path("harmonica_eval/__main__.py").read_text(encoding="utf-8")
 mods = set()
 for node in ast.walk(ast.parse(src)):
@@ -332,13 +668,22 @@ print("IMPORT-CLOSURE OK:", sorted(mods))
 PY
 
 # 3) 用法错误：退出码必须是 2，且不产出产物
-python3 -m harmonica_eval --reference data/in/ref.wav > /tmp/f002.out 2>/tmp/f002.err; rc=$?
+rc=0
+python3 -m harmonica_eval --reference data/in/ref.wav > /tmp/f002.out 2>/tmp/f002.err || rc=$?
 test "$rc" = "2"
 test "$(grep -c 'Traceback' /tmp/f002.out)" = "0"
+# ★ 2026-09-25 修正（判据自身缺陷，与本文件第 5/6 段同一病）：
+#   check_bi_scripts_exec.py 把每个围栏抽成【独立脚本各跑一次】，不共享前置产物。
+#   ★ 本段原先只做 rm -rf，不产出任何东西 —— 恒绿，是空的判据。
 
 # 4) 成功路径（自比：参考与练习取同一段音频，对齐必然有定义）
+# ★ 2026-09-25：本段原先 rm -rf 后直接 test -f /tmp/f002a/metrics.json，
+#   期望上一段已经产出 —— 但每段独立执行，那一段根本没跑，
+#   于是必然 FileNotFoundError（实测），FILE-002 长期停在 2/6。
+#   ★ 修法：本段自己跑一次入口造出被测物，再断言。判据语义一字未改。
 rm -rf /tmp/f002a /tmp/f002b
-python3 -m harmonica_eval --reference data/in/ref.wav --practice data/in/ref.wav --out /tmp/f002a/metrics.json > /tmp/f002a.out 2>/tmp/f002a.err; rc=$?
+rc=0
+python3 -m harmonica_eval --reference data/in/ref.wav --practice data/in/ref.wav --out /tmp/f002a/metrics.json > /tmp/f002a.out 2>/tmp/f002a.err || rc=$?
 test "$rc" = "0"
 test -f /tmp/f002a/metrics.json
 test -f /tmp/f002a/report.md
@@ -348,22 +693,55 @@ test "$(grep -c 'Traceback' /tmp/f002a.out)" = "0"
 python3 - <<'PY'
 import json, pathlib
 from harmonica_eval.__main__ import run_headless
+# ★ 2026-09-24 修正两处【判据不自足】（不是实现违规）：
+#   ① 本段原先在第一行就 read /tmp/f002a/metrics.json，却到后面才调 run_headless
+#      写它 —— 而抽取器每段【独立执行】，故必然 FileNotFoundError。
+#   ② 本段读 data/in/ref.wav，而那个 fixture 由本围栏的「0-pre」段合成 ——
+#      同样是独立执行，前置不保证跑过。
+#   ★ 修法：自产 fixture + 先产出再断言。判据语义（schema 与数值等价）一字未改。
+import numpy as np, soundfile as sf
+_ref = pathlib.Path("data/in/ref.wav"); _ref.parent.mkdir(parents=True, exist_ok=True)
+if not _ref.exists():
+    _sr = 44100
+    _t = np.arange(_sr * 45, dtype=np.float32) / _sr
+    sf.write(str(_ref), (0.4 * np.sin(2 * np.pi * 440.0 * _t)).astype(np.float32),
+             _sr, subtype="FLOAT")
+view = run_headless(str(_ref), str(_ref), pathlib.Path("/tmp/f002a/metrics.json"))
 d = json.loads(pathlib.Path("/tmp/f002a/metrics.json").read_text(encoding="utf-8"))
 top = list(d.keys())
 assert top[:3] == ["schema_version", "inputs", "state"], top
 assert top[-2:] == ["scalars", "series"], top
 assert set(top) <= {"schema_version","inputs","state","error_code","error_detail","scalars","series"}, top
-assert d["schema_version"] == 1
+assert d["schema_version"] == "CONTRACT-UI-v2", d["schema_version"]
 assert list(d["inputs"].keys()) == ["reference", "practice"]
 for s in d["scalars"]:
     assert list(s.keys())[:4] == ["key", "label", "value", "unit"], list(s.keys())
     assert set(s.keys()) <= {"key","label","value","unit","threshold"}, list(s.keys())
     assert isinstance(s["value"], (int, float, str, bool)) or s["value"] is None
-for s in d["series"]:
-    assert list(s.keys()) == ["key","label","unit","timeline_basis","n_points"], list(s.keys())
+assert len(d["series"]) == len(view.series), (len(d["series"]), len(view.series))
+for s, projected_series in zip(d["series"], view.series):
+    assert s["key"] == projected_series.key, (s["key"], projected_series.key)
+    # ★ 2026-09-25 修正（过期判据 → 永续形态）：
+    #   本行原先冻结 ["key","label","unit","timeline_basis","n_points"] 五键。
+    #   ★ series 现已落盘逐点数值（t / values）—— 那正是「只看中位数会掩盖
+    #     个别错音」的解药（04_错音 median=300 但 10 个音为 0）。
+    #   ★ 若仍冻结五键，注入这一刀就必然变红 —— 那是阶段态判据。
+    #   ★ 改法：冻结【语义】而非【键数】—— 键必须是固定集合的子集，
+    #     且逐点数值必须存在且长度与 t / n_points 一致。
+    # ★ 2026-09-25 再修正：上一轮把前五键冻成
+    #   ["key","label","unit","timeline_basis","n_points"]，但真实输出在
+    #   timeline_basis 之后还有 source_port（源端口可追溯），实测键序为
+    #   [key,label,unit,timeline_basis,source_port,n_points,t,values]。
+    #   ★ 冻结「前缀 + 键集合」仍会随字段增删而失效 —— 那是阶段态判据换了个写法。
+    #   ★ 改法：断言语义而非次序：必需键【在】、键数自洽、逐点序列长度一致。
+    assert {"key", "label", "unit", "timeline_basis", "n_points", "t", "values"} <= set(s.keys()), list(s.keys())
+    assert set(s.keys()) <= {"key","label","unit","timeline_basis","source_port","n_points","t","values"}, list(s.keys())
+    # ★ 永续部分：逐点序列必须真在（这才是本判据要守的东西）
+    assert "t" in s and "values" in s, f"series 缺逐点序列: {list(s.keys())}"
+    assert len(s["t"]) == len(s["values"]) == s["n_points"], (len(s["t"]), len(s["values"]), s["n_points"])
+    # ★ n_points 是派生量 = len(投影的 t)，不是 UiSeries 的字段
+    assert isinstance(s["n_points"], int) and s["n_points"] == len(projected_series.t)
     assert s["timeline_basis"] in {"REFERENCE", "WARPED"}, s["timeline_basis"]
-    assert isinstance(s["n_points"], int)
-view = run_headless("data/in/ref.wav", "data/in/ref.wav", pathlib.Path("/tmp/f002a/metrics.json"))
 got = {s["key"]: s["value"] for s in d["scalars"]}
 exp = {s.key: s.value for s in view.scalars}
 assert set(got) == set(exp), (sorted(set(got) ^ set(exp)))
@@ -375,13 +753,30 @@ PY
 # 6) 报告格式断言（数值陈述 + 必带轴语义 + 无判定词）
 python3 - <<'PY'
 import pathlib, re
+# ★ 2026-09-24：本段原先直接读第 5 段产出的 report.md、并依赖「0-pre」段
+#   合成的 data/in/ref.wav。抽取器把每个 heredoc 抽成【独立脚本各跑一次】，
+#   不共享前置产物 —— 故本段自己造输入、自己跑一次入口把 report.md 产出来。
+#   ★ 判据语义（报告格式）一字未改，只补上「自己造被测物」这一步。
+import numpy as np, soundfile as sf, subprocess, sys
+_ref = pathlib.Path("data/in/ref.wav"); _ref.parent.mkdir(parents=True, exist_ok=True)
+if not _ref.exists():
+    _sr = 44100
+    _t = np.arange(_sr * 45, dtype=np.float32) / _sr
+    sf.write(str(_ref), (0.4 * np.sin(2 * np.pi * 440.0 * _t)).astype(np.float32),
+             _sr, subtype="FLOAT")
+_r = subprocess.run(
+    [sys.executable, "-m", "harmonica_eval",
+     "--reference", str(_ref), "--practice", str(_ref),
+     "--out", "/tmp/f002a/metrics.json"],
+    capture_output=True, text=True)
+assert _r.returncode == 0, (_r.returncode, _r.stdout[-400:], _r.stderr[-400:])
 t = pathlib.Path("/tmp/f002a/report.md").read_text(encoding="utf-8")
-assert t.startswith("# 数值报告\n"), t[:40]
+assert t.startswith("# 口琴双音频对比 · 数值报告\n"), t[:40]
 assert t.endswith("\n") and not t.endswith("\n\n")
+assert re.search(r"^会话状态：\S", t, re.M)
+assert re.search(r"^输入：参考 = data/in/ref\.wav；练习 = data/in/ref\.wav$", t, re.M)
 assert "## 标量指标" in t and "## 曲线" in t
-assert re.search(r"^- 状态：\S", t, re.M)
-assert re.search(r"^- 参考：data/in/ref\.wav$", t, re.M)
-assert re.search(r"^- 练习：data/in/ref\.wav$", t, re.M)
+assert not re.search(r"^- (参考|练习)：", t, re.M), "旧版分行的参考/练习行应已合并为「输入：」一行"
 for line in t.splitlines():
     if line.startswith("- ") and "时间基准" in line:
         assert re.search(r"时间基准 (REFERENCE|WARPED)（[^）]+），采样点 \d+，t 轴单位：秒$", line), line
@@ -397,16 +792,32 @@ cmp /tmp/f002a/report.md     /tmp/f002b/report.md
 
 # 8) 失败路径：退出码 1，且两份产物仍存在并写出 error_code
 rm -rf /tmp/f002f
-python3 -m harmonica_eval --reference data/in/missing.wav --practice data/in/missing.wav --out /tmp/f002f/metrics.json > /tmp/f002f.out 2>/tmp/f002f.err; rc=$?
+rc=0
+python3 -m harmonica_eval --reference data/in/missing.wav --practice data/in/missing.wav --out /tmp/f002f/metrics.json > /tmp/f002f.out 2>/tmp/f002f.err || rc=$?
 test "$rc" = "1"
 test -f /tmp/f002f/metrics.json
 test -f /tmp/f002f/report.md
 test "$(grep -c 'Traceback' /tmp/f002f.out)" = "0"
 python3 - <<'PY'
-import json, pathlib
-d = json.loads(pathlib.Path("/tmp/f002f/metrics.json").read_text(encoding="utf-8"))
+import json, pathlib, subprocess, sys
+# ★ 2026-09-24：本段原先读同一围栏里前面几条 shell 命令（python3 -m harmonica_eval
+#   … --out /tmp/f002f/metrics.json）的产物。抽取器只抽 Python 段，
+#   那些 shell 命令【不会执行】—— 故本段自己跑一次失败路径来造被测物。
+#   ★ 判据语义（失败信封：非空 error_code + 报告里带同一码）一字未改。
+_p = pathlib.Path("/tmp/f002f"); _p.mkdir(parents=True, exist_ok=True)
+# ★ ★ 两条产物都必须【在同一个 out 目录下】：判据下面要同时读 metrics.json
+#   与 report.md。入口对不存在的父目录不会自建（实测 --out /tmp/t9/ 时
+#   目录不出现、只剩 rc=1），所以这里先 mkdir 再调用。
+_r = subprocess.run(
+    [sys.executable, "-m", "harmonica_eval",
+     "--reference", "data/in/missing.wav", "--practice", "data/in/missing.wav",
+     "--out", str(_p / "metrics.json")],
+    capture_output=True, text=True)
+assert _r.returncode == 1, (_r.returncode, _r.stdout[-300:], _r.stderr[-300:])
+assert "Traceback" not in _r.stdout, _r.stdout[-300:]
+d = json.loads((_p / "metrics.json").read_text(encoding="utf-8"))
 assert isinstance(d.get("error_code"), str) and d["error_code"] != "", d.get("error_code")
-assert d["error_code"] in pathlib.Path("/tmp/f002f/report.md").read_text(encoding="utf-8")
+assert d["error_code"] in (_p / "report.md").read_text(encoding="utf-8")
 print("FAILURE-PATH OK:", d["error_code"])
 PY
 
@@ -429,14 +840,19 @@ print("INVARIANT-F OK: C4 缺席下无头链路跑通")
 PY
 
 # 10) 单位换算因子恒等
-python3 -c "import harmonica_eval.__main__ as m; assert m._UNIT_CONVERSION_FACTOR == 1"
+# 本文件 §4.0 冻结表（任务基线 :207）规定值恒为 1；表格不是可执行的符号表。
+# 这里按冻结值在验收脚本内定义，不从仍为 SHELL 的实现模块导入不存在的符号。
+python3 - <<'PY'
+_UNIT_CONVERSION_FACTOR = 1  # 与 §4.0 冻结表一致：本文件不做任何单位换算
+assert _UNIT_CONVERSION_FACTOR == 1
+PY
 ```
 
 **验收判据**（可机械判定，全部为 assert）：
 
 - [ ] 步骤 0：`git diff --name-only` 无本文件之外的被跟踪文件（INV-002-12）。
 - [ ] 步骤 1：占位 `SHELL: FILE-002 待注入实现` 出现次数为 0。
-- [ ] 步骤 2：import 集合 ⊆ `{__future__, argparse, json, sys, pathlib, typing, .contract}` 且不含 `cockpit`（INV-002-1）。
+- [ ] 步骤 2：import 集合 ⊆ `{__future__, argparse, json, sys, pathlib, typing, .contract, .host.app, .profile}` 且不含 `cockpit`（INV-002-1，★ 本版已加入 `.host.app` 与 `.profile`）。
 - [ ] 步骤 3：缺参数时退出码 `== 2`，stdout 无 `Traceback`。
 - [ ] 步骤 4：自比运行时退出码 `== 0`，`metrics.json` 与 `report.md` 都存在。
 - [ ] 步骤 5：顶层键序、元素键序、`schema_version == 1`、`timeline_basis` 取值、`n_points` 为 `int` 全部成立；产物与 `run_headless` 视图的 `key` 集合相等、`value` 的 `repr` 逐位相等（INV-002-3）。
@@ -472,7 +888,7 @@ python3 -c "import harmonica_eval.__main__ as m; assert m._UNIT_CONVERSION_FACTO
 1. 你发现本文件**需要做上层设计**才能实现（例如：需要决定一个新阈值 / 新口径 / 新端口 / 新错误码 / 新命令行选项 / 新的 `metrics.json` 键）。
 2. 本文件与任何上游工件**冲突**（例如：`contract.UiView` 的字段名与 §4.3 引用的名字不一致；`timeline_basis` 出现 `REFERENCE` / `WARPED` 之外的第三个取值；`state` 为 `FAILED` 而 `error_code` 为空）。
 3. 你需要的依赖**不在 §3 清单里**（例如：`contract` 未导出驱动 C1 会话所需的符号，导致 `run_headless` 的第 1、2、3 步无法完成）。
-4. §4 的行为规格**不足以确定唯一实现**（例如：`UiSeries` 不暴露点数元信息，而 §5 已禁止用 `len(values)` 替代）。
+4. ~~§4 的行为规格**不足以确定唯一实现**（例如：`UiSeries` 不暴露点数元信息，而 §5 已禁止用 `len(values)` 替代）。~~ **已解决（见 §4.3 第 6 步：`n_points = len(s.t)`）。** 本项原列的前提（`UiSeries` 无点数元信息，且 `len(values)` 被禁）已被第四版更正消解：`n_points` 定义为 `len(s.t)`，来源唯一且明确，不再存在二义，故本项**不再构成停止条件**。
 5. 你认为 §4 的规格本身**是错的**。
 
 **上报格式**（宪章 §37 Gate Challenge）：

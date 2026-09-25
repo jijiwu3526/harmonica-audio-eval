@@ -1,0 +1,27 @@
+== 1. warp_path：build_surface 的入参 vs generate_all_ports 的产物 ==
+  FILE-104 L345: core.align.align                (reference, practice)           # 2 参
+  FILE-104 L375: | `warp_path` | `core.align.align` | `(reference, practice)` |
+  FILE-104 L676: 4. 校验 `warp_path.dtype == np.int32`、`warp_path.ndim == 2`、
+  FILE-104 L678: 5. `ports = generate_all_ports(reference, practice, sample_rate, warp_path)`。
+  FILE-104 L813: - **不实现时间对齐、不计算 `warp_path`。** `warp_path` 是入参，
+
+== 2. warp_path 的 hop_length（换算 reference_frame 用）==
+  profile.PORT_INDEX['warp_path'].hop_length = 0
+  profile.py:526 强制：非 frame 维端口 hop_length 必须 == 0
+  contract.py:443 换算规则：units=='index' -> 秒*sample_rate/hop_length
+  contract.py:429 明令：换算依据是该端口自己的 hop_length（不是 ALIGN.hop_length）
+  => warp_path.reference_frame 实际落在 ALIGN.hop_length=2048 的 chroma 栅格上，
+     但端口只能声明 hop=0 -> 秒<->reference_frame 换算除零/无定义。
+
+== 3. 终端指标：SPEC §3 要求 vs 生产者 ==
+  SPEC.md L49: "alignment": { "method": "...", "mean_abs_warp_sec": 0.0, "tempo_ratio": 1.0, "confidence": 0.0 },
+  SPEC.md L50: "global": { "pitch_cents_mae": 0.0, "in_tune_ratio": 0.0, "timing_mae_ms": 0.0, "energy_db_delta": 0.0 },
+  SPEC.md L51: "sections": [
+  SPEC.md L53: "pitch_cents_mae": 0.0, "pitch_bias_cents": 0.0, "in_tune_ratio": 0.0,
+  SPEC.md L80: `mean_abs_warp_sec`、`tempo_ratio`、`confidence`。
+  payload 键: ['early_ratio', 'late_ratio', 'median_abs_cents', 'median_db', 'median_onset_ms', 'n_notes_used', 'n_unpaired', 'off_pitch_ratio', 'on_time_ratio', 'per_note_cents', 'per_note_delta_db', 'per_note_onset_ms', 'sample_rate', 'spread_db', 'spread_ms']
+  SPEC 要求但无 payload 生产者: ['confidence', 'energy_db_delta', 'in_tune_ratio', 'mean_abs_warp_sec', 'pitch_cents_mae', 'tempo_ratio', 'timing_mae_ms']
+
+== 4. align 的真实消费者 ==
+   harmonica_eval/core/align.py:116:    返回 0.0–1.0。低于 WARP_PATH_MIN_COVERAGE 时应由 align() 抛
+   harmonica_eval/core/align.py:122:def align(

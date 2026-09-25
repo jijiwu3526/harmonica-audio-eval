@@ -1,0 +1,22 @@
+=== PAYLOAD_SCHEMAS (authority) ===
+  pitch      n=5  ('per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used', 'sample_rate')
+  timing     n=8  ('per_note_onset_ms', 'median_onset_ms', 'spread_ms', 'early_ratio', 'late_ratio', 'on_time_ratio', 'n_notes_used', 'n_unpaired')
+  dynamics   n=5  ('per_note_delta_db', 'median_db', 'spread_db', 'n_notes_used', 'n_unpaired')
+
+=== FILE-201 §4.2 compare_pitch_curves declared return ===
+  {'per_note_cents','n_paired','n_unpaired'}  (3 keys)
+  'n_paired' in PAYLOAD_SCHEMAS['pitch']? -> False
+  'n_unpaired' in PAYLOAD_SCHEMAS['pitch']? -> False
+  => FILE-201 §4.3 summarize_deviations must convert n_paired -> n_notes_used
+
+=== FILE-201 §4.3 summarize_deviations declared return ===
+  keys = PAYLOAD_SCHEMAS['pitch'] = ('per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used', 'sample_rate')
+  'n_unpaired' present in pitch schema? -> False
+
+=== cross-check: does the skeleton pitch.py docstring agree? ===
+   skeleton: sample_rate: int,
+   skeleton: per_note_cents      逐音音分偏差（带符号），长度 == n_notes_used
+   skeleton: median_abs_cents    中位绝对偏差
+   skeleton: off_pitch_ratio     超过 MAX_CENTS_DEVIATION 的音占比
+   skeleton: n_notes_used        参与统计的音数（**必须报告**）
+   skeleton: sample_rate         采样率（结果的成因，不是元数据）

@@ -1,0 +1,25 @@
+######## FILE-202 run() names vs skeleton symbols ########
+   timing.detect_onsets                exists = True
+   timing.ONSET_MATCH_TOLERANCE_SEC    exists = True
+   timing.AXIS                         exists = True
+   timing.match_onsets                 exists = True
+   timing.compute_deviations           exists = True
+   timing.summarize_deviations         exists = True
+
+   timing module public names: ['ALGORITHM_ID', 'ALGORITHM_VERSION', 'AXIS', 'AlgorithmDataContract', 'AlgorithmResultEnvelope', 'ONSET_DEADBAND_MS', 'ONSET_MATCH_TOLERANCE_SEC', 'TimelineBasis', 'annotations', 'compute_deviations', 'detect_onsets', 'match_onsets', 'run', 'summarize_deviations']
+
+######## what does timing.py actually define (source scan) ########
+   timing.py:48: ALGORITHM_ID: str = "timing"
+   timing.py:49: ALGORITHM_VERSION: str = "1.0.0"
+   timing.py:51: AXIS: TimelineBasis = TimelineBasis.REFERENCE
+   timing.py:58: ONSET_MATCH_TOLERANCE_SEC: float = 0.100
+   timing.py:89: ONSET_DEADBAND_MS: float = 23.0
+   timing.py:117: def detect_onsets(samples: object, sample_rate: int) -> object:
+   timing.py:141: def match_onsets(
+   timing.py:155: def compute_deviations(matched: object) -> object:
+   timing.py:166: def summarize_deviations(deviations_ms: object, n_unpaired: int) -> object:
+   timing.py:195: def run(surface: AlgorithmDataContract) -> AlgorithmResultEnvelope:
+
+######## 'AXIS(' appears anywhere in the repo? ########
+   python files containing 'AXIS(':  NONE
+   FILE-202 uses AXIS(REFERENCE) at line 177 -> True

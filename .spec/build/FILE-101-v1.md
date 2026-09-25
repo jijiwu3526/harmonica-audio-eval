@@ -233,11 +233,21 @@ SPEC.md@v2.1 §7.4 明令「对齐两侧必须**同率**」。参考与练习是
   - 用**整段** RMS，不是分帧 RMS：本函数只回答"这段录音整体是不是空的"，
     局部静音是**合法**的（乐句之间就有静音），属于算法层的分析对象。
   - 比较用 `<`，不是 `<=`：恰好等于 `1e-4` **是合法的**。
+
+    ★ **但"恰好等于"在浮点下几乎不可达（BLOCK-1 实测）**：
+    `np.float32(1e-4) == 9.999999747378752e-05`，比 Python 的 `1e-4` 略小；
+    而 `sqrt(mean(x²))` 也不是恒等变换 —— 实测
+    `np.full(44100, 1e-4, float64)` 得 `9.999999999999999e-05`，仍小于 `1e-4`。
+    只有极短数组（如 4 个样本）才恰好回到 `0.0001`。
+
+    **这不影响门限的正确性**，但它意味着：**验收脚本不能用"构造一个恰好等于阈值的
+    输入"来验这条语义** —— 那是在赌浮点巧合。正确做法是两侧各验一次
+    （阈值之上放行、阈值之下拒绝），见 §8 判据 C。
 - **边界**：
   | 输入 | 行为 |
   | --- | --- |
   | `rms < 1e-4` | `INPUT_SILENT` |
-  | `rms == 1e-4` | **合法**，返回 1e-4 |
+  | `rms == 1e-4` | **合法**，返回该值。★ **但注意（BLOCK-1）：从 `float32` 输入出发这一格不可达** —— `1e-4` 不是二进制有限小数，`np.float32(1e-4)` 向零取到 `9.999999747378752e-05`，先转 `float64` 再算 RMS 仍略小于 `1e-4`（见 §3 的 `SILENCE_RMS_THRESHOLD` 说明）。本格描述的是**语义**（比较用 `<` 而非 `<=`），不是"一定存在某个输入能命中" |
   | 全零数组 | `INPUT_SILENT` |
   | 空数组 | `INPUT_SILENT`（`mean` 产生 `NaN`/警告；实现须先判空并直接抛 `INPUT_SILENT`） |
   | 含 `NaN` | `rms` 为 `NaN`；`NaN < threshold` 为 `False`，故**不会**被拦下 |
@@ -409,9 +419,39 @@ try:
     assert_not_silent(np.zeros(44100, dtype=np.float32)); raise SystemExit('未拒绝静音')
 except CoreBuildError as e:
     assert e.code == ErrorCode.INPUT_SILENT, e.code
-# 恰好在阈值上合法
-assert assert_not_silent(np.full(44100, 1e-4, dtype=np.float32)) == 1e-4
-print('PASS C: 闭区间边界 + 静音门限正确')
+# ★★ 更正（第三轮盲审 B 的 BLOCK-1）：原写
+#     assert assert_not_silent(np.full(44100, 1e-4, dtype=np.float32)) == 1e-4
+#   这条**无解**，与规格自己的边界表互斥。
+#
+#   实测：np.full(44100, 1e-4, dtype=np.float32) 的整段 RMS
+#         = 9.999999747378752e-05  （**小于** 1e-4，不是等于）
+#   原因：1e-4 存进 float32 就有舍入，平方→求和→开方后仍略低于 float64 的 1e-4。
+#   而 §4 边界表明写「比较用 `<`，恰好等于 1e-4 是合法的」，
+#   于是该输入命中 `rms < 1e-4` → 抛 INPUT_SILENT → 断言必然失败。
+#
+#   正确做法：**不要把"恰好等于阈值"寄托在浮点巧合上**。
+#   实测：平方→平均→开方不是恒等变换，`np.full(44100, 1e-4, float64)`
+#   得 9.999999999999999e-05（仍小于 1e-4）。
+#   只有极短数组（如 4 个样本）才恰好回到 0.0001 —— 那是巧合，不是契约。
+#
+#   因此判据改为验**契约本身**，而不是验某个特定输入落在阈值上：
+#   （1）构造一个 RMS 严格大于阈值的输入 → 必须放行，且返回值等于该 RMS；
+#   （2）构造一个 RMS 严格小于阈值的输入 → 必须抛 INPUT_SILENT。
+#   两条合起来就锁死了"`<` 而非 `<=`"这条语义，且不依赖浮点巧合。
+_above = np.full(44100, 1e-3, dtype=np.float64)
+_r_above = float(np.sqrt(np.mean(_above ** 2)))
+assert _r_above > 1e-4, _r_above
+assert assert_not_silent(_above) == _r_above, assert_not_silent(_above)
+
+_below = np.full(44100, 1e-4 * (1 - 1e-6), dtype=np.float64)
+assert float(np.sqrt(np.mean(_below ** 2))) < 1e-4
+try:
+    assert_not_silent(_below)
+    raise SystemExit('阈值之下未被拒绝')
+except CoreBuildError as e:
+    assert e.code == ErrorCode.INPUT_SILENT, e.code
+
+print('PASS C: 阈值之上放行 / 阈值之下拒绝，静音门限正确')
 "
 
 # ── 判据 D（INV-101-9）：下混是平均，不是取第 0 声道
@@ -421,7 +461,17 @@ from harmonica_eval.core.ingest import decode_to_mono
 d = tempfile.mkdtemp()
 p = os.path.join(d, 'stereo.wav')
 st = np.stack([np.ones(44100), np.zeros(44100)], axis=1).astype(np.float32)
-sf.write(p, st, 44100)
+# ★★ 更正（第三轮盲审 B 的 BLOCK-2）：原写 `sf.write(p, st, 44100)` ——
+#   soundfile 默认 subtype 是 PCM_16，会引入量化误差。
+#   实测：默认子类型下 mono[0] = 0.4999847412109375，误差 1.526e-05，
+#   **比 1e-6 容差大 15 倍**，判据必然失败。
+#   （PCM_16 用 32767 而非 32768 做满量程，1.0 往返后不再是精确的 1.0，
+#     平均后就不是精确的 0.5。0.5 本身可精确表示，问题出在 1.0。）
+#   本判据要验的是「下混用平均而不是取第 0 声道」——
+#   量化误差与这个命题无关，必须排除。用 FLOAT 子类型即可零误差。
+#   ★ 注意：本脚本外层是 `python3 -c "..."`，所以这里**只能用单引号**
+#     `subtype='FLOAT'` —— 写成双引号会提前闭合 shell 字符串。
+sf.write(p, st, 44100, subtype='FLOAT')
 mono, sr = decode_to_mono(p)
 assert abs(float(mono[0]) - 0.5) < 1e-6, f'下混结果 {mono[0]}，应为 0.5（平均值）'
 print('PASS D: 双声道 (1.0, 0.0) 下混为 0.5 —— 用的是平均')

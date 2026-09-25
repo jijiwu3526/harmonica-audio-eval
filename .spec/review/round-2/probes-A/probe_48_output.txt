@@ -1,0 +1,39 @@
+######## A. FILE-105:51 claims '恰 6 条 import 的来源'; count the listed bullets ########
+- 本包内（穷举，恰 6 条 import 的来源）：
+  - `harmonica_eval.contract`：且仅这 5 个名字 —— `HostContract`, `SessionState`, `ContractViolation`, `CoreBuildError`, `ErrorCode`
+  - `harmonica_eval.core.surface`：且仅 `Surface`
+  - `harmonica_eval.core.ingest`、`harmonica_eval.core.align`、`harmonica_eval.core.features`：仅作为 build_surface 的阶段入口调用（入口签名以各自 BUILD-INSTRUCTION 冻结的规格为准，本文件不内联其任何逻辑）
+
+   module paths named: ['contract', 'core.surface', 'core.ingest', 'core.align', 'core.features']
+   -> distinct import sources implied: 5 ['contract', 'core.align', 'core.features', 'core.ingest', 'core.surface']
+   claimed: 6   actual: 5  MISMATCH
+
+######## B. FILE-105:59 says 'profile 解析责任在阶段模块' -- do stage modules allow profile? ########
+   FILE-105:59: - 本包具名禁入：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`（门面不得反向依赖调用方或算法）、`harmonica_eval.profile`（profile 解析责任在阶段模块）、core 包内 ingest/align/features/surface 的任何 `_` 私有符号
+   FILE-101-v1.md: mentions 'profile' in §3 = True | total 'profile' hits = 25
+   FILE-102-v1.md: mentions 'profile' in §3 = True | total 'profile' hits = 19
+   FILE-103-v1.md: mentions 'profile' in §3 = True | total 'profile' hits = 40
+
+######## C. does ANY stage module BI permit importing profile? ########
+   --- FILE-101-v1.md: 5 line(s) mentioning profile import
+       62: - 本包内：`from ..contract import CoreBuildError, ErrorCode`（`harmonica_eval/contract.py`）；`from ..profile import AUDIO`（`harmonica_eval/profile.py`）。本文件位于 `harmonica_eval/co
+       82: - 本包的其他层与同层模块：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`、`harmonica_eval.core.api`、`harmonica_eval.core.align`、`harmonica_eval.core.featur
+       367: from harmonica_eval.profile import AUDIO
+       381: from harmonica_eval.profile import AUDIO
+       395: from harmonica_eval.profile import AUDIO
+   --- FILE-102-v1.md: 1 line(s) mentioning profile import
+       43: - `harmonica_eval.profile`（只读引用常量 `ALIGN.hop_length`=`2048`、`ALIGN.n_chroma`、`ALIGN.band_rad`=`0.25`、`ALIGN.global_constraints`=`True`）
+   --- FILE-103-v1.md: 6 line(s) mentioning profile import
+       40: - 本包内：`..profile`（`PORTS` / `PORT_INDEX` / `AUDIO` / `MATERIALIZE`）· `..contract`（`FIELD_LAYOUTS` / `ErrorCode` / `CoreBuildError`）
+       43: > `harmonica_eval.profile` / `harmonica_eval.contract` —— **这两个模块不存在**。
+       47: > from ..profile import AUDIO, MATERIALIZE, PORTS, PORT_INDEX
+       50: > 上一版的写法会让实现者写出 `ModuleNotFoundError: No module named 'harmonica_eval.profile'`。
+       244: from harmonica_eval.profile import AUDIO
+   --- FILE-104-v1.md: 1 line(s) mentioning profile import
+       87: - `harmonica_eval.profile` 的 **6 个名字**：
+   --- FILE-105-v1.md: 5 line(s) mentioning profile import
+       59: - 本包具名禁入：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`（门面不得反向依赖调用方或算法）、`harmonica_eval.profile`（profile 解析责任在阶段模块）、core 包内 ingest/align/featu
+       109: - **输入**：`profile_version: str`。语义 = profile 版本标识（本仓当前取值 `"CORE_PROFILE_V0.1"`）。取值域 = 任意非空 `str`。单位：无。本文件对该字符串**只做两件事**：判非空、存入 `_Session.profile_version`；不解析、不比对本仓已登记版本、不
+       166: import 白名单里**没有 `harmonica_eval.profile`**，且本节末尾又明写
+       167: 「不 import `harmonica_eval.profile`，不校验 `profile_version`
+       342: - **不解析 profile**：不 import `harmonica_eval.profile`，不校验 `profile_version` 是否为已知版本，不读取 `AUDIO.max_duration_sec` / `ALIGN.hop_length` / `MATERIALIZE.rms_hop_length`，不决定端口清单

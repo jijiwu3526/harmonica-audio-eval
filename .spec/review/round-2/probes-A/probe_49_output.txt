@@ -1,0 +1,67 @@
+######## FILE-105 build_surface stage: full text of the 4 stages ########
+   145: 1. `s = self._sessions.get(session_id)`；`s is None` → 抛 `ContractViolation`（未知会话）。
+   146: 2. `if s.state is not SessionState.INPUT_READY: raise ContractViolation(...)`。本次调用**零副作用**：`s.state` 不变、`s.surface` 不变（`DATA_READY` 下重复调用**不得**销毁已发布的数据面）。
+   147: 3. `s.state = SessionState.BUILDING`。
+   148: 4. `try:` 块内按**固定顺序**驱动四阶段，每阶段的返回值只以局部变量在方法体内传递，不写入 `_Session`：
+   149:    - 阶段 1 `INGEST`：**分别**调用 `harmonica_eval.core.ingest.ingest(uri)` **两次**
+   150:      —— 一次 `s.reference_uri`、一次 `s.practice_uri`；产出 = 两路规范化后的
+   151:      mono/`float32` PCM 与其 `AudioFormat`。
+   152: 
+   153:      ★★ **更正（P1 审查 F6）：上一版的实参个数是错的。** ★★
+   154: 
+   155:      原写「实参含 `(s.reference_uri, s.practice_uri, s.profile_version)`」——
+   156:      **三个参数**。实测 `core.ingest.ingest` 的签名是 **`ingest(uri)`，只有一个参数**，
+   157:      且 `FILE-101-v1.md:256` 明确标注它是「**唯一对外入口**」。
+   158:      按原规格实现必然 `TypeError`。
+   159: 
+   160:      **本版冻结**：
+   161:      - 调用形态 = `ingest(uri)`，**逐路**调用，共两次。
+   162:      - `profile_version` **不是** `ingest` 的参数。它属于**会话**身份
+   163:        （`create_session(profile_version)`），在阶段 1 里只做一次断言：
+   164:        ★★ **本版再更正（第三轮盲审 A 的 probe 18）：上一版这里写
+   165:        `assert s.profile_version == profile.PROFILE_VERSION` —— 但 §3 的
+   166:        import 白名单里**没有 `harmonica_eval.profile`**，且本节末尾又明写
+   167:        「不 import `harmonica_eval.profile`，不校验 `profile_version`
+   168:        是否为已知版本」。**同一份文件里既禁止 import 又要求用它的常量。** ★★
+   169: 
+   170:        **本版冻结**：阶段 1 **不**做任何版本比对。
+   171:        `profile_version` 是**不透明字符串** —— 由调用方（C1 的会话）传入、
+   172:        由本文件原样转交给 `create_session`，**本文件不解释它**。
+   173:        版本是否受支持由 `create_session` 自己判定（那是 C1 的职责）。
+   174:        理由：本文件是 C2 的门面，**不是** profile 的守卫；
+   175:        把版本白名单塞进 C2 会让「支持哪些 profile」分散到两处。
+   176:      - 两次调用的**顺序冻结**：先 reference、后 practice。
+   177:      - 采样率不由本文件假设：`ingest` 返回的 PCM 已按 `profile.AUDIO.sample_rate`
+   178:        规范化（SPEC §7.4 授权的重采样点唯一地在这里）。
+   179:    - 阶段 2 `ALIGN`：调用 `harmonica_eval.core.align` 的入口，实参 = 阶段 1 的产出；
+   180:      产出 = **warp 路径点**（`warp_path`，一个 `(n_ref_frames, 2)` 的 `int32` 数组）。
+   181: 
+   182:      ★★ **更正（负责人裁定 `pcm.*` 归属后同步）：上一版这里说 ALIGN 产出
+   183:      「两份对齐 PCM」—— 与实测不符，也与裁定冲突。** ★★
+   184: 
+   185:      实测：`core.align.align(reference, practice)` 的返回注解是
+   186:      `npt.NDArray`，**只返回 `warp_path`**，不产任何 PCM。
+   187: 
+   188:      裁定后 `pcm.*` 的归属是：
+   189:      - `pcm.mapped.reference` / `pcm.mapped.practice` —— 阶段 4（`core.surface`）
+   190:        **纯转发**阶段 1 的规范化 PCM（零计算）；
+   191:      - `pcm.warped.practice` —— 阶段 4 按 `warp_path` 做**索引重排**。
+   192: 
+   193:      ⇒ 阶段 2 只负责**算对齐**；PCM 的登记与装配**全部**在阶段 4。
+   194:      本阶段**不得**产出任何 PCM（否则同一份数据有两个生产者）。
+   195:    - 阶段 3 `FEATURES`：调用 `harmonica_eval.core.features` 的入口，实参 = 阶段 2 的产出；产出 = profile 决定的**全部**端口缓冲（每个端口的 `PortDescriptor` 与配套数组），**一次性预生成、非惰性**。
+   196:    - 阶段 4 `SURFACE`：调用 `harmonica_eval.core.surface` 的入口装配并按 surface.py 冻结的口径 Seal，使 `SurfaceManifest.sealed is True`；每个端口的 `content_hash` 按 `contract.PortDescriptor.content_hash` 冻结的字节级口径计算
+   197:    - 四个阶段的**入口签名以各自 BUILD-INSTRUCTION 冻结的规格为准**；本文件不内联四阶段的任何逻辑，不做任何数值计算，不接触音频字节。
+   198: 5. Seal 成功**之后**才执行 `s.surface = 第 4 阶段装配好的那一个 Surface 实例`；紧接着 `s.state = SessionState.DATA_READY`；`return None`。
+   199: 6. `except HarmonicaError as err:` → `s.surface = None`；`s.state = SessionState.FAILED`；`raise CoreBuildError(code=err.code, detail=非空字符串且格式为「阶段名: 原始 detail」, session_id=session_id, componen
+   200: 7. `except Exception as err:`（仅 `Exception` 及其子类，**不捕获** `BaseException`）→ 与第 6 步同路径，但 `code = ErrorCode.CORE_BUILD_FAILED`，`detail` 含 `type(err).__name__` 与 `str(err)`，`from err` 保留因果链。
+   201: 8. 本文件**不**调用 `harmonica_eval.algorithms` 的任何名字，也不调用任何算法入口；机械判据见 INV-105-6。
+   202: 
+   203: **不得部分发布**的精确含义（三条同时成立才算合规）：失败路径上 `_Session.surface` 恒为 `None`；失败路径上 `s.state` 只可能是 `FAILED`（不可能是 `BUILDING` 或 `DATA_READY`）；第 4 步产生的所有局部缓冲随方法返回被丢弃，不留任何模块级或实例级引用。
+   204: 
+   205: **资源释放**：第 6/7 步的执行顺序是「先把 `s.surface` 置 `None`，再改状态，再抛」——把引用置空即释放；本文件不提供额外的 `close()` / `release()` 方法（那会成为第 8 个操作）。
+   206: 
+   207: **边界**：空 `session_id` / 未知 `session_id` → 抛 `ContractViolation`。`CREATED`（只登记了一段或一段都没登记）→ 抛 `ContractViolation`。`BUILDING` / `DATA_READY` / `FAILED` / `CLOSED` → 抛 `ContractViolation`。单元素 / 
+   208: 
+   209: **不变量**：`state` 的取值序列只能是 `CREATED → INPUT_READY → BUILDING → DATA_READY`（成功路径）或 `CREATED → INPUT_READY → BUILDING → FAILED`（失败路径），不可回退、不可跳过；`DATA_READY` 之外 `_Session.surface` 恒为 `None`。
+   210: 

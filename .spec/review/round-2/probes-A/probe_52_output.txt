@@ -1,0 +1,36 @@
+=== FILE-200 rules on PAYLOAD_SCHEMAS key exactness ===
+   116: ### 4.3 `PAYLOAD_SCHEMAS: Mapping[str, tuple[str, ...]]` ★ 唯一权威
+   146: - 键集合恰为三个 `algorithm_id`：`set(PAYLOAD_SCHEMAS) == {s.algorithm_id for s in ALGORITHMS}`，且互不遗漏、不含额外键。
+   161: - **读数方式（冻结）**：必须以运行期全局名查找读取 `ALGORITHMS` 与 `PAYLOAD_SCHEMAS`；**不得**把二者写成函数默认参数、不得闭包捕获、不得在模块 import 时复制成局部常量。§8 的负向测试依赖这一条。
+   212: 1. 对每条 `spec`，`spec.algorithm_id in PAYLOAD_SCHEMAS` 必须为真；
+   213: 2. 对 `PAYLOAD_SCHEMAS` 的每个键 `k`，必须存在 `spec` 使 `spec.algorithm_id == k`；
+   215: - **C7 的边界（明确写死，避免越权）**：运行期 payload 的实际键集合是运行期产物，import 期静态检查够不着它。因此本函数对「payload 键恰为表中键」的**静态**部分只做上面 3 项；逐次运行「恰为」的相等校验由 C1 的校验器以 `PAYLOAD_SCHEMAS` 为权威在运行期执行。**不得**为了在 import 
+   217: - **检查集合封闭**：「`ALGORITHMS` 是 tuple」与「`PAYLOAD_SCHEMAS` 不可变」**不**放进本函数（本函数的检查集恰为 7 条）。这两条由 §8 判据验证。
+   222: 模块末尾必须恰有**一次**模块级语句 `assert_registry_integrity()`，位置在所有定义之后（`PAYLOAD_SCHEMAS` 赋值之后）。配置错误由此在 import 时立刻暴露。
+   264: | INV-200-6 | `PAYLOAD_SCHEMAS` 键集合恰为 `{"pitch","timing","dynamics"}`，三值逐字等于 §4.3 列出的键序列 | §8.2 的三条元组等值断言 |
+   270: | INV-200-12 | import 本模块时恰执行一次 `assert_registry_integrity()`，位置在 `PAYLOAD_SCHEMAS` 赋值之后 | §8.5 的 AST 静态检查 |
+   439: # INV-200-12：恰一次模块级 assert_registry_integrity()，且在 PAYLOAD_SCHEMAS 赋值之后
+   509: 6. 你**想动** `PAYLOAD_SCHEMAS` —— 包括为 `pitch` 补 `n_unpaired`（`GAP-200-1`）、改键名、改键顺序、增删键。冻结表的变更属接口变更。
+
+=== FILE-201:220-240 已知缺口 ===
+   220: - **★ 已知缺口（由下往上核对发现，如实记录不掩盖，实现者不得"顺手修"）**：
+   221:   `timing` 与 `dynamics` 的 payload 都含 `n_unpaired`（未能配对的音数），
+   222:   **`pitch` 的 payload 没有**（见 `PAYLOAD_SCHEMAS['pitch']`，只有 5 个键）。
+   223:   而本函数的配对**同样会失败**（漏音 / 多音 / 音数不等），
+   224:   被排除的音**同样无处报告**。
+   225:   后果：读者无法分辨「整首都测了」与「只测上了少数几个音」，
+   226:   而 `off_pitch_ratio` 的**分母**恰恰就是 `n_notes_used` ——
+   227:   「全曲 115 个音里 58 个走音」与「12 个音里 6 个走音」会得到同一个数字。
+   228: 
+   229:   根因：`PAYLOAD_SCHEMAS` 由人工维护、三份各自演化，缺少对称性约束。
+   230:   修它需要在**冻结表**加键 = **接口变更**。
+   231:   故：**本函数照常返回 `n_unpaired`（它是有用的中间量），
+   232:   但 `run()` 装信封时不得把它写进 payload**（那会违反冻结的 schema）。
+   233:   **按 §37 Gate Challenge 上报**，见 §10。
+   234: 
+   235: ---
+   236: 
+   237: ### 4.3 `summarize_deviations(deviations_cents) -> dict`
+   238: 
+   239: - **输入**：`deviations_cents: list[float] | NDArray` —— §4.2 产出的逐音偏差
+   240: - **输出**：`dict`，**键名以 `algorithms.PAYLOAD_SCHEMAS["pitch"]` 为唯一权威**，

@@ -29,7 +29,7 @@
 **删掉它会坏掉什么（逐条机械后果）**：
 
 1. **编译级断裂**：机械分析证实全仓 11 个文件 import 本文件；删除后 C1/C2/C3/C4 与 profile 全部 ImportError，仓库不可构建。它不是工具库，是结构承重墙。
-2. **C2 失去实现对象**：`HostContract`（7 操作）与 `AlgorithmDataContract`（2 操作）不存在 → core 无法声明它对 C1 暴露什么；`SessionState` 消失 → `status()` 无返回类型，C2 内部阶段（INGESTING、ALIGNING、BUILDING_PORTS 这类名字）失去「禁止外泄」的对照物，深组件边界瓦解。
+2. **C2 失去实现对象**：`HostContract`（7 操作）与 `AlgorithmDataContract`（2 个纯查表操作 + 1 个只读状态属性 `resolution`，不计入操作数）不存在 → core 无法声明它对 C1 暴露什么；`SessionState` 消失 → `status()` 无返回类型，C2 内部阶段（INGESTING、ALIGNING、BUILDING_PORTS 这类名字）失去「禁止外泄」的对照物，深组件边界瓦解。
 3. **C3 失去数据面词汇**：`PortDescriptor` / `FIELD_LAYOUTS` 消失 → 算法无从判断端口是否有自己要的量、多维端口第二维字段顺序无共同事实来源 → 两个实现者写出不同内存布局，读出的 `f0_hz` 是 `voiced` 且**不报错**。`AlgorithmResultEnvelope` 消失 → 「失败也要返回信封」的隔离机制不存在，单个算法的异常穿透到 C1 打断全部流程。
 4. **节奏指标静默算错**：`TimelineBasis` 消失 → 无人在结构上强迫端口声明挂哪条时间网格 → 节奏指标被放到归一化网格上计算，抢拍拖拍被静默抹掉（结果恒为 0 且不报错）。这正是宪章 §21 缺陷的原型。
 5. **失败语义退化**：`ErrorCode` / `HarmonicaError` 族消失 → 失败退化为裸异常与自由字符串，C1 无法归一化上报，COMPONENTS.md §7 失败语义表失去唯一权威来源。
@@ -46,7 +46,7 @@
   - `__future__` —— 仅 `from __future__ import annotations`
   - `dataclasses` —— 仅 `dataclass` 与 `field`
   - `enum` —— 仅 `Enum`
-  - `typing` —— 仅 `Any`、`Mapping`、`Protocol`、`Sequence`
+  - `typing` —— 仅 `Any`、`Callable`、`Mapping`、`Protocol`、`Sequence`
 - 第三方（共 2 个）：
   - `numpy` —— 仅作类型注解用途；本文件不调用任何 numpy 函数
   - `numpy.typing` —— 仅 `NDArray`（用于 `BufferView.data` 注解）
@@ -67,7 +67,7 @@
 
 ## 4 · 你要实现什么（行为规格）
 
-**总则**：本文件是纯声明模块。每个公开符号只做「定义 + 语义注释」，运行期零计算、零 I/O。唯一有执行体的是三处**输入校验**（§4.3 AudioFormat、§4.13 HarmonicaError.__str__、Enum 继承），它们是定义的一部分，不是行为扩展。以下按 `__all__` 分组逐符号写。
+**总则**：本文件是纯声明模块。每个公开符号只做「定义 + 语义注释」，不承载 I/O 或业务计算。有限实体逻辑仅限三处：`ResolutionView.is_available` 只查 `frozenset` 成员（`harmonica_eval/contract.py:411-413`）、`AudioFormat.__post_init__` 的输入校验（`harmonica_eval/contract.py:171-175`）、`HarmonicaError.__str__` 的展示格式化（`harmonica_eval/contract.py:944-953`）。以下按 `__all__` 分组逐符号写。
 
 ### 4.0 类型注记约定
 
@@ -89,7 +89,7 @@
 | DATA_READY | destroy_session | CLOSED |
 | FAILED | destroy_session | CLOSED |
 | 任一非 CLOSED 状态 | destroy_session | CLOSED |
-| BUILDING | CANCEL（COMMAND_EFFECTS） | INPUT_READY（销毁未完成数据面） |
+| BUILDING | CANCEL（COMMAND_EFFECTS） | **不打断同步构建**；构建完成后按 `CANCEL` 的目标转移生效 |
 | FAILED | RESET（COMMAND_EFFECTS） | CREATED（销毁数据面与已登记输入，会话对象保留） |
 
 非法转移（必须拒绝且状态不变）：任何向「回退方向」的转移（如 DATA_READY→BUILDING、INPUT_READY→CREATED，RESET/CANCEL 按上表除外）；FAILED 之后除 destroy_session/RESET 外的一切操作；CLOSED 之后的一切操作。**C1 对 status() 能看到的只有这 6 个值**；C2 内部阶段名（INGESTING / ALIGNING / BUILDING_PORTS 等）禁止出现在返回值、日志字段名与 UiView 之外的任何跨组件边界上。
@@ -133,7 +133,7 @@
 ### 4.5 CONTENT_HASH_MAGIC 与 UNITS_VOCABULARY（常量）
 
 - `CONTENT_HASH_MAGIC: bytes = b"harmonica-eval/surface/v1\x00"`。作用：`content_hash` 的域分隔前缀（G12），让该 hash 的输入空间与任何其他用途的 sha256 不重叠；末尾 `\x00` 是长度分隔，防止 `"a"+"bc"` 与 `"ab"+"c"` 碰撞。取值逐字节冻结。
-- `UNITS_VOCABULARY: frozenset[str]`，**穷举 8 个合法值**：`amplitude`（`pcm.mapped.*` / `pcm.warped.*`）、`chroma`（`chroma.lowres.*`）、`hz`（`pitch.*`）、`index`（`warp_path` / `notes.*`）、`rms`（`rms.*`）、`cents`、`db`、`seconds`（后三个为算法 payload 预留，当前未被任何 profile 端口使用；预留项必须由某个未来 profile 真正使用，否则应删——本词表不收集「以后可能有用」的值）。
+- `UNITS_VOCABULARY: frozenset[str]`，**穷举 10 个合法值**：`amplitude`（`pcm.mapped.*` / `pcm.warped.*`）、`chroma`（`chroma.lowres.*`）、`hz`（`pitch.*`）、`index`（`warp_path` / `notes.*`）、`rms`（`rms.*`）、`cents`、`db`、`seconds`（后三个为算法 payload 预留，当前未被任何 profile 端口使用；预留项必须由某个未来 profile 真正使用，否则应删——本词表不收集「以后可能有用」的值）、`ratio`（比例，如 `off_pitch_ratio` / `early_ratio`）、`count`（无量纲计数，如 `n_notes_used` / `n_unpaired`）。
 - 存在理由（G10）：`units` 是算法判断「这个端口是不是我要的量」的依据；开放式字符串会让 `"hz"`/`"Hz"`/`"hertz"` 三种写法在 `== "hz"` 判断下静默不匹配。第一版举例还漏了 profile 实际在用的 `chroma`。取值由 `assert_profile_integrity()` 检查。
 - 不变量：词表封闭；端口 `units` 取值必属此表；比较一律用本表内的小写字面量精确相等。
 
@@ -145,7 +145,7 @@
   - `element_type: str` —— numpy dtype 名称，取值域 `{'float32', 'int32'}`（profile 实际使用的全部取值）。
   - `dimensions: Sequence[str]` —— 维度语义名，合法取值逐个为 `'sample'` / `'frame'` / `'warp_point'` / `'axis'` / `'field'` / `'bin'`（profile 实际使用的全部语义名）。
   - `shape: Sequence[int]` —— 各维尺寸，运行期填充。
-  - `units: str` —— 物理单位，取值必属 `UNITS_VOCABULARY`（8 值，见 §4.5）。
+  - `units: str` —— 物理单位，取值必属 `UNITS_VOCABULARY`（10 值，见 §4.5）。
   - `field_names: Sequence[str] = ()` —— 第二维字段名，顺序即内存布局顺序；单维端口为空元组；多维端口必须与 `FIELD_LAYOUTS[类别前缀]` 完全一致（防止静默错位的唯一手段）。
   - `timeline_basis: TimelineBasis = TimelineBasis.REFERENCE` —— 必填语义；忘记声明会导致节奏指标算错。
   - `hop_length: int = 0` —— 该端口的**帧移**（单位：采样点）。帧类端口必填；非帧类（index / 逐音表）为 0。数值事实：`profile.ALIGN.hop_length = 2048`（chroma 帧移），`MATERIALIZE.rms_hop_length = 256`（RMS 帧移），两者相差 8×，故必须在描述符里逐端口声明，不许实现者猜（G5）。`read(time_range)` 的秒→帧换算依据**本字段**，不是 `profile.ALIGN.hop_length`。
@@ -159,20 +159,28 @@
 
 - `BufferView`（frozen dataclass）：对某端口的只读借用视图。字段：`data: npt.NDArray[Any]`（`field(repr=False)`，实际 numpy 数组）、`element_count: int`（恒等于 `data.size`，即各维尺寸之积）、`element_type: str`（与宿主 `PortDescriptor.element_type` 相同）。所有权始终属于 C2；借用方不得修改、不得释放、不得跨会话持有；实现层必须保证 `data.flags.writeable is False`。边界：`data.ndim` 必须等于描述符 `dimensions` 的长度；`element_count == product(data.shape)` 不成立即为实现缺陷（ContractViolation 级别的事实）。
 - `SurfaceManifest`（frozen dataclass）：数据面自描述清单。字段：`profile_version: str`（构造数据面用的 profile 版本）、`audio_format: AudioFormat`（§4.3）、`reference_duration_sec: float`（参考演奏时长，秒）、`practice_duration_sec: float`（练习演奏时长，秒）、`ports: Mapping[str, PortDescriptor]`（全部端口，键为 port_id）、`sealed: bool`（Seal 后为 True）。外部通过它枚举端口而**无需预知端口清单**——这是「深组件」的关键：C2 内部可重组而不破坏外部。不变量：`sealed is False` 时该清单**不得**交给任何算法；`ports` 必须包含 `CORE_REQUIRED_PORTS` 的全部 2 项。
+- `ResolutionView`（frozen dataclass）：插件运行入口可见的输入解析只读视图。字段：`available: frozenset[str]`（本次实际可用的 required / optional 端口）与 `missing_optional: frozenset[str]`（声明了但未取得或未通过检查的 optional 端口）；只有只读查询方法 `is_available(port_id: str) -> bool`，没有 setter 或变更方法。插件读取 `missing_optional` 即可知道哪些 optional 没拿到；它是契约层视图类型，不是 runtime 的原始 `InputResolution`（源码事实：`harmonica_eval/contract.py:390-413`；查询实现为 `return port_id in self.available`，不修改任何状态）。
 
 ### 4.8 AlgorithmResultEnvelope（frozen dataclass，算法标准回执）
 
-- 输入（构造参数）：`algorithm_id: str`；`algorithm_version: str`；`status: str`，取值域**封闭三元** `{'OK', 'FAILED', 'INCOMPATIBLE'}`；`required_ports: Sequence[str]`（算法声明需要的端口，仅用于兼容性检查，单向）；`consumed_ports: Sequence[str]`（本次**实际读取**的端口，仅用于证据与追溯，**绝不**反向触发 C2 生成数据）；`payload: Mapping[str, Any]`（结果本体，形状由算法自己声明，C1 不解释其内部）；`error_code: str | None = None`（失败时填 `ErrorCode` 的 `.value`，如 `"ALGORITHM_FAILED"`）；`error_detail: str | None = None`；`elapsed_sec: float | None = None`（算法耗时，秒）。
+- 输入（构造参数）：`algorithm_id: str`；`algorithm_version: str`；`status: str`，取值域**封闭四元** `{'OK', 'DEGRADED', 'INCOMPATIBLE', 'FAILED'}`；`required_ports: Sequence[str]`（算法声明需要的端口，仅用于兼容性检查，单向）；`consumed_ports: Sequence[str]`（本次**实际读取**的端口，仅用于证据与追溯，**绝不**反向触发 C2 生成数据）；`payload: Sequence[UiScalar | UiSeries]`（结果本体；每个标量最终成为一个 `UiScalar`，逐音序列成为一个 `UiSeries`，字段名由对象自身的 `key` 自描述，框架不维护第二份键名清单）；`error_code: str | None = None`（失败时填 `ErrorCode` 的 `.value`，如 `"ALGORITHM_FAILED"`）；`error_detail: str | None = None`；`elapsed_sec: float | None = None`（算法耗时，秒）；`coverage: float | None = None`（覆盖比例，0.0–1.0；无法测量时为 `None`，不得用 0.0 冒充）；`warnings: tuple[str, ...] = ()`（人可读告警，每条一句）。
 - 输出/用途：C3 每个算法运行后返回一个实例；C1 逐个消费它更新 UiView 与证据包。
 - **核心纪律：算法失败也必须返回信封（status='FAILED'），而不是抛异常穿透到 C1。** 这是 C1 隔离故障的唯一机制：单个算法崩溃不得打断其余算法与会话。
-- 边界：`status='OK'` 时 `payload` 必须非空且 `error_code is None`；`status='FAILED'` 时 `error_code` 必须非 None；`status='INCOMPATIBLE'` 表示 `required_ports` 中存在数据面没有的端口（对应 `PLUGIN_INCOMPATIBLE`）。
-- 不变量：`consumed_ports ⊆ required_ports`；`error_code` 非 None 时必属 `ErrorCode` 的 12 个 `.value` 之一；信封一旦构造不可变。
+- 四值语义：`OK`=兼容并正常完成全部预期能力；`DEGRADED`=正常运行但因 optional 输入缺失或明确的输入质量限制，只提供部分能力，`coverage` 或 `warnings` 至少一项必须非空；`INCOMPATIBLE`=required 输入不满足，入口根本不应调用（对应 `PLUGIN_INCOMPATIBLE`）；`FAILED`=输入本来兼容但执行失败。`OK` / `DEGRADED` 的 `error_code` 必须为 `None`。
+- 边界：`status='OK'` 时 `payload` 必须非空且 `error_code is None`；`status='DEGRADED'` 时 `payload` 可非空，但必须以 `coverage` 或 `warnings` 明示降级证据；`status='FAILED'` 时 `error_code` 必须非 None；`status='INCOMPATIBLE'` 表示 `required_ports` 中存在数据面没有的端口（对应 `PLUGIN_INCOMPATIBLE`）。
+- 不变量：`consumed_ports ⊆ required_ports`；`error_code` 非 None 时必属 `ErrorCode` 的 12 个 `.value` 之一；信封一旦构造不可变。★ 算法清单的权威是 `algorithms.registry.Registry` 的显式注册结果；payload 字段名的权威是插件产出的 `UiScalar` / `UiSeries.key`，不再存在框架侧按算法标识索引的冻结表。
 
-### 4.9 AlgorithmDataContract（Protocol，C3 → 数据面，2 操作）
+### 4.9 AlgorithmDataContract（Protocol，C3 → 数据面，2 个纯查表操作 + 1 个只读状态属性）
 
-实现者：C2 产出的 Surface；调用者：C3 各算法。设计裁定（负责人，不可推翻）：**Core 预生成，端口清单封闭，算法适配 Core**，故只有两个**纯查表**操作，`read()` **无副作用**——不触发任何计算、不会失败于「算不出来」；Seal 时数据面里已有算法要的一切，若算法需要数据面之外的东西，从 PCM 自己算。
+**2 个纯查表操作**（`manifest()` / `read()`）**+ 1 个只读状态属性 `resolution`，不计入操作数**。现有
+`tools/check_counts.py` 的旧数量判据只核对 callable 操作，不能把本属性计入操作数；这一判据
+待负责人的独立任务更新，本文件不删减或改写事实来迎合它。
+`resolution` 返回 `ResolutionView`（`harmonica_eval/contract.py:654-678`）。
+
+实现者：C2 产出的 Surface；调用者：C3 各算法。设计裁定（负责人，不可推翻）：**Core 预生成，端口清单封闭，算法适配 Core**。接口明确区分 **2 个纯查表操作**（`manifest()` / `read()`）与 **1 个只读状态属性 `resolution`，不计入操作数**。`resolution` 是 `@property`，返回 `ResolutionView`；`read()` **无副作用**——不触发任何计算、不会失败于「算不出来」；Seal 时数据面里已有算法要的一切，若算法需要数据面之外的东西，从 PCM 自己算。成员定义：`harmonica_eval/contract.py:654-678`。
 
 - `manifest() -> SurfaceManifest`：输入无；输出 §4.7 的清单。用于枚举端口并判断兼容性。纯读取，无副作用，不抛受控异常。
+- `resolution -> ResolutionView`（**只读状态属性，不计入操作数**）：返回本次插件运行可见的输入解析视图。插件通过 `view.missing_optional` 知道哪些 optional 没拿到，也可调用只读查询 `view.is_available(port_id)`；不得把 runtime 的原始 `InputResolution` 传入或暴露给插件。`resolution` 无 setter，C2 的 `core/surface.py::Surface` 当前也不提供该状态（`harmonica_eval/core/surface.py:112-144`），runtime 计划只用 `ResolvedSurface` 适配器组合 C2 数据面与解析视图后再交给单参 `entry`；但该适配器的 `manifest()` / `read()` / `resolution` 当前**均为 SHELL**，实现未注入，故这条装配链目前尚不可工作（契约意图见 `harmonica_eval/contract.py:654-678`，空壳事实见 `harmonica_eval/algorithms/runtime.py:99-131`）。**已知未决：谁负责把 C2 Surface 包装成完整 `AlgorithmDataContract`（含 `resolution`）仍待裁定；不得把 C2 Surface 改称已实现该属性。**
 - `read(port_id: str, time_range: tuple[float, float] | None = None) -> BufferView`：
   - 输入：`port_id`（必须已存在于数据面）；`time_range` **统一以秒为单位**（不是帧、不是采样点），左闭右开 `[t0, t1)`；`None` ⇒ 整段。坐标含义由该端口 `timeline_basis` 决定：REFERENCE → 相对参考演奏起点的秒；WARPED → 相对时间归一化后起点的秒。秒→帧/索引换算由**实现**负责，调用方不得自行乘除 hop；换算依据是该端口自己的 `hop_length`。
   - 换算规则（按端口 `units` / `dimensions`，冻结）：
@@ -194,7 +202,7 @@
 1. `create_session(profile_version: str) -> str`：输入 profile 版本字符串（如 `'CORE_PROFILE_V0.1'`，必须显式传入——数据面内容是 (reference, practice, profile_version) 的函数，没有它「同一对输入」不成立）；输出 session_id（str，唯一句柄）。状态 CREATED。
 2. `set_reference(session_id: str, uri: str) -> None`：登记参考演奏，**不触发**解码或计算。合法状态 CREATED / INPUT_READY；两段都登记后 → INPUT_READY。★ G8 修正：第一版签名无 `session_id`，而其余 5 个操作都要求它——契约内部不自洽，多会话直接歧义、单会话需「当前会话」隐含状态；修正后**所有会话级操作显式定位会话**，不引入隐含状态。
 3. `set_practice(session_id: str, uri: str) -> None`：同上，登记学习者演奏。
-4. `build_surface(session_id: str) -> None`：**一次性预生成**全部端口并 Seal。前置：状态 == INPUT_READY；后置：状态 == DATA_READY，数据面不可变；失败：抛 `CoreBuildError`，状态 → FAILED，**不得部分发布**，资源全部释放，且未触发任何算法。本操作**不接收任何算法信息**（不知道谁会来读）。构建为同步阻塞调用，内部四阶段（ingest → align → features → surface）禁止外泄；须提供取消检查点（见 §4.14 COMMAND_EFFECTS 的 CANCEL）。
+4. `build_surface(session_id: str) -> None`：**一次性预生成**全部端口并 Seal。前置：状态 == INPUT_READY；后置：状态 == DATA_READY，数据面不可变；失败：抛 `CoreBuildError`，状态 → FAILED，**不得部分发布**，资源全部释放，且未触发任何算法。本操作**不接收任何算法信息**（不知道谁会来读）。构建为同步阻塞调用，内部四阶段（ingest → align → features → surface）禁止外泄；`CANCEL` 在 `BUILDING` 时不打断构建，契约没有取消标志的设置或观察通道，故不得注入后台线程、回调或 checkpoint。
 5. `status(session_id: str) -> SessionState`：只返回 §4.1 的 6 值之一；C2 内部阶段不得外泄。
 6. `acquire_surface(session_id: str) -> AlgorithmDataContract`：取得数据面只读句柄。前置：状态 == DATA_READY，否则抛 `ContractViolation`；句柄有效期至 destroy_session。
 7. `destroy_session(session_id: str) -> None`：销毁会话并释放全部资源；之后使用旧句柄的任何行为都是 `ContractViolation`。
@@ -215,7 +223,7 @@
 6. `ALIGNMENT_UNRECOVERABLE` —— 归属 C2。触发：无法建立有效时间映射。**禁止**静默退化为「逐点硬比」（宪章 §5.6）——逐点硬比会产出看似有效实则无意义的指标。结果：状态 → FAILED。
 7. `PLUGIN_INCOMPATIBLE` —— 归属 **C1 判定**。触发：算法 `required_ports` 声明了数据面没有的端口。结果：该算法返回 `AlgorithmResultEnvelope(status='INCOMPATIBLE')`；**数据面仍有效**，其他算法不受影响。
 8. `ALGORITHM_FAILED` —— 归属 C3。触发：算法崩溃（异常）/ 产出含 NaN / 产出非法结果。结果：该算法信封 `status='FAILED'`；数据面与其余算法不受影响。
-9. `ALGORITHM_RESULT_INVALID` —— 归属 **C1（校验）**。触发：算法返回的结果不符合其声明的 schema（如 payload 缺声明的键、形状与声明不符）。结果：该算法按失败处理；数据面仍有效。
+9. `ALGORITHM_RESULT_INVALID` —— 归属 **C1（校验）**。触发：算法返回的结果违反自描述契约（如 payload 含非 `UiScalar` / `UiSeries` 对象、单位不在 `UNITS_VOCABULARY`、`UiSeries.t` / `values` 长度不等，或 `DEGRADED` 缺少 `coverage` / `warnings` 证据）。结果：该插件按失败处理；数据面仍有效。
 10. `ALGORITHM_TIMEOUT` —— 归属 C1。**v0.1 未实现**（已知缺口：死循环会卡住流程）；保留编号占位，任何路径**不得**在 v0.1 产出它。
 11. `COCKPIT_DETACHED` —— 归属 C4。★ G14 修正：第一版定义了它但**没有任何地方能产生**（`UiProjectionPort` 只有 snapshot/submit，无上报通道，C1 也不检测界面存活）——这是已删除功能的残留，不是待实现接口。**v0.1 不会产生此码**；保留它只为让 `ErrorCode` 编号在文档/报表中不偏移（已发出的证据包不失效）。v0.1 对界面断开的实际处理（MT-007）：C4 进程消失 → C1 **什么都不做**，会话继续（不变量 F：C4 可缺席）。若将来要记录界面事件，正确做法是新增事件通道，不是复用 ErrorCode（断开不是错误，塞进错误码会污染失败统计）。
 12. `INTERNAL_ERROR` —— 兜底。触发：出现即表示存在未分类失败路径，应视为**缺陷**上报，不得把它当正常分支使用。
@@ -234,15 +242,26 @@
 
 - `UiScalar`（frozen）：`key: str`；`label: str`（给人看的中文短名）；`value: float`；`unit: str`，取值域 `{'cents', 'ms', 'db', 'ratio', ''}`；`threshold: float | None = None`（None = 纯陈述、无判定）。纪律：只陈述数值与含义，**不下教学结论**（SPEC §3）。
 - `UiSeries`（frozen）：`key: str`；`label: str`；`t: Sequence[float]`（时间轴，秒，`field(repr=False)`）；`values: Sequence[float]`（`field(repr=False)`）；不变量 `len(t) == len(values)`；`unit: str`；`timeline_basis: TimelineBasis`（**必填**）。纪律：曲线**必须已下采样**后交付；★ 已裁定：**禁止把不同 timeline_basis 的曲线画在同一张图上**（两条轴的 t 物理含义不同，叠加必然误导，会让抢拍拖拍看起来「对齐了」）；同一 basis 的多条曲线可以叠加。`source_port: str | None = None`（None = 算法直接产出）。
-- `UiView`（frozen）：`session_id: str`；`state: SessionState`；`series: Sequence[UiSeries] = ()`；`scalars: Sequence[UiScalar] = ()`；`progress: float | None`（取值域 0.0–1.0 **比例，不是百分数**；`None` = 该会话没有进度概念——尚未开始或已进入终态；`1.0` 与 `state == DATA_READY` 一致；界面不得自行归一化、不得推断百分比）；`error_code: str | None = None`；`error_detail: str | None = None`；`note: str = ""`（给开发者的一句话说明）。
-- `progress` 产生机制（G9，冻结）：**「C1 已完成的正交步骤数 / 总步骤数」**。BUILD_SURFACE 期间 → 0.0 → 1.0 的**单次跳变**（或 None），没有中间值——因为那需要 Core 汇报内部阶段，而内部阶段禁止外泄；RUN_ALGORITHMS 期间 → `k / 3`（k = 已完成算法数，按 registry 顺序）。这是刻意取舍：平滑进度条需要 Core 开放内部阶段 = 契约从 7 操作变 8 操作，违反封闭契约原则；本轮不做。记入已知缺口：若将来需要平滑进度，正确做法是在 C1 里把构建拆成可观测的多次调用（同样须负责人裁定）。
+- `UiView`（frozen）：`session_id: str`；`state: SessionState`；`series: Sequence[UiSeries] = ()`；`scalars: Sequence[UiScalar] = ()`；`progress: float | None`（取值域 0.0–1.0 **比例，不是百分数**；`None` = 该会话没有进度概念——尚未开始或已进入终态；`1.0` 与 `state == DATA_READY` 一致；界面不得自行归一化、不得推断百分比）；`port_summary: Sequence[PortDescriptor] = ()`（端口结构只读摘要，**投影 5 字段子集**，见下方专段）；`error_code: str | None = None`；`error_detail: str | None = None`；`note: str = ""`（给开发者的一句话说明）。
+- `port_summary` 冻结语义（负责人裁定 2026-09-24，CONTRACT-UI 升 v2 时新增）：
+  - **投影 5 字段子集**：`port_id` / `units` / `dimensions` / `shape` / `timeline_basis`。
+  - **不投影其余 6 个**：`schema_version` / `element_type` / `field_names` / `hop_length` / `sample_rate` / `content_hash` —— 它们是 **C2 的实现细节**；G14 说的是「不直连 C2」，若经 C1 转手把 11 个字段**全部**投影给 C4，那只是换了个手，**实质仍是 C2 内部结构泄漏**。降信息熵要在这个方向上也成立。
+  - `field_names` 尤其不投影：它已由契约层 `FIELD_LAYOUTS` 承载，**那是单一真相源**；再投影一份就是制造第二份，迟早漂移。
+  - `()` ＝ **C1 未提供**（尚无数据面或该投影未实现），**不是**「没有端口」的断言；二者不得混为一谈。
+  - 由 **C1 在 `snapshot()` 时投影**，C4 只消费；C1 **不得**为补全信息而让 C4 直连 C2（G14）。
+- ★★ **有限扩面冻结记录（防止本条被当作可援引的先例）★★
+  1. **`port_summary` 是 `UiView` 上的【数据字段】，不是 `UiProjectionPort` 上的【第三个操作】。** §4.15「port 上不得再增第三个操作」**继续有效**，本次未触碰、也不得据此放宽。
+  2. 本次扩面的**唯一理由**：C4 没有**合法通道**得知端口结构（直接 import `profile` 即绕过 G14 直连 C2），而该信息对其调试视图**必需**。
+  3. ★ **本次是唯一一次**以「补通道缺失」为由对 `UiView` 的扩面。
+  4. ★ **后续任何 `UiView` 字段的增删，须重新裁定，不得援引本次先例。** 「上次也是加字段」不是理由。
+- `progress` 产生机制（G9，冻结）：**「C1 已完成的正交步骤数 / 总步骤数」**。BUILD_SURFACE 期间 → 0.0 → 1.0 的**单次跳变**（或 None），没有中间值——因为那需要 Core 汇报内部阶段，而内部阶段禁止外泄；RUN_ALGORITHMS 期间 → `k / N`（k = 已完成插件数，N = `Registry.list()` 的当前注册总数，按注册顺序）。这是刻意取舍：平滑进度条需要 Core 开放内部阶段 = 契约从 7 操作变 8 操作，违反封闭契约原则；本轮不做。记入已知缺口：若将来需要平滑进度，正确做法是在 C1 里把构建拆成可观测的多次调用（同样须负责人裁定）。
 
 ### 4.14 UiCommandKind / COMMAND_LEGALITY / COMMAND_EFFECTS / UiCommand / UI_PAYLOAD_KEYS
 
 - `UiCommandKind`（Enum，6 值）：`SET_REFERENCE` / `SET_PRACTICE` / `BUILD_SURFACE` / `RUN_ALGORITHMS` / `CANCEL` / `RESET`。刻意保持极小：C4 **不能凭界面发明内核能力**。
 - `COMMAND_LEGALITY: Mapping[UiCommandKind, frozenset[SessionState]]`（逐项冻结）：SET_REFERENCE → {CREATED, INPUT_READY}；SET_PRACTICE → {CREATED, INPUT_READY}；BUILD_SURFACE → {INPUT_READY}；RUN_ALGORITHMS → {DATA_READY}；CANCEL → {INPUT_READY, BUILDING, DATA_READY}；RESET → 全部 6 个状态。用途：C1 **必须**用它校验（非法命令 → 拒绝且**不改变状态**）；C4 **可以**用它置灰按钮（纯 UI 优化，**不是**安全边界）；即使 C4 不置灰，C1 也必须校验——界面不是可信输入源。
-- `COMMAND_EFFECTS: Mapping[UiCommandKind, str]`（G11，冻结语义，逐条）：SET_REFERENCE = 登记参考演奏路径，成功 → INPUT_READY；SET_PRACTICE = 登记练习演奏路径，成功 → INPUT_READY；BUILD_SURFACE = 开始构建数据面，进入 BUILDING，成功 → DATA_READY；RUN_ALGORITHMS = 运行全部已注册算法，**状态不变**（仍在 DATA_READY）；CANCEL = 中止进行中操作 → **回到操作前的稳定态**，细化为：INPUT_READY 下无进行中操作，状态不变（幂等）；BUILDING 下中止构建、**销毁未完成的数据面**，回 INPUT_READY；DATA_READY 下只中止正在运行的算法、**数据面保持有效**，回 DATA_READY（已 Seal 的数据面不因取消而销毁）。RESET = 销毁数据面、清空已登记输入，回 CREATED（会话对象本身保留，可继续登记新输入）。★ BUILDING 期间取消的实现要求：`build_surface` 同步阻塞、中途无天然中断点，契约**要求**实现者提供检查点——至少在每个端口物化完成时检查一次取消标志，不得以「构建太快」回避（120 s 音频的构建可感知）。★ CANCEL 与 RESET 都**不是错误**：不得产生 ErrorCode，新状态不是 FAILED——用户主动中止 ≠ 系统失败。
-- `UiCommand`（frozen）：`kind: UiCommandKind`；`payload: dict = field(default_factory=dict)`。载荷键名冻结（G7，唯一权威即下表）：SET_REFERENCE `{"path": str}`（绝对路径，音频文件）；SET_PRACTICE `{"path": str}`；BUILD_SURFACE `{}`；RUN_ALGORITHMS `{}`；CANCEL `{}`；RESET `{}`。规则：键名不得增删（需要新载荷时改契约并升 CONTRACT-UI-v1 版本）；C1 **必须**校验——未知键、缺必需键、值类型不符 → **拒绝命令**（拒绝而非忽略：忽略会让 C4 以为命令生效了）；非法命令被拒绝且不改变状态，不许「尽力而为」。
+- `COMMAND_EFFECTS: Mapping[UiCommandKind, str]`（G11，冻结语义，逐条）：SET_REFERENCE = 登记参考演奏路径，成功 → INPUT_READY；SET_PRACTICE = 登记练习演奏路径，成功 → INPUT_READY；BUILD_SURFACE = 开始构建数据面，进入 BUILDING，成功 → DATA_READY；RUN_ALGORITHMS = 运行全部已注册算法，**状态不变**（仍在 DATA_READY）；CANCEL = 中止进行中的操作 → **回到操作前的稳定态**，细化为：INPUT_READY 下无进行中操作，状态不变（幂等）；BUILDING 下**不打断同步构建**，构建完成后按 `CANCEL` 的目标转移生效；DATA_READY 下只中止正在运行的算法、**数据面保持有效**，回 DATA_READY（已 Seal 的数据面不因取消而销毁）。RESET = 销毁数据面、清空已登记输入，回 CREATED（会话对象本身保留，可继续登记新输入）。★ `CANCEL` 只能在 `INPUT_READY` / `DATA_READY` 阶段被即时响应。契约没有取消标志的设置或观察通道，故不存在可执行的端口级检查要求；不得注入后台线程、回调或 checkpoint。★ CANCEL 与 RESET 都**不是错误**：不得产生 ErrorCode，新状态不是 FAILED——用户主动中止 ≠ 系统失败。
+- `UiCommand`（frozen）：`kind: UiCommandKind`；`payload: dict = field(default_factory=dict)`。载荷键名冻结（G7，唯一权威即下表）：SET_REFERENCE `{"path": str}`（绝对路径，音频文件）；SET_PRACTICE `{"path": str}`；BUILD_SURFACE `{}`；RUN_ALGORITHMS `{}`；CANCEL `{}`；RESET `{}`。规则：键名不得增删（需要新载荷时改契约并升 CONTRACT-UI-v2 版本）；C1 **必须**校验——未知键、缺必需键、值类型不符 → **拒绝命令**（拒绝而非忽略：忽略会让 C4 以为命令生效了）；非法命令被拒绝且不改变状态，不许「尽力而为」。
 - `UI_PAYLOAD_KEYS: Mapping[UiCommandKind, tuple[str, ...]]`（逐项）：SET_REFERENCE → `("path",)`；SET_PRACTICE → `("path",)`；BUILD_SURFACE → `()`；RUN_ALGORITHMS → `()`；CANCEL → `()`；RESET → `()`。教训同 `FIELD_LAYOUTS`：`dict` 类型不携带键名信息，产出方与消费方必须有共同事实来源，否则静默错位。
 
 ### 4.15 UiProjectionPort（Protocol，C1 ↔ C4，2 操作）
@@ -274,8 +293,8 @@
 | 标准化 / 对齐 / 预生成任一步失败 | 显式失败；**不得部分发布**，资源全释放，未触发任何算法 | `CoreBuildError`，`code=ErrorCode.CORE_BUILD_FAILED` |
 | 无法建立有效时间映射 | 显式失败；**禁止**静默退化为逐点硬比 | `CoreBuildError`，`code=ErrorCode.ALIGNMENT_UNRECOVERABLE` |
 | 算法声明数据面没有的端口 | 降级为该算法退出，**其余流程不受影响**（数据面仍有效） | 该算法返回 `AlgorithmResultEnvelope(status='INCOMPATIBLE', error_code='PLUGIN_INCOMPATIBLE')`，不抛异常 |
-| 算法运行崩溃 / 产出 NaN / 非法结果 | 降级为该算法失败，**其余流程不受影响**；失败也要返回信封，异常不得穿透到 C1 | `AlgorithmResultEnvelope(status='FAILED', error_code='ALGORITHM_FAILED')`；内部捕获 `AlgorithmError` |
-| 算法结果不符合其声明 schema | 该算法按失败处理；数据面仍有效 | `AlgorithmResultEnvelope(status='FAILED', error_code='ALGORITHM_RESULT_INVALID')` |
+| 算法运行崩溃 / 产出 NaN / 非法结果 | 降级为该插件失败，**其余流程不受影响**；失败也要返回信封，异常不得穿透到 C1 | `AlgorithmResultEnvelope(status='FAILED', error_code='ALGORITHM_FAILED')`；内部捕获 `AlgorithmError` |
+| 算法返回的结果违反自描述契约（payload 元素类型/单位/曲线形状不合法，或 `DEGRADED` 缺少 `coverage` / `warnings` 证据） | 该插件按失败处理；数据面仍有效 | `AlgorithmResultEnvelope(status='FAILED', error_code='ALGORITHM_RESULT_INVALID')` |
 | 算法超时 | **v0.1 未实现**（已知缺口：死循环会卡住流程）；任何路径不得产出该码 | 无（`ErrorCode.ALGORITHM_TIMEOUT` 仅为编号占位） |
 | 界面（C4）断开 | 什么都不做，会话继续（不变量 F：C4 可缺席）；**不是错误**，不得产生错误码污染失败统计 | 无（`ErrorCode.COCKPIT_DETACHED` 在 v0.1 无产生点） |
 | CANCEL / RESET | 用户主动中止 ≠ 系统失败；按 `COMMAND_EFFECTS` 转移状态，不产生 ErrorCode，新状态不是 FAILED | 正常返回 |
@@ -290,21 +309,22 @@
 
 | ID | 不变量 | 怎么验 |
 | --- | --- | --- |
-| INV-003-1 | 本文件只含 Enum / dataclass / Protocol / 常量元组；零计算、零 I/O、零第三方算法调用（铭牌 MUST）。执行体仅限：`AudioFormat.__post_init__` 两处校验、`HarmonicaError.__str__`、Enum/Protocol 定义本身 | AST 断言：模块顶层除 class/assignment/`__all__`/imports/docstring 外无语句；无 `open`/`print`/`hashlib`/`os` 引用（§8 脚本 Q1） |
+| INV-003-1 | 本文件只含 Enum / dataclass / Protocol / 常量元组；零计算、零 I/O、零第三方算法调用（铭牌 MUST）。按现有数量统计口径（异常基类 `HarmonicaError` 不计入），模块内有 **12 个 dataclass**（包含新增的 `ResolutionView`）；执行体仅限：`AudioFormat.__post_init__` 两处校验、`ResolutionView.is_available` 只读集合查询、`HarmonicaError.__str__` 展示格式化、Enum/Protocol 定义本身 | AST 断言：模块顶层除 class/assignment/`__all__`/imports/docstring 外无语句；无 `open`/`print`/`hashlib`/`os` 引用（§8 脚本 Q1） |
 | INV-003-2 | 不 import 本包任何模块（core / host / algorithms / cockpit / profile），也不 import `hashlib` 等计算库；依赖链根（铭牌 MUST NOT） | 断言 `contract.__file__` 所属模块的 import 表 ⊆ {`__future__`, `dataclasses`, `enum`, `typing`, `numpy`, `numpy.typing`}（§8 脚本 Q1） |
 | INV-003-3 | 端口描述符能表达 profile.py 的全部字段（铭牌 MUST）：`PortDescriptor` 字段集 ⊇ profile 每个端口声明所需的全部语义（port_id / schema_version / element_type / dimensions / shape / units / field_names / timeline_basis / hop_length / sample_rate / content_hash） | 构造 `FIELD_LAYOUTS` 全部 4 类前缀 × `UNITS_VOCABULARY` 实际使用的 5 个 units 值的 `PortDescriptor` 实例，逐一成功（§8 脚本 Q2） |
 | INV-003-4 | `FIELD_LAYOUTS` 封闭且顺序冻结：恰 4 键 `warp_path`/`pitch`/`notes`/`chroma`，值分别等于 `("reference_frame","practice_frame")` / `("f0_hz","voiced","confidence")` / `("onset_sec","f0_hz","rms")` / 12 音级 `("C","C#","D","D#","E","F","F#","G","G#","A","A#","B")`，bin 0 = C | 断言 `dict(FIELD_LAYOUTS) == 冻结字典` 且每值为 tuple（§8 脚本 Q2） |
-| INV-003-5 | `UNITS_VOCABULARY` 封闭：恰 8 个元素 {amplitude, chroma, hz, index, rms, cents, db, seconds}；`CORE_REQUIRED_PORTS` 恰 2 项（pcm.mapped.reference / pcm.mapped.practice）；`FORBIDDEN_OPERATIONS` 恰 10 项且含 `align`/`fft`/`register_algorithm` | 断言三个常量与其冻结字面量相等（§8 脚本 Q2） |
+| INV-003-5 | `UNITS_VOCABULARY` 封闭：恰 10 个元素 {amplitude, chroma, hz, index, rms, cents, db, seconds, ratio, count}；`CORE_REQUIRED_PORTS` 恰 2 项（pcm.mapped.reference / pcm.mapped.practice）；`FORBIDDEN_OPERATIONS` 恰 10 项且含 `align`/`fft`/`register_algorithm` | 断言三个常量与其冻结字面量相等（§8 脚本 Q2） |
 | INV-003-6 | `SessionState` 恰 6 值；`status()` 契约只允许返回这 6 值之一，C2 内部阶段不得外泄 | 断言 `len(SessionState) == 6` 且成员名集合 == {CREATED, INPUT_READY, BUILDING, DATA_READY, FAILED, CLOSED}（§8 脚本 Q2） |
 | INV-003-7 | `TimelineBasis` 恰 2 值，语义冻结为「哪条时间网格」：REFERENCE=源时间网格（保留源时间、未被时间归一化），WARPED=归一化网格；REFERENCE **不**蕴含两侧帧号一一对应，两段独立录音帧数默认不等，「逐帧相减」无定义，必须按音配对 | 断言成员集合 == {REFERENCE, WARPED}；文本断言本文件 §4.2 含「逐帧相减」无定义与按音配对表述（§8 脚本 Q3） |
-| INV-003-8 | `AlgorithmDataContract` 恰 2 个操作（manifest / read），read 无副作用、单位为秒、绝不以空视图冒充成功（时间窗非法时抛 ContractViolation；窗内确无数据且 t1 在时长内时空视图合法） | Protocol 成员断言 `set(AlgorithmDataContract.__protocol_attrs__) ⊆ {"manifest", "read"}`；read 失败语义由实现侧（FILE-005/006）测试复验（§8 脚本 Q2） |
+| INV-003-8 | `AlgorithmDataContract` 恰 2 个操作（`manifest` / `read`；**操作数不含 `resolution` 属性**），另有 1 个只读状态属性 `resolution`；`read` 无副作用、单位为秒、绝不以空视图冒充成功（时间窗非法时抛 `ContractViolation`；窗内确无数据且 `t1` 在时长内时空视图合法）；`resolution` 返回 `ResolutionView`，供插件查询可用性并读取 `missing_optional` | Protocol 成员断言：公开成员恰为 `{"manifest", "read", "resolution"}`；操作成员恰为 `{"manifest", "read"}`，且 `vars(AlgorithmDataContract)["resolution"]` 为 `property`；`ResolutionView` 字段与 `is_available` 由 Q2 断言；read 失败语义由实现侧（FILE-005/006）测试复验（§8 脚本 Q2） |
 | INV-003-9 | `HostContract` 恰 7 个操作，不多不少：create_session / set_reference / set_practice / build_surface / status / acquire_surface / destroy_session；且 `FORBIDDEN_OPERATIONS` 的 10 个名字不得出现在任何 C2 实现的公开方法名中 | Protocol 成员断言 == 冻结集合；Inspector General 断言 `FORBIDDEN_OPERATIONS ∩ dir(core实现) == ∅`（§8 脚本 Q2） |
-| INV-003-10 | `AlgorithmResultEnvelope.status` 取值域封闭 {'OK','FAILED','INCOMPATIBLE'}；算法失败也必须返回信封，异常不得穿透到 C1 | 断言取值域；实现侧测试：任一算法抛异常时 C1 收到的仍是信封（§8 脚本 Q2） |
+| INV-003-10 | `AlgorithmResultEnvelope.status` 取值域封闭 {'OK','DEGRADED','INCOMPATIBLE','FAILED'}；`payload` 是 `Sequence[UiScalar | UiSeries]`；`DEGRADED` 必须有 `coverage` 或 `warnings` 证据；失败/不兼容也必须返回信封，异常不得穿透到 C1 | Q2 断言 dataclass 字段、payload 注解、四值集合与各状态构造行为；Q3 断言本文件 §4.8 明文列出四值及其证据纪律（§8 脚本 Q2/Q3） |
 | INV-003-11 | `ErrorCode` 恰 12 值，名称与 `.value` 一一相同；各码触发条件以 §4.11 为唯一事实来源 | 断言 `len(ErrorCode) == 12` 且 `{m.name: m.value}` 为恒等映射（§8 脚本 Q2） |
 | INV-003-12 | `COMMAND_LEGALITY` / `COMMAND_EFFECTS` / `UI_PAYLOAD_KEYS` 键集 == `UiCommandKind` 全部 6 成员；SET_REFERENCE/SET_PRACTICE 载荷恰为 `("path",)`，其余 4 个为空元组；非法命令必须被拒绝且不改变状态 | 断言三个映射的键集与值（§8 脚本 Q2） |
 | INV-003-13 | `UiSeries.timeline_basis` 必填且禁止不同 basis 曲线同图；`UiView.progress` 取值域 0.0–1.0 或 None，1.0 与 DATA_READY 一致 | 类型断言（timeline_basis 无默认值即强制）；实现侧 C4 投影测试复验同图禁令（§8 脚本 Q2） |
 | INV-003-14 | 受控失败全部经 HarmonicaError 族（ContractViolation / CoreBuildError / AlgorithmError）抛出，裸异常不得跨组件边界传播 | 实现侧集成测试逐组件断言异常类型 ⊆ HarmonicaError 族；本文件级：断言三者 issubclass 于 HarmonicaError（§8 脚本 Q2） |
 | INV-003-15 | `__all__` 与文件实际公开符号一致（列出的每个名字在模块命名空间存在） | 断言 `all(hasattr(contract, n) for n in contract.__all__)`（§8 脚本 Q1） |
+| INV-003-16 | ★ C3 插件契约完整暴露：`algorithms.__all__ == ["InputRequirement", "PluginSpec", "Registry"]`；算法包不 import 任何具体实现 `.pitch` / `.timing` / `.dynamics`，也不重新暴露任何已删除的算法清单/字段映射/旧注册自检符号 | Q1 增补可执行断言：从 `algorithms/__init__.py` AST 解析 import 与顶层定义，逐项核对（§8 脚本 Q1） |
 
 ---
 
@@ -319,10 +339,10 @@
 - **不定义阈值与数值**：最小可分析长度、静音门限、`max_duration_sec = 120`、`ALIGN.hop_length = 2048`、`MATERIALIZE.rms_hop_length = 256` 一律不写进本文件；本文件只以文字引用它们（如 `INPUT_TOO_LONG` 的触发条件引用 `profile.AUDIO.max_duration_sec`）。把数字抄进本文件「方便引用」同样是越界。
 - **不定义 C2 内部阶段**：`INGESTING`、`ALIGNING`、`BUILDING_PORTS` 这类内部阶段名不得成为本文件的 Enum 成员、常量或 Protocol 操作名。
 - **不承诺两侧帧号一一对应**：`TimelineBasis.REFERENCE` 只表示「保留源时间、未被时间归一化」，**不**表示参考侧与练习侧的第 n 帧是同一物理时刻。两段是独立录音，采样点数与帧数默认不相等，故「逐帧相减」无定义。逐帧差的唯一合法前提是两侧端口同网格、同 `shape`、同 `hop_length`（例如标准化后的 `pcm.mapped.reference` 与 `pcm.mapped.practice`）；跨网格比较必须**按音配对**（经 `warp_path` 或 `notes.*` 的 onset 对齐）。本文件不提供任何帧号映射表。
-- **不实现 Protocol**：`HostContract`（7 操作）、`AlgorithmDataContract`（2 操作）、`UiProjectionPort`（2 操作）在本文件中只有声明体 `...`；实现分别属于 COMP-C2 与 COMP-C1。本文件不提供默认实现、mixin、基类或适配器。
+- **不实现 Protocol**：`HostContract`（7 操作）、`AlgorithmDataContract`（2 个纯查表操作 + 1 个只读状态属性 `resolution`）、`UiProjectionPort`（2 操作）在本文件中只有声明体 `...`；实现分别属于 COMP-C2 与 COMP-C1。本文件不提供默认实现、mixin、基类或适配器。
 - **不新增端口、不新增操作、不新增错误码**：`HostContract` 恒为 7 操作（第 8 个操作即破坏封闭契约原则，进度查询已被负责人裁定不做）、`ErrorCode` 恒为 12 值、`UiCommandKind` 恒为 6 值、`FIELD_LAYOUTS` 恒为 4 键。需要变更时改契约版本，不改本文件。
 - **不给编号占位码补产生点**：`ALGORITHM_TIMEOUT` 在 v0.1 无实现、`COCKPIT_DETACHED` 在 v0.1 无上报通道。本文件不得为它们加事件通道，不得在 `UiProjectionPort` 上加第三个操作。
-- **不定义算法侧内容**：不定义算法 ID 列表、算法 registry、算法 payload 的键名与形状、算法需要的端口集合、算法超时秒数。`AlgorithmResultEnvelope.payload` 的内部结构由各算法自行声明，本文件不解释。
+- **不定义算法侧内容**：不定义算法 ID 列表、算法 registry、算法 payload 的具体键名与数值口径、算法超时秒数。`AlgorithmResultEnvelope.payload` 只冻结自描述形状 `Sequence[UiScalar | UiSeries]`；字段名的唯一权威是插件产出对象的 `key` 字段，插件通过 `PluginSpec` 向显式 `Registry` 声明输入需求。
 - **不定义 UI 侧内容**：不定义布局、颜色、坐标范围、下采样率、进度条中间值。`UiSeries` 只声明「必须已下采样」与「同一张图不得混用两条 `timeline_basis`」，点数由 C3/C4 决定；`UiView.progress` 在 BUILD_SURFACE 期间没有中间值（§4.13 G9）。
 - **不定义重试与恢复策略**：不提供重试次数、退避、降级开关。`ContractViolation`（程序缺陷）与 `CoreBuildError`（构建失败）都不在本文件里被捕获或转换成别的类型。
 - **不做便利函数与默认业务值**：不写 `units_of(port)`、`is_rhythm_port(port)`、`SESSION_DEFAULT` 这类名字；铭牌 MUST NOT 明文禁止「便利函数」与「默认业务值」。
@@ -343,14 +363,17 @@ mkdir -p data/out
 
 # ── Q1 · AST 静态断言：零计算 / 零 I/O / 零本包 import / 执行体仅两处 / __all__ 自洽 ──
 "$PYTHON" - <<'PY' 2>&1 | tee data/out/FILE-003-q1.txt | tee -a data/out/FILE-003-verify.txt
-import ast, importlib.util, pathlib
+import ast, importlib.util, pathlib, sys
 
 SRC = pathlib.Path("harmonica_eval/contract.py")
 src = SRC.read_text(encoding="utf-8")
 tree = ast.parse(src)
 
 # INV-003-2：import 表 ⊆ 封闭清单，且不得使用相对 import
-ALLOWED_IMPORTS = {"__future__", "dataclasses", "enum", "typing", "numpy", "numpy.typing"}
+# ★ 2026-09-24 更正（⑳ 执行确认）：封闭清单漏了 `types`（标准库）
+#   contract.py:50 `from types import MappingProxyType` —— 标准库，不是本包依赖
+#   ★ 漏列会让「零本包 import」这条不变量被标准库误报，属判据缺陷而非实现违规
+ALLOWED_IMPORTS = {"__future__", "dataclasses", "enum", "typing", "types", "numpy", "numpy.typing"}
 mods = set()
 for node in ast.walk(tree):
     if isinstance(node, ast.Import):
@@ -360,13 +383,54 @@ for node in ast.walk(tree):
         mods.add(node.module)
 assert mods <= ALLOWED_IMPORTS, f"越界 import: {sorted(mods - ALLOWED_IMPORTS)}"
 
-# INV-003-1：模块顶层只有 import / class / 常量赋值 / docstring
-TOP_OK = (ast.Import, ast.ImportFrom, ast.ClassDef, ast.Assign, ast.AnnAssign, ast.Expr)
+# INV-003-1：模块顶层只有 import / class / 常量赋值 / docstring / 冻结的只读查询
+# ★ 2026-09-25 修正（★ 规格冲突，★ 不是阶段态过期）：
+#   本断言原先不含 ast.FunctionDef，于是 hop_of 一出现就红
+#   （实测 AssertionError: 顶层非法语句 FunctionDef @line 845）。
+# ★ ★ 冲突双方（★ 两份规格原本互相矛盾，★ 这里写明依据）：
+#     · INV-003-1 说「本文件只含 Enum / dataclass / Protocol / 常量元组」
+#     · FILE-201-v1.md:137 明文要求「现契约层新增只读查询 hop_of(port_id)」，
+#       并让算法侧写 `from ..contract import hop_of`
+# ★ ★ 裁定：hop_of 是【规格明确要求的】唯一模块级函数 ——
+#   理由是 hop 的权威源在 C2（profile），而算法侧判据 G 的 import 面
+#   冻结不含 profile；契约层提供只读转供，是为了让 hop 只有【一份真相源】，
+#   而不是让每个算法各抄一份（★ 那正是本项目要消灭的熵）。
+# ★ ★ 因此：不删 hop_of，不改 INV-003-1 的意图，
+#   只把「模块级函数」纳入允许集合，★ 且【收窄为仅这一个】——
+#   新增第二个模块级函数仍会红。
+# ★ 历史留档（★ 不是判据）：修复前 contract.py 顶层零函数，断言不含 FunctionDef。
+TOP_OK = (ast.Import, ast.ImportFrom, ast.ClassDef, ast.Assign, ast.AnnAssign, ast.Expr, ast.FunctionDef)
+# ★ 允许的模块级函数【精确名单】—— ★ 不是「所有函数都行」
+ALLOWED_TOP_FUNCS = frozenset({"hop_of"})
+_defined_funcs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+assert _defined_funcs <= ALLOWED_TOP_FUNCS, (
+    f"模块级函数超出允许名单 {sorted(ALLOWED_TOP_FUNCS)}：{sorted(_defined_funcs - ALLOWED_TOP_FUNCS)}")
 for node in tree.body:
     assert isinstance(node, TOP_OK), f"顶层非法语句 {type(node).__name__} @line {node.lineno}"
     if isinstance(node, ast.Expr):
         assert isinstance(node.value, ast.Constant) and isinstance(node.value.value, str), \
             f"顶层表达式只允许 docstring @line {node.lineno}"
+
+# INV-003-1：模块内恰 12 个普通 dataclass（HarmonicaError 基类另计，故含基类为 13）
+DCD_NAMES = tuple(
+    n.name for n in tree.body
+    if isinstance(n, ast.ClassDef)
+    and any(
+        (isinstance(d, ast.Name) and d.id == "dataclass")
+        or (isinstance(d, ast.Attribute) and d.attr == "dataclass")
+        or (isinstance(d, ast.Call) and (
+            (isinstance(d.func, ast.Name) and d.func.id == "dataclass")
+            or (isinstance(d.func, ast.Attribute) and d.func.attr == "dataclass")
+        ))
+        for d in n.decorator_list
+    )
+)
+# `from dataclasses import dataclass` 后的装饰器是 ast.Name；上面的静态结构也覆盖
+# `dataclasses.dataclass(...)` 等等价写法。HarmonicaError 是异常基类，按项目统计口径另列。
+assert len(DCD_NAMES) == 13, DCD_NAMES
+assert DCD_NAMES.count("HarmonicaError") == 1, DCD_NAMES
+assert len(set(DCD_NAMES) - {"HarmonicaError"}) == 12, DCD_NAMES
+assert "ResolutionView" in DCD_NAMES, DCD_NAMES
 
 # INV-003-1：类体只含方法声明 / 赋值 / 注解 / docstring
 CLASS_OK = (ast.FunctionDef, ast.Assign, ast.AnnAssign, ast.Expr, ast.ClassDef)
@@ -374,8 +438,8 @@ for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
     for node in cls.body:
         assert isinstance(node, CLASS_OK), f"{cls.name} 体内非法语句 {type(node).__name__} @line {node.lineno}"
 
-# INV-003-1：唯一允许有执行体的两处方法，其余方法体必须恰好是 `...`
-EXEC_BODIES = {"AudioFormat.__post_init__", "HarmonicaError.__str__"}
+# INV-003-1：唯一允许有实体的方法：AudioFormat 两处校验、ResolutionView 集合查询、HarmonicaError 展示格式化
+EXEC_BODIES = {"AudioFormat.__post_init__", "ResolutionView.is_available", "HarmonicaError.__str__"}
 seen = set()
 for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
     for fn in (n for n in cls.body if isinstance(n, ast.FunctionDef)):
@@ -386,9 +450,17 @@ for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
             continue
         ok = (len(fn.body) == 1 and isinstance(fn.body[0], ast.Expr)
               and isinstance(fn.body[0].value, ast.Constant) and fn.body[0].value.value is Ellipsis)
-        assert ok, f"{q} 的声明体必须恰好是 `...`（本文件是纯声明模块）"
+        if not ok:
+            # 允许最后一个语句为 `...`；其前只能是 docstring，不允许实际计算。
+            assert fn.body and isinstance(fn.body[-1], ast.Expr) \
+                and isinstance(fn.body[-1].value, ast.Constant) \
+                and fn.body[-1].value.value is Ellipsis, \
+                f"{q} 的声明体必须以 `...` 结尾且不得含实际计算"
+            for stmt in fn.body[:-1]:
+                assert isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) \
+                    and isinstance(stmt.value.value, str), f"{q} 的非末语句只能是 docstring"
 assert EXEC_BODIES <= seen, f"缺少执行体: {sorted(EXEC_BODIES - seen)}"
-assert len(seen) == 13, f"方法数应为 13（7+2+2 个 Protocol 操作 + 2 处执行体），实际 {len(seen)}: {sorted(seen)}"
+assert len(seen) == 15, f"方法数应为 15（AlgorithmDataContract 2 操作+1 属性、HostContract 7 操作、UiProjectionPort 2 操作、ResolutionView 1 查询、HarmonicaError 1 展示、AudioFormat 1 校验），实际 {len(seen)}: {sorted(seen)}"
 
 # INV-003-1：真实代码中不得出现计算 / I/O 名字（AST 节点级，docstring 内的算法描述不算）
 FORBIDDEN_NAMES = {"open", "print", "input", "eval", "exec", "compile", "__import__",
@@ -404,14 +476,48 @@ assert not (attrs & FORBIDDEN_ATTRS), f"出现越界属性访问: {sorted(attrs 
 # INV-003-15：__all__ 列出的每个名字都在模块命名空间存在，且无重复
 spec = importlib.util.spec_from_file_location("contract_under_test", SRC)
 c = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = c
 spec.loader.exec_module(c)
 assert len(c.__all__) == len(set(c.__all__)), "__all__ 存在重复项"
-assert len(c.__all__) == 29, f"__all__ 应为 29 项，实际 {len(c.__all__)}"
+# ★ 2026-09-25：32 → 34。增的两项是 hop_of 与 PORT_HOP_LENGTHS。
+#   依据：FILE-201-v1.md:137 明文要求契约层提供只读查询 hop_of(port_id)，
+#   让算法侧「用 contract.hop_of 而非 import profile」（该文件 §8 有断言
+#   'hop_of' in src）。两项都是为让 hop 只有【一份真相源】而设 ——
+#   否则每个算法各抄一份 hop，那正是本项目要消灭的熵。
+# ★ 判断依据是「每一个名字都要能说出它为什么在公开面上」，不是「凑够个数」。
+assert len(c.__all__) == 34, f"__all__ 应为 34 项，实际 {len(c.__all__)}"
+# ★ C3 插件化：算法包只做稳定类型出口，框架不得重新硬绑具体算法
+ALGO = pathlib.Path("harmonica_eval/algorithms/__init__.py")
+algo_tree = ast.parse(ALGO.read_text(encoding="utf-8"))
+assert isinstance(next(n.value for n in algo_tree.body
+                        if isinstance(n, ast.AnnAssign)
+                        and isinstance(n.target, ast.Name) and n.target.id == "__all__"),
+                  ast.List)
+assert ast.literal_eval(next(n.value for n in algo_tree.body
+                              if isinstance(n, ast.AnnAssign)
+                              and isinstance(n.target, ast.Name) and n.target.id == "__all__")) == [
+                                  "InputRequirement", "PluginSpec", "Registry"]
+for node in ast.walk(algo_tree):
+    if isinstance(node, ast.ImportFrom):
+        assert (node.module or "") not in {".pitch", ".timing", ".dynamics"}, ast.unparse(node)
+    if isinstance(node, ast.Import):
+        assert all(a.name not in {"harmonica_eval.algorithms.pitch",
+                                  "harmonica_eval.algorithms.timing",
+                                  "harmonica_eval.algorithms.dynamics"} for a in node.names)
+public_names = {n.id for n in algo_tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef))}
+public_names |= {n.target.id for n in algo_tree.body if isinstance(n, ast.AnnAssign)
+                 and isinstance(n.target, ast.Name) and not n.target.id.startswith("_")}
+public_names |= {t.id for n in algo_tree.body if isinstance(n, ast.Assign)
+                 for t in n.targets if isinstance(t, ast.Name) and not t.id.startswith("_")}
+assert not (set(public_names) & {"ALGORITHMS", "PAYLOAD_SCHEMAS", "assert_registry_integrity"})
+# docstring 中记录了「已删除」的历史说明，不属于现行导出面。
+assert not ({"ALGORITHMS", "PAYLOAD_SCHEMAS", "assert_registry_integrity"} & set(c.__all__))
 missing = [n for n in c.__all__ if not hasattr(c, n)]
 assert not missing, f"__all__ 列了不存在的名字: {missing}"
 for required in ("SessionState", "TimelineBasis", "AlignmentRepresentation", "AudioFormat",
                  "FIELD_LAYOUTS", "CONTENT_HASH_MAGIC", "UNITS_VOCABULARY", "PortDescriptor",
-                 "BufferView", "SurfaceManifest", "AlgorithmResultEnvelope",
+                 "BufferView", "SurfaceManifest", "ResolutionView", "AlgorithmResultEnvelope",
+                 "InputRequirement", "PluginSpec",
                  "AlgorithmDataContract", "CORE_REQUIRED_PORTS", "HostContract",
                  "FORBIDDEN_OPERATIONS", "ErrorCode", "HarmonicaError", "ContractViolation",
                  "CoreBuildError", "AlgorithmError", "UiScalar", "UiSeries", "UiView",
@@ -425,10 +531,11 @@ PY
 
 # ── Q2 · 运行期常量 / 枚举 / Protocol / dataclass 断言 ──
 "$PYTHON" - <<'PY' 2>&1 | tee data/out/FILE-003-q2.txt | tee -a data/out/FILE-003-verify.txt
-import dataclasses, importlib.util, inspect, pathlib
+import dataclasses, importlib.util, inspect, pathlib, sys
 
 spec = importlib.util.spec_from_file_location("contract_under_test", pathlib.Path("harmonica_eval/contract.py"))
 c = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = c
 spec.loader.exec_module(c)
 
 # INV-003-4：FIELD_LAYOUTS 恰 4 键、值为 tuple、chroma bin 0 = C
@@ -444,8 +551,8 @@ assert len(c.FIELD_LAYOUTS["chroma"]) == 12 and c.FIELD_LAYOUTS["chroma"][0] == 
 
 # INV-003-5：三个常量与其冻结字面量相等
 assert c.UNITS_VOCABULARY == frozenset(
-    {"amplitude", "chroma", "hz", "index", "rms", "cents", "seconds", "db"})
-assert len(c.UNITS_VOCABULARY) == 8
+    {"amplitude", "chroma", "hz", "index", "rms", "cents", "seconds", "db", "ratio", "count"})
+assert len(c.UNITS_VOCABULARY) == 10
 assert c.CORE_REQUIRED_PORTS == ("pcm.mapped.reference", "pcm.mapped.practice")
 assert c.FORBIDDEN_OPERATIONS == (
     "align", "fft", "stft", "compute_feature", "generate_pitch_input",
@@ -463,13 +570,24 @@ assert all(m.value == m.name for m in c.SessionState)
 assert set(c.TimelineBasis.__members__) == {"REFERENCE", "WARPED"} and len(c.TimelineBasis) == 2
 assert set(c.AlignmentRepresentation.__members__) == {"MAPPED", "WARPED"}
 
-# INV-003-8 / INV-003-9：Protocol 操作数不多不少
-def ops(cls):
+# INV-003-8 / INV-003-9：Protocol 操作数不多不少；只读状态属性不计操作
+def public_names(cls):
     return {n for n in vars(cls) if not n.startswith("_")}
-assert ops(c.AlgorithmDataContract) == {"manifest", "read"}
-assert ops(c.HostContract) == {"create_session", "set_reference", "set_practice",
-                               "build_surface", "status", "acquire_surface", "destroy_session"}
-assert ops(c.UiProjectionPort) == {"snapshot", "submit"}
+
+
+def operations(cls):
+    return {
+        n for n in public_names(cls)
+        if not isinstance(vars(cls)[n], property)
+    }
+
+
+assert public_names(c.AlgorithmDataContract) == {"manifest", "resolution", "read"}
+assert operations(c.AlgorithmDataContract) == {"manifest", "read"}
+assert isinstance(vars(c.AlgorithmDataContract)["resolution"], property)
+assert operations(c.HostContract) == {"create_session", "set_reference", "set_practice",
+                                      "build_surface", "status", "acquire_surface", "destroy_session"}
+assert operations(c.UiProjectionPort) == {"snapshot", "submit"}
 assert list(inspect.signature(c.HostContract.create_session).parameters) == ["self", "profile_version"]
 assert list(inspect.signature(c.HostContract.set_reference).parameters) == ["self", "session_id", "uri"]
 assert list(inspect.signature(c.HostContract.set_practice).parameters) == ["self", "session_id", "uri"]
@@ -487,7 +605,7 @@ for prefix, fields in c.FIELD_LAYOUTS.items():
             port_id=f"{prefix}.q2", schema_version="v1", element_type="float32",
             dimensions=dims,
             shape=(8, len(fields)) if len(dims) > 1 else (8,),
-            units=u, field_names=fields if len(dims) > 1 else (),
+            units=u, field_names=fields,
             timeline_basis=c.TimelineBasis.REFERENCE, hop_length=2048, sample_rate=44100)
         assert c.FIELD_LAYOUTS[d.port_id.split(".", 1)[0]] == tuple(d.field_names)
 
@@ -534,12 +652,46 @@ for channels, dtype, msg in ((2, "float32", "契约要求 mono"), (1, "float64",
 err = c.ContractViolation(code=c.ErrorCode.INTERNAL_ERROR, component="C2", session_id="s1", port_id="p1")
 assert str(err) == "[INTERNAL_ERROR] (C2) no detail session=s1 port=p1", str(err)
 
-# INV-003-10 / INV-003-13：信封与投影对象的字段与必填语义
+# INV-003-10 / INV-003-13：插件契约、信封与投影对象的字段与必填语义
+assert len(inspect.signature(c.InputRequirement).parameters) == 6
+assert list(inspect.signature(c.InputRequirement).parameters) == [
+    "port_id", "schema_version", "timeline_basis", "element_type", "required_fields", "sample_rate"]
+assert [n for n, p in inspect.signature(c.InputRequirement).parameters.items() if p.default is inspect.Parameter.empty] == ["port_id"]
+assert len(inspect.signature(c.PluginSpec).parameters) == 6
+assert list(inspect.signature(c.PluginSpec).parameters) == [
+    "algorithm_id", "algorithm_version", "label", "required_inputs", "optional_inputs", "entry"]
+
+assert len(inspect.signature(c.AlgorithmResultEnvelope).parameters) == 11
+assert list(inspect.signature(c.AlgorithmResultEnvelope).parameters) == [
+    "algorithm_id", "algorithm_version", "status", "required_ports", "consumed_ports",
+    "payload", "error_code", "error_detail", "elapsed_sec", "coverage", "warnings"]
+payload_annotation = inspect.signature(c.AlgorithmResultEnvelope).parameters["payload"].annotation
+assert str(payload_annotation) == "Sequence[UiScalar | UiSeries]", payload_annotation
+STATUS_DOMAIN = {"OK", "DEGRADED", "INCOMPATIBLE", "FAILED"}
+STATUS_KWARGS = {
+    "OK": {"coverage": 1.0},
+    "DEGRADED": {"coverage": 0.5, "warnings": ("可选输入缺失",)},
+    "INCOMPATIBLE": {"error_code": c.ErrorCode.PLUGIN_INCOMPATIBLE.value},
+    "FAILED": {"error_code": c.ErrorCode.ALGORITHM_FAILED.value, "error_detail": "boom"},
+}
+common = dict(algorithm_id="demo", algorithm_version="1", required_ports=(), consumed_ports=())
+constructed = set()
+for status in STATUS_DOMAIN:
+    result = c.AlgorithmResultEnvelope(
+        status=status, payload=(), **common, **STATUS_KWARGS[status])
+    assert result.status == status
+    constructed.add(result.status)
+assert constructed == STATUS_DOMAIN
+scalar = c.UiScalar(key="median_abs_cents", label="中位绝对偏差", value=1.0, unit="cents")
+series = c.UiSeries(key="per_note_cents", label="逐音偏差", t=(0.0, 0.5),
+                    values=(1.0, -2.0), unit="cents", timeline_basis=c.TimelineBasis.REFERENCE)
 env = c.AlgorithmResultEnvelope(
-    algorithm_id="a", algorithm_version="1", status="FAILED",
-    required_ports=("pcm.mapped.reference",), consumed_ports=(), payload={},
-    error_code=c.ErrorCode.ALGORITHM_FAILED.value, error_detail="boom")
+    status="FAILED", payload=(scalar, series), error_code=c.ErrorCode.ALGORITHM_FAILED.value,
+    error_detail="boom", **common)
 assert env.status == "FAILED" and env.error_code == "ALGORITHM_FAILED"
+ok = c.AlgorithmResultEnvelope(status="OK", payload=(scalar,), coverage=1.0, **common)
+degraded = c.AlgorithmResultEnvelope(status="DEGRADED", payload=(scalar,), warnings=("可选输入缺失",), **common)
+assert ok.error_code is None and degraded.error_code is None
 try:
     c.UiSeries(key="k", label="l", t=(0.0,), values=(1.0,), unit="cents")
 except TypeError:
@@ -550,9 +702,21 @@ assert c.UiView(session_id="s", state=c.SessionState.DATA_READY, progress=1.0).p
 assert c.UiView(session_id="s", state=c.SessionState.CREATED, progress=None).progress is None
 
 # 全部 frozen dataclass 均不可变
-for name in ("AudioFormat", "PortDescriptor", "BufferView", "SurfaceManifest",
-             "AlgorithmResultEnvelope", "UiScalar", "UiSeries", "UiView", "UiCommand"):
+for name in ("AudioFormat", "PortDescriptor", "BufferView", "SurfaceManifest", "ResolutionView",
+             "AlgorithmResultEnvelope", "InputRequirement", "PluginSpec",
+             "UiScalar", "UiSeries", "UiView", "UiCommand"):
     assert getattr(c, name).__dataclass_params__.frozen is True, f"{name} 不是 frozen"
+view = c.ResolutionView(available=frozenset({"pcm.mapped.reference"}),
+                        missing_optional=frozenset({"notes.reference"}))
+assert view.is_available("pcm.mapped.reference") is True
+assert view.is_available("notes.reference") is False
+assert view.is_available("unknown") is False
+try:
+    view.available = frozenset()
+except dataclasses.FrozenInstanceError:
+    pass
+else:
+    raise AssertionError("ResolutionView 可变，frozen 语义被破坏")
 pd = c.PortDescriptor(port_id="pitch.lowres", schema_version="v1", element_type="float32",
                       dimensions=("frame", "field"), shape=(4, 3), units="hz",
                       field_names=c.FIELD_LAYOUTS["pitch"],
@@ -572,9 +736,12 @@ print("counts =", {"SessionState": len(c.SessionState), "TimelineBasis": len(c.T
                    "FIELD_LAYOUTS": len(c.FIELD_LAYOUTS), "UNITS_VOCABULARY": len(c.UNITS_VOCABULARY),
                    "CORE_REQUIRED_PORTS": len(c.CORE_REQUIRED_PORTS),
                    "FORBIDDEN_OPERATIONS": len(c.FORBIDDEN_OPERATIONS),
-                   "HostContract": len(ops(c.HostContract)),
-                   "AlgorithmDataContract": len(ops(c.AlgorithmDataContract)),
-                   "UiProjectionPort": len(ops(c.UiProjectionPort)),
+                   "HostContract": len(operations(c.HostContract)),
+                   "AlgorithmDataContract": len(operations(c.AlgorithmDataContract)),
+                   "UiProjectionPort": len(operations(c.UiProjectionPort)),
+                   "InputRequirement": len(inspect.signature(c.InputRequirement).parameters),
+                   "PluginSpec": len(inspect.signature(c.PluginSpec).parameters),
+                   "AlgorithmResultEnvelope": len(inspect.signature(c.AlgorithmResultEnvelope).parameters),
                    "__all__": len(c.__all__)})
 print("CONTENT_HASH_MAGIC ok =", c.CONTENT_HASH_MAGIC == b"harmonica-eval/surface/v1\x00")
 
@@ -595,7 +762,7 @@ PY
 
 # ── Q3 · 文本断言：TimelineBasis.REFERENCE 的冻结口径（INV-003-7）与 status 取值域（INV-003-10） ──
 "$PYTHON" - <<'PY' 2>&1 | tee data/out/FILE-003-q3.txt | tee -a data/out/FILE-003-verify.txt
-import ast, importlib.util, pathlib
+import ast, importlib.util, pathlib, sys
 
 SRC = pathlib.Path("harmonica_eval/contract.py")
 tree = ast.parse(SRC.read_text(encoding="utf-8"))
@@ -606,8 +773,10 @@ for needle in ("两侧帧号一一对应", "逐帧相减", "按音配对",
                "同网格、同 shape、同 hop_length", "源时间网格", "归一化网格"):
     assert needle in sec42, f"§4.2 缺少冻结表述: {needle}"
 sec48 = doc.split("### 4.8", 1)[1].split("### 4.9", 1)[0]
-for needle in ("'OK'", "'FAILED'", "'INCOMPATIBLE'"):
+for needle in ("'OK'", "'DEGRADED'", "'INCOMPATIBLE'", "'FAILED'"):
     assert needle in sec48, f"§4.8 缺少 status 取值域: {needle}"
+for needle in ("Sequence[UiScalar | UiSeries]", "coverage", "warnings", "key"):
+    assert needle in sec48, f"§4.8 缺少自描述 payload 规则: {needle}"
 assert "REFERENCE 只表示" in doc or "不表示两侧帧号一一对应" in doc
 
 # 枚举成员文档按 AST 取（不依赖 Enum 成员 __doc__ 的运行期行为）
@@ -635,6 +804,7 @@ assert "逐帧" not in basis["REFERENCE"], "REFERENCE 文档不得出现「逐�
 
 spec = importlib.util.spec_from_file_location("contract_under_test", SRC)
 c = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = c
 spec.loader.exec_module(c)
 assert isinstance(c.TimelineBasis.REFERENCE, c.TimelineBasis)
 print("Q3 OK")
@@ -643,21 +813,21 @@ PY
 
 **验收判据**（可机械判定，非「看起来对」）。下列每一条都对应上面脚本里的一条 `assert`，全部通过即为验收通过：
 
-- [ ] INV-003-1：Q1 的 AST 断言通过——模块顶层语句 ∈ {import, class, 常量赋值/注解赋值, docstring}；类体语句 ∈ {方法声明, 赋值, 注解赋值, docstring}；13 个方法中只有 `AudioFormat.__post_init__` 与 `HarmonicaError.__str__` 有执行体，其余 11 个声明体恰好是 `...`；真实代码（AST `Name`/`Attribute` 节点）中不出现 `open`/`print`/`hashlib`/`os`/`sha256`/`tobytes`/`asarray` 等计算与 I/O 名字。
+- [ ] INV-003-1：Q1 的 AST 断言通过——模块顶层语句 ∈ {import, class, 常量赋值/注解赋值, docstring}；类体语句 ∈ {方法声明, 赋值, 注解赋值, docstring}；15 个方法中只有 `AudioFormat.__post_init__`（两处校验）、`ResolutionView.is_available`（一次集合成员查询）与 `HarmonicaError.__str__`（展示格式化）有实体逻辑，其余 12 个声明体只含 docstring 与末尾 `...`（长规格 docstring 位于 `...` 前，AST 断言逐条确认其前没有实际计算）；真实代码（AST `Name`/`Attribute` 节点）中不出现 `open`/`print`/`hashlib`/`os`/`sha256`/`tobytes`/`asarray` 等计算与 I/O 名字。dataclass 数量断言：按 `HarmonicaError` 异常基类不计入的现有统计口径恰为 12（包含 `ResolutionView`；若把基类也按 Python 装饰器计数则为 13，文档同时写明两种口径）。
 - [ ] INV-003-2：Q1 的 import 表断言通过——`{__future__, dataclasses, enum, typing, numpy, numpy.typing}` 之外的模块一个都没有，`ast.ImportFrom.level == 0`（无相对 import，即无本包 import）。
 - [ ] INV-003-3：Q2 的 4 前缀 × 5 units 共 20 个 `PortDescriptor` 全部构造成功，且每个实例的 `FIELD_LAYOUTS[port_id.split('.', 1)[0]] == tuple(field_names)`。
 - [ ] INV-003-4：Q2 的 `dict(FIELD_LAYOUTS)` 等于 4 键冻结字典，每个值为 `tuple`，chroma 长度 12 且首元素为 `"C"`。
-- [ ] INV-003-5：Q2 的 `UNITS_VOCABULARY`（8 元素）、`CORE_REQUIRED_PORTS`（2 项）、`FORBIDDEN_OPERATIONS`（10 项，含 `align`/`fft`/`register_algorithm`）、`CONTENT_HASH_MAGIC`（逐字节）断言全部通过。
+- [ ] INV-003-5：Q2 的 `UNITS_VOCABULARY`（10 元素，含 `ratio` / `count`）、`CORE_REQUIRED_PORTS`（2 项）、`FORBIDDEN_OPERATIONS`（10 项，含 `align`/`fft`/`register_algorithm`）、`CONTENT_HASH_MAGIC`（逐字节）断言全部通过。
 - [ ] INV-003-6：Q2 的 `len(SessionState) == 6` 且成员名集合等于冻结集合。
 - [ ] INV-003-7：Q3 的文本断言通过——本文件 §4.2 含「两侧帧号一一对应」「逐帧相减」「按音配对」「同网格、同 shape、同 hop_length」；由 AST 取出的 `TimelineBasis.REFERENCE` 成员文档含「源时间网格」与「抢拍拖拍」且不含「逐帧」字样，`TimelineBasis.WARPED` 成员文档含「归一化网格」与「禁止」。
-- [ ] INV-003-8：Q2 的 `ops(AlgorithmDataContract) == {"manifest", "read"}`，且 `read` 形参恰为 `["self", "port_id", "time_range"]`。
-- [ ] INV-003-9：Q2 的 `ops(HostContract)` 等于 7 操作冻结集合，且 5 个会话级操作的形参逐个匹配（`set_reference`/`set_practice` 均含 `session_id`）。
-- [ ] INV-003-10：Q2 的信封断言通过（`status='FAILED'` + `error_code='ALGORITHM_FAILED'` 可构造且不可变）；Q3 断言本文件 §4.8 明文列出 `'OK'`/`'FAILED'`/`'INCOMPATIBLE'` 三元取值域。
+- [ ] INV-003-8：Q2 的 `public_names(AlgorithmDataContract) == {"manifest", "read", "resolution"}`、`operations(AlgorithmDataContract) == {"manifest", "read"}`、`resolution` 是 `property`，且 `ResolutionView.is_available` 对可用/缺失/未知端口分别返回 `True` / `False` / `False`；`read` 形参恰为 `["self", "port_id", "time_range"]`。
+- [ ] INV-003-9：Q2 的 `operations(HostContract)` 等于 7 操作冻结集合，且 5 个会话级操作的形参逐个匹配（`set_reference`/`set_practice` 均含 `session_id`）。
+- [ ] INV-003-10：Q2 断言 `InputRequirement` 6 字段且仅 `port_id` 必填、`PluginSpec` 6 字段、`AlgorithmResultEnvelope` 11 字段、`payload` 注解逐字为 `Sequence[UiScalar | UiSeries]`，并成功构造 `OK` / `DEGRADED` / `FAILED` 三种自描述结果；Q3 断言本文件 §4.8 明文列出 `'OK'`/`'DEGRADED'`/`'INCOMPATIBLE'`/`'FAILED'` 四值及降级证据规则。
 - [ ] INV-003-11：Q2 的 `len(ErrorCode) == 12` 且 `{m.name: m.value}` 为恒等映射。
 - [ ] INV-003-12：Q2 的三个映射键集 == `set(UiCommandKind)`（6 成员）；`UI_PAYLOAD_KEYS` 中 `SET_REFERENCE`/`SET_PRACTICE` 恰为 `("path",)`、其余 4 个为空元组；6 条 `COMMAND_LEGALITY` 逐条等于冻结集合。
 - [ ] INV-003-13：Q2 中 `UiSeries(...)` 省略 `timeline_basis` 抛 `TypeError`（必填语义成立）；`UiView(progress=1.0)` 与 `UiView(progress=None)` 均可构造。
 - [ ] INV-003-14：Q2 的 `issubclass(ContractViolation|CoreBuildError|AlgorithmError, HarmonicaError)` 全部为真，且 `HarmonicaError` 派生自 `Exception`。
-- [ ] INV-003-15：Q1 的 `__all__` 断言通过——无重复项，长度恰为 29，每个列出的名字都在模块命名空间存在，29 个必需符号全部在列。
+- [ ] INV-003-15：Q1 的 `__all__` 断言通过——无重复项，长度恰为 32，每个列出的名字都在模块命名空间存在，32 个必需符号全部在列。
 - [ ] 三段脚本的输出依次为 `Q1 OK`、`Q2 OK`、`Q3 OK`，且整段 bash 退出码为 0（`set -euo pipefail` 下任一 `assert` 失败即非 0）。
 
 ---
@@ -668,7 +838,7 @@ PY
 
 **产物（1 个，唯一）**
 
-- [ ] `harmonica_eval/contract.py` —— 本文件唯一的交付物。判据：存在且非空；`python3 -c "import ast,pathlib; ast.parse(pathlib.Path('harmonica_eval/contract.py').read_text(encoding='utf-8'))"` 退出码 0（可解析）；文件头三行依次为 `FILE-ID: FILE-003`、`COMPONENT: COMP-CONTRACT…`、`SPEC: SPEC.md@v2.1 …`；`__all__` 长度恰为 29（§8 Q1），且每项都在模块命名空间存在。
+- [ ] `harmonica_eval/contract.py` —— 本文件唯一的交付物。判据：存在且非空；`python3 -c "import ast,pathlib; ast.parse(pathlib.Path('harmonica_eval/contract.py').read_text(encoding='utf-8'))"` 退出码 0（可解析）；文件头三行依次为 `FILE-ID: FILE-003`、`COMPONENT: COMP-CONTRACT…`、`SPEC: SPEC.md@v2.1 …`；`__all__` 长度恰为 32（§8 Q1），且每项都在模块命名空间存在。
 
 **验证命令与输出（3 段，逐段落盘）**
 
@@ -681,7 +851,7 @@ PY
 **必须一并提交的实测数字（写进证据文件，不接受「都通过了」这种说法）**
 
 - [ ] import 表实测值：实际被 import 的顶层模块名集合，必须恰为 `{'__future__', 'dataclasses', 'enum', 'typing', 'numpy', 'numpy.typing'}`（6 个）。
-- [ ] 计数实测值：`len(SessionState)=6`、`len(TimelineBasis)=2`、`len(AlignmentRepresentation)=2`、`len(ErrorCode)=12`、`len(UiCommandKind)=6`、`len(FIELD_LAYOUTS)=4`、`len(UNITS_VOCABULARY)=8`、`len(CORE_REQUIRED_PORTS)=2`、`len(FORBIDDEN_OPERATIONS)=10`、`HostContract` 操作数 7、`AlgorithmDataContract` 操作数 2、`UiProjectionPort` 操作数 2、`__all__` 长度。
+- [ ] 计数实测值：`len(SessionState)=6`、`len(TimelineBasis)=2`、`len(AlignmentRepresentation)=2`、`len(ErrorCode)=12`、`len(UiCommandKind)=6`、`len(FIELD_LAYOUTS)=4`、`len(UNITS_VOCABULARY)=10`、`len(CORE_REQUIRED_PORTS)=2`、`len(FORBIDDEN_OPERATIONS)=10`、普通 dataclass 数 12（`HarmonicaError` 基类另计，含基类 13）、`HostContract` 操作数 7、`AlgorithmDataContract` 操作数 2（另有 1 个 `resolution` 只读状态属性）、`UiProjectionPort` 操作数 2、`InputRequirement` 字段数 6、`PluginSpec` 字段数 6、`AlgorithmResultEnvelope` 字段数 11、`__all__` 长度 32。
 - [ ] 常量逐字节值：`CONTENT_HASH_MAGIC == b"harmonica-eval/surface/v1\x00"` 的比较结果（`True`/`False`）。
 - [ ] 反例实测：`AudioFormat(channels=2)` 抛出的异常类型与 `str(exc)`（必须为 `ValueError` / `契约要求 mono`）；`AudioFormat(dtype='float64')` 同上（`ValueError` / `契约要求 float32`）；`UiSeries` 省略 `timeline_basis` 抛出的异常类型（必须为 `TypeError`）。
 

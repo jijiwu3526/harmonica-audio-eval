@@ -44,7 +44,7 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 2. **数据面无从生成。** 12 个端口的定义（`port_id` / `units` / `dimensions` / `field_names` / `element_type` / `timeline_basis` / `hop_length` / `produced_by`）全部消失，`surface` 没有生成配方，包括两份**必须存在**的对齐 PCM（`pcm.mapped.reference`、`pcm.mapped.practice`）。算法层随即失去自行预处理的能力（rationale 原文：算法永远能拿到参考 PCM 自行做特有预处理，因此 profile 只决定「快不快」，不决定「能不能」）。
 3. **端口清单的封闭性失去可审依据。** 没有 `PORTS` 就没有「清单外端口不存在」这一事实的载体，算法按需索要数据重新变成可行路径；DESIGN-RULING 要消除的协商协议（特征声明→解析→版本→缓存失效→失败语义）随之回归，Core 接口变成插件需求的函数。
 4. **四条静默错误防线同时消失。** `assert_profile_integrity()` 随文件消失，以下四类「不报错、只静默算错」的缺陷重新变成可犯而不可查：① 多维度端口字段顺序不一致 → 读出的 `f0_hz` 实际是 `voiced`；② 帧类端口未声明帧移 → 同一 `read(port_id, (t0, t1))` 的时间换算差 8×；③ `units` 字符串漂移（`"hz"` / `"Hz"` / `"hertz"`）→ 下游按 `== "hz"` 判断时静默漏配；④ 端口对称性破裂 → `notes.*` 只有参考侧时，`dynamics` 写出无法满足的 MUST（要求一个数据面里不存在的端口轴）。
-5. **关键数字失去唯一来源，产出不可比。** 各自缺失的后果逐一对应：`sample_rate=44100`（22.05 kHz 下 pYIN 把 D5 判成 D4，恰好 −1200 音分）；`ALIGN.hop_length=2048`（512 会把 120 s 的 DTW 代价矩阵从 53,416,448 B 抬到 854,663,168 B，越过 512 MiB 预算上限）；`MATERIALIZE.pitch_hop_length=2048`（猜 256 会得到 8× 的时间刻度偏差）；`min_duration_sec=45.0` / `max_duration_sec=120.0`（输入门消失，短输入与超长输入行为分叉）；`BUDGET.max_surface_bytes=536870912`（数据面总量失去闸门）；`fmin_hz=130.81` / `fmax_hz=2093.0`（音高搜索域分叉，一侧钳位、一侧不钳位）。
+5. **关键数字失去唯一来源，产出不可比。** 各自缺失的后果逐一对应：`sample_rate=44100`（22.05 kHz 下 pYIN 把 D5 判成 D4，恰好 −1200 音分）；`ALIGN.hop_length=2048`（512 会把 120 s 的 DTW 代价矩阵从 53,457,800 B 抬到 854,828,552 B，越过 512 MiB 预算上限）；`MATERIALIZE.pitch_hop_length=2048`（猜 256 会得到 8× 的时间刻度偏差）；`min_duration_sec=45.0` / `max_duration_sec=120.0`（输入门消失，短输入与超长输入行为分叉）；`BUDGET.max_surface_bytes=536870912`（数据面总量失去闸门）；`fmin_hz=130.81` / `fmax_hz=2093.0`（音高搜索域分叉，一侧钳位、一侧不钳位）。
 6. **数据面身份断链。** `PROFILE_VERSION` 消失后 `f(reference, practice, PROFILE_VERSION)` 无法计算，两次 Seal 的产物无法判定是否同源，复现性判定与缓存失效判定同时失效。
 7. **`read(port_id, (t0, t1))` 的秒→帧换算失去唯一依据。** 该换算的唯一依据是 `PortSpec.hop_length`。依据消失后两个实现者会对同一查询返回不同时间窗的数据，**且两侧都不会报错**。
 8. **端口语义轴裁定消失。** 「节奏类指标**只能**在 `TimelineBasis.REFERENCE` 轴上算，用 warped 轴报抢拍拖拍是构造性错误（SPEC §5.5）」这一裁定唯一的落盘处就是端口表；删除后该构造性错误重新变成可犯而不可查。
@@ -132,7 +132,7 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 - **输出**：`ALIGN` 为 `AlignSpec` 实例，frozen。
 - **算法口径（写到可复现同一数字）**：
   1. 帧数写死为 `N = ceil(len(samples) / ALIGN.hop_length)`，`ALIGN.hop_length = 2048`。等价写法 `N = ceil(dur_sec * 44100 / 2048) = ceil(dur_sec * 21.533203125)`。
-  2. DTW 代价矩阵字节数写死为 `8 * N * N`（**float64**，非 float32）。验证锚点（照抄即可复现）：`dur_sec = 120.0` → `N = 2584` → `53,416,448` B（≈ 53 MB，即铭牌所称实测值）；`dur_sec = 45.0` → `N = 969` → `7,511,688` B；`dur_sec = 72.802` → `N = 1568` → `19,668,992` B。反例锚点：`hop=512` 且 `dur_sec = 120.0` → `N = 10336` → `854,663,168` B（≈ 855 MB）。
+  2. DTW 代价矩阵字节数写死为 `8 * N * N`（**float64**，非 float32）。验证锚点（照抄即可复现）：`dur_sec = 120.0` → `N = 2585` → `53,457,800` B（≈ 53 MB，即铭牌所称实测值）；`dur_sec = 45.0` → `N = 970` → `7,527,200` B；`dur_sec = 72.802` → `N = 1569` → `19,694,088` B。反例锚点：`hop=512` 且 `dur_sec = 120.0` → `N = 10337` → `854,828,552` B（≈ 855 MB）。
   3. `librosa.sequence.dtw` 的代价矩阵是 **float64**（非 float32），故实际占用是 `N²×8B`。
   4. `global_constraints=True` **不减少**矩阵分配，只约束路径、降低耗时 —— 不得以「加了带宽就省内存」为由调整预算。
   5. Sakoe-Chiba 带宽的绝对宽度写死为 `band = ceil(ALIGN.band_rad * max(N_ref, N_prac))` 帧，`ALIGN.band_rad = 0.25`，`N_ref` / `N_prac` 按上述第 1 条口径各自计算。禁止把 `0.25` 当作「采样点比例」或「秒」使用。
@@ -162,8 +162,8 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 - **输出**：`MATERIALIZE` 为 `MaterializeSpec` 实例，frozen。
 - **算法口径（写到可复现同一数字）**：
   1. 帧数口径：令 `x` 为单声道 `float32` 信号，`sr = 44100`。RMS 帧数写死 `ceil(len(x) / MATERIALIZE.rms_hop_length)`，`rms_hop_length = 256`；音高帧数写死 `ceil(len(x) / MATERIALIZE.pitch_hop_length)`，`pitch_hop_length = 2048`。
-  2. **`pitch_hop_length` 是音高端口时间刻度的唯一依据。** 时间换算写死为 `t_sec = frame_index * 2048 / 44100`（`frame_index` 从 0 起）。反例锚点：同一段 120 s 音频，`rms.*` 得 `ceil(5,292,000 / 256) = 20672` 帧，`pitch.*` 得 `ceil(5,292,000 / 2048) = 2584` 帧，比值 `20672 / 2584 = 8`（**恰好 8×**）。用 `256` 换算 `pitch.*` 的帧号会得到错误时刻，且不报错。
-  3. 端口帧数锚点（可直接 assert）：`dur_sec = 72.802` 的音频，`pitch.*` 帧数 `= ceil(72.802 * 44100 / 2048) = 1568`（实测：本数据集 01 的全部 wav 恰好都是 72.802 s）。
+  2. **`pitch_hop_length` 是音高端口时间刻度的唯一依据。** 时间换算写死为 `t_sec = frame_index * 2048 / 44100`（`frame_index` 从 0 起）。反例锚点：同一段 120 s 音频，`rms.*` 得 `ceil(5,292,000 / 256) = 20672` 帧，`pitch.*` 得 `ceil(5,292,000 / 2048) = 2584` 帧，比值 `20672 / 2584 = 8`（**恰好 8×**）。用 `256` 换算 `pitch.*` 的帧号会得到错误时刻，且不报错。★ 两侧都用**裸 `ceil`** 口径才可比；§4.4 的 `1 + ceil(n/hop)` 是**另一种**帧数口径（120 s 下得 2585），**两者不可混用**——原文把 `pitch.*` 的分母误写成 2585，与本行 `rms.*` 的口径不一致。
+  3. 端口帧数锚点（可直接 assert）：`dur_sec = 72.802` 的音频，`pitch.*` 帧数 `= ceil(72.802 * 44100 / 2048) = 1569`（实测：本数据集 01 的全部 wav 恰好都是 72.802 s）。
   4. 音高搜索域写死 `[130.81, 2093.0]` Hz，闭区间，单位 Hz，不得换算成 MIDI 后传递到端口层（端口 `units` 写死 `"hz"`）。MIDI 换算参考：`130.81 Hz = C3 = MIDI 48`，`2093.0 Hz = C7 = MIDI 96`。
   5. 窗长与帧移的语义区分写死：`frame_length` 与 `pitch_frame_length` 是**窗长**，`pitch_hop_length` / `rms_hop_length` 是**帧移**。`frame_length` 与 `ALIGN.hop_length` 数值同为 2048 是**巧合，不是约定**；禁止把 `ALIGN.hop_length` 当作窗长或把 `MATERIALIZE.frame_length` 当作帧移使用。
   6. 样本点 ↔ 毫秒换算写死：`ms = samples / 44.1`（因 44100 Hz 下 1 采样点 `= 1000/44100 = 0.02267573696...` ms）。锚点：`2048` 采样点 `= 46.4399...` ms ≈ 46.4 ms；`1024` 采样点 `= 23.2199...` ms；`256` 采样点 `= 5.8049...` ms。
@@ -195,7 +195,7 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
   2. 数据面总量口径写死为 `sum(port.nbytes for port in 12 ports)`，逐端口字节数 `= 元素数 × itemsize`，`itemsize` 在 `float32` 下为 4 B、`int32` 下为 4 B。超出 `536870912` B → `CORE_BUILD_FAILED`（构建失败，非降级、非截断）。
   3. 量级锚点（可直接 assert `<=`）：12 端口在 120 s 音频下实测约 10–20 MB，相对 `536870912` B 余量约 25×。
   4. 63,829 B/端口 的除算参考：`536870912 / 12 = 44,739,242.66...` B/端口（仅作审查参考，不是闸门口径；闸门是总量）。
-  5. 对齐峰值锚点写死：`hop = 2048`、`dur_sec = 120.0` → 单矩阵 `53,416,448` B，**不**计入数据面总量（它是中间量，不是端口）。
+  5. 对齐峰值锚点写死：`hop = 2048`、`dur_sec = 120.0` → 单矩阵 `53,457,800` B，**不**计入数据面总量（它是中间量，不是端口）。
 - **边界**：
   - **空输入**：`max_surface_bytes = 0` → 一切非空数据面 `CORE_BUILD_FAILED`；本文件不抛异常。
   - **单元素**：`max_surface_bytes = 1` → 同上；本文件不抛异常。
@@ -238,7 +238,7 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 | 1 | `warp_path` | `index` | `("warp_point","axis")` | `("reference_frame","practice_frame")` | `int32` | `REFERENCE` | `0` | `core.align` | 对齐的唯一产物。实测仅 165 KB（120 s），却是其余全部端口的生成依据 —— 相对 DTW 代价矩阵是 1/5300。 |
 | 2 | `pcm.mapped.reference` | `amplitude` | `("sample",)` | `()` | `float32` | `REFERENCE` | `0` | `core.surface` | 逃生口甲：算法永远能拿到参考 PCM 自行做特有预处理，因此 profile 只决定「快不快」，不决定「能不能」。 |
 | 3 | `pcm.mapped.practice` | `amplitude` | `("sample",)` | `()` | `float32` | `REFERENCE` | `0` | `core.surface` | 逃生口乙：练习演奏保留源时间。节奏类指标**只能**在这条轴上算 —— 用 warped 轴报抢拍拖拍是构造性错误（SPEC §5.5）。 |
-| 4 | `pcm.warped.practice` | `amplitude` | `("sample",)` | `()` | `float32` | `WARPED` | `0` | `core.surface` | 时间归一化后的练习演奏，与参考等长。★ 更正：`pitch` 与 `dynamics` 都**没有**使用它（两者走的都是 `notes.*` / `rms.*`，见 `algorithms.ALGORITHMS` 的 `required_ports`）。它当前**无算法消费**；保留的真实理由是数据面保证：算法永远能拿到时间归一化后的 PCM 自行做特有预处理。 |
+| 4 | `pcm.warped.practice` | `amplitude` | `("sample",)` | `()` | `float32` | `WARPED` | `0` | `core.surface` | 时间归一化后的练习演奏，与参考等长。★ 更正：`pitch` 与 `dynamics` 都**没有**使用它（两者走的都是 `notes.*` / `rms.*`；插件输入需求的权威来源是各插件经 `algorithms.registry.Registry` 显式注册的 `PluginSpec.required_inputs` / `optional_inputs`）。它当前**无算法消费**；保留的真实理由是数据面保证：算法永远能拿到时间归一化后的 PCM 自行做特有预处理。 |
 | 5 | `pitch.reference` | `hz` | `("frame","field")` | `("f0_hz","voiced","confidence")` | `float32` | `REFERENCE` | `2048` | `core.features` | 逐帧 f0 + voiced 标志 + 置信度（field 维）。预生成是因为它是音准算法的**直接**输入，现算不划算。 |
 | 6 | `pitch.practice` | `hz` | `("frame","field")` | `("f0_hz","voiced","confidence")` | `float32` | `REFERENCE` | `2048` | `core.features` | 练习侧音高曲线，与参考同轴（`REFERENCE`），即两侧都保留各自的源时间、都没有被拉伸对齐。★ 修正：原文「两条曲线可以逐帧直接相减得到音分误差」**不成立** —— `REFERENCE` 只保证各自未被归一化，**不保证两侧帧数相等**。正确路径是用 `notes.*` 的 `onset_sec` 按音配对后再比较。 |
 | 7 | `rms.reference` | `rms` | `("frame",)` | `()` | `float32` | `REFERENCE` | `256` | `core.features` | 逐帧 RMS。力度对比需要它。★ §20 盲审修正：真值**不是** MIDI velocity（数据面里没有 MIDI 通路：ingest 只解码音频，features 从音频派生）。故力度指标是「练习相对参考的能量差」，不是「相对乐谱的绝对力度差」。 |
@@ -264,7 +264,7 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 
 `TimelineBasis` 由 `contract` 定义，`profile` 只使用其两个成员的语义如下。**必须逐字遵守，不得外推**：
 
-- **`TimelineBasis.REFERENCE`**：只表示**保留源时间、未归一化**。它**不**表示两侧帧号一一对应，**不**表示两侧帧数相等，**不**表示两端口可直接逐帧相减。本 profile 中 11 个端口使用它，其中 `pitch.reference` 与 `pitch.practice` 虽**同轴**（都在各自的源时间网格上）却因参考与练习是两段独立录音、帧数 `= 各自时长 / pitch_hop_length`（默认不同）而**不可逐帧对齐**。实测：本数据集 01 的全部 wav 恰好都是 72.802 s（1568 帧），把该缺陷掩盖了；换一首时长不同的练习曲即失效。正确路径是用 `notes.*` 的 `onset_sec` **按音配对**后再比较。
+- **`TimelineBasis.REFERENCE`**：只表示**保留源时间、未归一化**。它**不**表示两侧帧号一一对应，**不**表示两侧帧数相等，**不**表示两端口可直接逐帧相减。本 profile 中 11 个端口使用它，其中 `pitch.reference` 与 `pitch.practice` 虽**同轴**（都在各自的源时间网格上）却因参考与练习是两段独立录音、帧数 `= 各自时长 / pitch_hop_length`（默认不同）而**不可逐帧对齐**。实测：本数据集 01 的全部 wav 恰好都是 72.802 s（1569 帧），把该缺陷掩盖了；换一首时长不同的练习曲即失效。正确路径是用 `notes.*` 的 `onset_sec` **按音配对**后再比较。
 - **`TimelineBasis.WARPED`**：表示时间归一化后的轴。本 profile 中**仅** `pcm.warped.practice` 使用它。参考侧**没有**对应的 WARPED 端口（参考无需被拉伸到自己），故数据面里**不存在**任何 WARPED 轴的 `rms` / `pitch` / `notes`。凡要求「在 WARPED 轴上按帧比较」的约束都是**无法满足的约束**，必须改写为按音配对。
 - **`pcm.mapped.practice` 与 `pcm.warped.practice` 的时间基准对比（★ 强制）**：`pcm.mapped.practice` 是 `REFERENCE`，`pcm.warped.practice` 是 `WARPED`（逐字见第 3、4 行 `timeline_basis=`）。因此 `pcm.mapped.practice` 是「练习演奏保留源时间」，节奏类指标**只能**在它这条轴上算；在 warped 轴上报抢拍拖拍是**构造性错误**（SPEC §5.5）。
 
@@ -294,10 +294,10 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 ### §4.11 `__all__`
 
 - **输入**：无。
-- **输出**：`list[str]`，**恰好 13 个**元素，顺序为 `["PROFILE_VERSION", "AUDIO", "ALIGN", "MATERIALIZE", "BUDGET", "AudioSpec", "AlignSpec", "MaterializeSpec", "BudgetSpec", "PORTS", "PORT_INDEX", "PortSpec", "assert_profile_integrity"]`。
+- **输出**：`list[str]`，**恰好 15 个**元素，顺序为 `["PROFILE_VERSION", "AUDIO", "ALIGN", "MATERIALIZE", "BUDGET", "AudioSpec", "AlignSpec", "MaterializeSpec", "BudgetSpec", "PORTS", "PORT_INDEX", "PortSpec", "SAMPLE_RATE_FREE_PREFIXES", "port_prefix", "assert_profile_integrity"]`。
 - **算法口径**：字面量列表，逐字上述顺序。导出的常量名（大写）与其类型名（`*Spec`）成对出现，缺一不可。
 - **边界**：空输入不适用。空列表会使 `from harmonica_eval.profile import *` 静默导入 0 个名字；本文件不检查。
-- **不变量**：`len(__all__) == 13`；`len(set(__all__)) == 13`；`"PORTS" in __all__ and "PORT_INDEX" in __all__ and "assert_profile_integrity" in __all__`；`__all__` 中每个名字都真实存在于模块命名空间。
+- **不变量**：`len(__all__) == 15`；`len(set(__all__)) == 15`；`"PORTS" in __all__ and "PORT_INDEX" in __all__ and "assert_profile_integrity" in __all__`；`__all__` 中每个名字都真实存在于模块命名空间。（★ 2026-09-25 并发事故后由 13 增至 15：补回 `SAMPLE_RATE_FREE_PREFIXES` 与 `port_prefix`，后者是填充侧↔描述符侧共用的单一真相源。）
 
 ---
 
@@ -323,13 +323,13 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 | 输入音频时长 `< 45.0` s | 显式失败 | `INPUT_TOO_SHORT`（由 ingest 判决并抛出/上报；profile 只提供 `AUDIO.min_duration_sec = 45.0` 这个数字） |
 | 输入音频时长 `> 120.0` s | 显式失败 | 按上限拒绝（`AUDIO.max_duration_sec = 120.0`）。**不静默截断**、不降级 |
 | 试图下调采样率（如 22050 Hz） | 显式失败（禁止；无降级路径） | 违反 `AudioSpec.sample_rate` 的冻结值。后果实测：pYIN 把 D5 判成 D4，误差恰好 −1200 音分。由 §8 断点与 code review 拦截 |
-| 试图改用更细 hop（如 512）而不先重跑内存 spike | 显式失败（禁止；无降级路径） | 违反 `AlignSpec.hop_length` 的冻结值与 `BUDGET.peak_memory_note` 的原文要求：「若实现者改用更细 hop，必须先重跑 spike_dtw_memory.py 确认预算」。后果实测：120 s 下 DTW 矩阵由 `53,416,448` B 涨到 `854,663,168` B，越过上限 |
+| 试图改用更细 hop（如 512）而不先重跑内存 spike | 显式失败（禁止；无降级路径） | 违反 `AlignSpec.hop_length` 的冻结值与 `BUDGET.peak_memory_note` 的原文要求：「若实现者改用更细 hop，必须先重跑 spike_dtw_memory.py 确认预算」。后果实测：120 s 下 DTW 矩阵由 `53,457,800` B 涨到 `854,828,552` B，越过上限 |
 | 数据面总量 `> 536870912` B | 显式失败 | `CORE_BUILD_FAILED`（构建失败，不截断、不丢端口） |
 | 算法索要清单外端口（要求 Core 增加端口） | 显式失败（设计性拒绝） | 无错误码 —— 此路径**不存在**。正确做法是从 `pcm.mapped.reference` / `pcm.mapped.practice` / `pcm.warped.practice` 自行派生。任何「按算法需求扩展端口」的机制都被铭牌 MUST NOT 禁止 |
 | 端口清单被回退：删掉 `notes.practice` 只留 `notes.reference` | 显式失败 | `ValueError`（自检检查 7 对称性破裂）。这是 §20 盲审情况 A 的缺陷本身，不得回退 |
 | `chroma.lowres.*` 被用作评分依据 | 显式失败（禁止） | 无错误码 —— 属设计禁令。理由逐字：`**明确不作为评分依据**（chroma 是八度不变的）`。它只用于对齐与对齐可复现性审查 |
 | 在 `TimelineBasis.WARPED` 轴上计算节奏（抢拍/拖拍）指标 | 显式失败（禁止） | 无错误码 —— 属构造性错误，SPEC §5.5。数据面里也没有 WARPED 轴的 `rms` / `pitch` / `notes` 可供使用，故该约束**无法满足**，必须改写为按音配对 |
-| 把 `REFERENCE` 当作「两侧帧号一一对应」使用（对 `pitch.reference` 与 `pitch.practice` 逐帧相减） | 显式失败（禁止） | 无错误码 —— 属语义误读。后果：两侧帧数不等时静默错位；本数据集 01 的全部 wav 恰好都是 72.802 s（1568 帧）会**掩盖**该缺陷 |
+| 把 `REFERENCE` 当作「两侧帧号一一对应」使用（对 `pitch.reference` 与 `pitch.practice` 逐帧相减） | 显式失败（禁止） | 无错误码 —— 属语义误读。后果：两侧帧数不等时静默错位；本数据集 01 的全部 wav 恰好都是 72.802 s（1569 帧）会**掩盖**该缺陷 |
 | 用 `MATERIALIZE.rms_hop_length`（256）或 `ALIGN.hop_length` 换算 `pitch.*` 的帧号 | 显式失败（禁止） | 无错误码 —— 属静默分叉点。后果：时间刻度差 8×（256 vs 2048）或语义错用（窗长 vs 帧移），**不报错** |
 | 某端口 `units` 字段被写成词表外的新单位而不先扩词表 | 显式失败 | `ValueError`（自检检查 6）。正确顺序：先把新单位加进 `contract.UNITS_VOCABULARY`，再改端口 |
 | `profile.py` import 了 `core` / `host` / `algorithms` / `cockpit` | 显式失败（构建/审查层） | `ImportError` 或循环导入；属铭牌 MUST NOT 违规，由 §8 的断点与 code review 拦截 |
@@ -346,7 +346,7 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 | ID | 不变量 | 来源 | 怎么验 |
 | --- | --- | --- | --- |
 | INV-4-01 | 全部数值为**冻结常量**，不得在运行时依算法需求变化 | 铭牌 MUST | 读 `profile.py`：`AudioSpec` / `AlignSpec` / `MaterializeSpec` / `BudgetSpec` / `PortSpec` 五个类**全部**带 `@dataclass(frozen=True)`；模块级只实例化一次 `AUDIO` / `ALIGN` / `MATERIALIZE` / `BUDGET`；文件内无任何形如 `def set_*(...)` / `configure(...)` 的改写入口，无 `PORTS.append` / `PORTS +=` / 重新赋值 `PORTS`。断言：`dataclasses.is_dataclass(AUDIO) and AUDIO.__dataclass_params__.frozen is True`（四个 Spec 实例逐个）。 |
-| INV-4-02 | 每个参数带单位与依据（实测 / 规格 / 工程判断） | 铭牌 MUST | 读 `profile.py`：五个 Spec 类的**每个**字段下都有紧邻的 docstring 或注释，含单位（`Hz` / `采样点` / `秒` / `字节` / `bin` / `比例`）与依据类别之一（`实测` / `规格（SPEC §2）` / `工程判断`）。断言：字段数 `= 5 + 4 + 7 + 2 = 18`，每个字段都有非空说明。 |
+| INV-4-02 | 每个参数带单位与依据（实测 / 规格 / 工程判断） | 铭牌 MUST | 读 `profile.py`：五个 Spec 类的**每个**字段下都有紧邻的 docstring 或注释，含单位（`Hz` / `采样点` / `秒` / `字节` / `bin` / `比例`）与依据类别之一（`实测` / `规格（SPEC §2）` / `工程判断`）。断言：字段数 `= 5 + 4 + 7 + 2 + 9 = 27`（**含 `PortSpec` 的 9 个字段**——它同样带单位如 `hop_length` 与字节上限，属本不变量覆盖范围；原声明 `= 18` 漏计 `PortSpec`，且 `tools/check_counts.py` 曾同步漏列该类，导致对 `PortSpec` 字段变化完全失明），每个字段都有非空说明。 |
 | INV-4-03 | `PORTS` 必须**穷举**，且必须包含 `CORE_REQUIRED_PORTS` | 铭牌 MUST | 自检检查 2 覆盖「包含」；「穷举」由 §4.7 的 12 行全表 + §8 断言 `len(PORTS) == 12` 覆盖。断言：`{p.port_id for p in PORTS} == {12 个 port_id 的写死集合}`，且该集合与 §4.7 表逐行一致。 |
 | INV-4-04 | **禁止** `import core / host / algorithms / cockpit` | 铭牌 MUST NOT | 断言：文件内 import 语句只有 4 条 —— `from __future__ import annotations`、`from dataclasses import dataclass`、`from typing import Sequence`、`from .contract import CORE_REQUIRED_PORTS, FIELD_LAYOUTS, UNITS_VOCABULARY, TimelineBasis`。逐名检查 `core` / `host` / `algorithms` / `cockpit` 不出现在任何 `import` 行；也不出现 `from .core` / `from ..core` / `importlib.import_module("...core...")` 等间接形式。 |
 | INV-4-05 | **禁止**出现「按算法需求扩展端口」的任何机制 | 铭牌 MUST NOT | 读 `profile.py`：`PORTS` 为字面量元组，元素为 12 个字面量 `PortSpec(...)` 调用；无 `def build_ports(` / `def add_port(` / `def register_port(` / `PORTS: list`（必须为 `tuple`）；无任何以算法名/`required_ports` 为参数的端口构造函数。断言：`type(PORTS) is tuple`，且 `len(PORTS) == 12`。 |
@@ -364,11 +364,11 @@ DESIGN-RULING 的落地条文（逐字）：本文件的 `PORTS` 元组是**穷�
 | INV-4-17 | `PROFILE_VERSION == "CORE_PROFILE_V0.1"`，是数据面身份的唯一版本因子 | 派生（§4.1） | 断言：`PROFILE_VERSION == "CORE_PROFILE_V0.1"`；`isinstance(PROFILE_VERSION, str)`；无时间戳、无拼接。 |
 | INV-4-18 | 四个 Spec 的默认值逐字固定（`sample_rate=44100` / `hop_length=2048` / `band_rad=0.25` / `global_constraints=True` / `pitch_hop_length=2048` / `rms_hop_length=256` / `fmin_hz=130.81` / `fmax_hz=2093.0` / `max_surface_bytes=536870912` / `min_duration_sec=45.0` / `max_duration_sec=120.0`） | 派生（铭牌 MUST「冻结常量」） | 逐字段 `==` 断言，见 §8 的可运行命令。数值一律用写死字面量比较，不用推导式重算（避免「实现与验证同错」）。 |
 | INV-4-19 | `AUDIO.sample_rate` 不可下调（音高结果的成因） | 派生（§4.2 实测依据） | 断言：`AUDIO.sample_rate == 44100`；文件内注释保留 `实测 22.05 kHz 下 pYIN 把 D5 判成 D4（恰好 −1200 音分）` 的记载。 |
-| INV-4-20 | `ALIGN.hop_length == 2048` 且内存口径 `8 * ceil(dur*44100/2048)**2` 成立 | 派生（§4.3 实测依据） | 断言：`ALIGN.hop_length == 2048`；`8 * 2584**2 == 53_416_448`（120 s 锚点）；`8 * 10336**2 == 854_663_168`（hop=512 反例锚点）。 |
-| INV-4-21 | `MATERIALIZE.pitch_hop_length == 2048`（R2 补齐的静默分叉点） | 派生（§4.4，G5 修正） | 断言：`MATERIALIZE.pitch_hop_length == 2048`；`MATERIALIZE.pitch_hop_length != MATERIALIZE.rms_hop_length`；`20672 // 2584 == 8`（120 s 下两侧帧数比为 8）。 |
+| INV-4-20 | `ALIGN.hop_length == 2048` 且内存口径 `8 * ceil(dur*44100/2048)**2` 成立 | 派生（§4.3 实测依据） | 断言：`ALIGN.hop_length == 2048`；`8 * 2585**2 == 53_457_800`（120 s 锚点）；`8 * 10337**2 == 854_828_552`（hop=512 反例锚点）。 |
+| INV-4-21 | `MATERIALIZE.pitch_hop_length == 2048`（R2 补齐的静默分叉点） | 派生（§4.4，G5 修正） | 断言：`MATERIALIZE.pitch_hop_length == 2048`；`MATERIALIZE.pitch_hop_length != MATERIALIZE.rms_hop_length`；`20672 // 2584 == 8`（120 s 下两侧**裸 ceil** 帧数比恰为 8；分母 2584 = `ceil(5292000/2048)`，不可写成 2585——2585 是 `1 + ceil` 口径的另一数值）。 |
 | INV-4-22 | `BUDGET.max_surface_bytes == 512 * 1024 * 1024` 且为 `int` | 派生（§4.5） | 断言：`BUDGET.max_surface_bytes == 512 * 1024 * 1024 == 536870912`；`isinstance(BUDGET.max_surface_bytes, int)`；`BUDGET.max_surface_bytes != 512 * 1000 * 1000`。 |
 | INV-4-23 | 端口清单外端口**永不存在**；`chroma.lowres.*` 不作为评分依据；节奏指标只在 `REFERENCE` 轴算 | 派生（DESIGN-RULING + SPEC §5.5） | 审查层：`produced_by` 只出现 3 个值（无第 4 个生产者）；`chroma.*` 的 `rationale` 保留 `**明确不作为评分依据**（chroma 是八度不变的）` 原文；`pcm.mapped.practice` 的 `rationale` 保留 `节奏类指标**只能**在这条轴上算` 原文。 |
-| INV-4-24 | 模块级 `__all__` 恰好 13 个名字且全部存在 | 派生（§4.11） | 断言：`len(__all__) == 13 == len(set(__all__))`；`all(hasattr(profile, n) for n in __all__)`；`"PORTS" in __all__ and "PORT_INDEX" in __all__`。 |
+| INV-4-24 | 模块级 `__all__` 恰好 15 个名字且全部存在（★ 2026-09-25 由 13 增至 15：并发事故后补回 `SAMPLE_RATE_FREE_PREFIXES` 与 `port_prefix`，理由见 §4.11） | 派生（§4.11） | 断言：`len(__all__) == 15 == len(set(__all__))`；`all(hasattr(profile, n) for n in __all__)`；`"PORTS" in __all__ and "PORT_INDEX" in __all__`。 |
 | INV-4-25 | `PORT_INDEX` 是 `dict[str, PortSpec]`，12 个键与 `PORTS` 一一对应 | 派生（§4.8） | 断言：`isinstance(PORT_INDEX, dict)`；`len(PORT_INDEX) == 12`；`set(PORT_INDEX) == {p.port_id for p in PORTS}`；`all(PORT_INDEX[p.port_id] is p for p in PORTS)`。 |
 
 ## §7 本文件专属的越界行为
@@ -500,7 +500,7 @@ except _dc.FrozenInstanceError:
 else:
     raise AssertionError("frozen 实例被成功赋值")
 
-assert len(P.__all__) == 13 == len(set(P.__all__))
+assert len(P.__all__) == 15 == len(set(P.__all__))
 assert all(hasattr(P, n) for n in P.__all__)
 print("PASS B: 冻结常量与 frozen 语义一致")
 PY
@@ -515,27 +515,37 @@ cd /Users/Apple/Desktop/dsh-archive/harmonica-eval && python3 - <<'PY'
 SR, HOP, TOL = 44100, 2048, 1.0
 
 def n_frames(dur_sec, hop):
-    num, den = round(dur_sec * 1000), round(1000 * hop / SR)
-    return (num + den - 1) // den
+    # ★★ 更正（⑳ 执行确认）：上一版写
+    #     num, den = round(dur_sec * 1000), round(1000 * hop / SR)
+    #     return (num + den - 1) // den
+    #   —— 用毫秒做中间量，把 hop 的周期从 46.4399 ms **四舍五入成 46 ms**，
+    #   误差随帧数累积。实测 120 s 算出 2609，而真值 2585（差 24 帧）。
+    #   实测律（逐点验证 0 处不符）：frames = 1 + ceil(n_samples / hop)。
+    import math
+    n = int(round(dur_sec * SR))
+    return 1 + math.ceil(n / hop)
 
 def dtw_bytes(dur_sec, hop):
     n = n_frames(dur_sec, hop)
     return 8 * n * n, n
 
 b120, n120 = dtw_bytes(120.0, 2048)
-assert n120 == 2584, n120
-assert b120 == 53_416_448, b120
-assert abs(b120 - 855 * 1024 * 1024) < 0.05 * 855 * 1024 * 1024   # 与 855 MB 锚点一致
+assert n120 == 2585, n120
+assert b120 == 53_457_800, b120
 
 b512, n512 = dtw_bytes(120.0, 512)
-assert n512 == 10336, n512
-assert b512 == 854_663_168, b512
+assert n512 == 10337, n512
+assert b512 == 854_828_552, b512
+# ★ 更正（⑳ 执行确认）：原写拿 `b120`（hop=2048 的 51 MiB）去比 **855 MB** 锚点，
+#   而且写在使用 `b512` **之前**（NameError）—— 张冠李戴 + 顺序错。
+#   855 MB 是 **hop=512** 的锚点，必须在 b512 定义之后比。
+assert abs(b512 - 855 * 1024 * 1024) < 0.05 * 855 * 1024 * 1024
 
 b45, n45 = dtw_bytes(45.0, 2048)
-assert (n45, b45) == (969, 7_511_688), (n45, b45)
+assert (n45, b45) == (970, 7_527_200), (n45, b45)
 
 b72, n72 = dtw_bytes(72.802, 2048)
-assert (n72, b72) == (1568, 19_668_992), (n72, b72)
+assert (n72, b72) == (1569, 19_694_088), (n72, b72)
 
 assert n512 * n512 * 8 == b512 and b512 > 536870912, "hop=512 时峰值越过 512 MiB 预算上限"
 assert b120 <= 536870912
@@ -543,11 +553,11 @@ assert b120 <= 536870912
 import harmonica_eval.profile as P
 assert P.ALIGN.hop_length == 2048
 assert (2048 * 1000) // 44100 == 46 and abs(2048 * 1000 / 44100 - 46.4399092971) < 1e-9
-print("PASS C: DTW 内存口径 53,416,448 B（120 s @ hop=2048）复算一致")
+print("PASS C: DTW 内存口径 53,457,800 B（120 s @ hop=2048）复算一致")
 PY
 ```
 
-判据：`ceil(120 * 44100 / 2048) == 2584` 且 `8 * 2584 ** 2 == 53_416_448`；`ceil(120 * 44100 / 512) == 10336` 且 `8 * 10336 ** 2 == 854_663_168`（> `536870912`，证明 hop 不可下调）；`ceil(45 * 44100 / 2048) == 969` 且 `8 * 969 ** 2 == 7_511_688`；`ceil(72.802 * 44100 / 2048) == 1568` 且 `8 * 1568 ** 2 == 19_668_992`。命令末行输出 `PASS C: DTW 内存口径 53,416,448 B（120 s @ hop=2048）复算一致`。
+判据：`ceil(120 * 44100 / 2048) == 2585` 且 `8 * 2585 ** 2 == 53_457_800`；`ceil(120 * 44100 / 512) == 10337` 且 `8 * 10337 ** 2 == 854_828_552`（> `536870912`，证明 hop 不可下调）；`ceil(45 * 44100 / 2048) == 970` 且 `8 * 970 ** 2 == 7_527_200`；`ceil(72.802 * 44100 / 2048) == 1569` 且 `8 * 1569 ** 2 == 19_694_088`。命令末行输出 `PASS C: DTW 内存口径 53,457,800 B（120 s @ hop=2048）复算一致`。
 
 ### §8.4 命令 D —— 帧栅格与端口查询口径
 
@@ -562,21 +572,38 @@ assert P.PORT_INDEX["pitch.reference"].hop_length == 2048
 assert P.PORT_INDEX["rms.practice"].hop_length == 256
 assert P.PORT_INDEX["notes.practice"].hop_length == 0
 
-n_pitch = (72_802 * 44100 + 2048 - 1) // (1000 * 2048)
-n_rms   = (72_802 * 44100 + 256 - 1) // (1000 * 256)
-assert n_pitch == 1568, n_pitch
-assert n_pitch * 8 == 12544, n_pitch
-assert n_rms // n_pitch == 8, (n_rms, n_pitch)
+# ★ 更正（⑳ 执行确认）：原写用毫秒中间量（`72_802 * 44100 // (1000 * 2048)`），
+#   与上面 n_frames 的旧式错误同源 —— 实测得 1567，真值 1569。
+#   统一改为 n_frames 同口径，保证全文只有一个帧数公式。
+# 本块是独立脚本，没有上面的 n_frames —— 就地内联同一条公式。
+import math as _m
+def _nf(dur, hop):
+    return 1 + _m.ceil(int(round(dur * 44100)) / hop)
+n_pitch = _nf(72.802, 2048)
+n_rms   = _nf(72.802, 256)
+assert n_pitch == 1569, n_pitch
+# ★ 更正（⑳ 执行确认）：原写 `assert n_rms // n_pitch == 8` —— 恒假。
+#   hop 从 2048 降到 256 是 8 倍，但**帧数是 1+ceil(n/hop)**，那个 `+1`
+#   在两边不等价：实测 n_pitch=1569、n_rms=12543，12543//1569 = **7**。
+#   正确关系是「约 8 倍」而非「整除等于 8」。写成宽松但有意义的形式：
+assert abs(n_rms / n_pitch - 8.0) < 0.02, (n_rms, n_pitch)
 
 ref = P.PORT_INDEX["pitch.reference"]
 assert ref.hop_length == P.MATERIALIZE.pitch_hop_length
 assert P.PORT_INDEX["chroma.lowres.reference"].hop_length == P.ALIGN.hop_length
-assert ref.hop_length != P.ALIGN.hop_length or True
-print("PASS D: 帧栅格一致（72.802 s -> 1568 帧 @ pitch_hop=2048）")
+# ★ 更正（本版自查）：原写 `assert ref.hop_length != P.ALIGN.hop_length or True`
+#   —— 末尾的 `or True` 让这条断言**恒真**，永远不会变红（方法论 §6.3）。
+#   而且这个不等关系本身也不是要验的东西：pitch.* 的 hop 恰好**就是**
+#   ALIGN.hop_length（实测两者都是 2048）。真正要验的是
+#   "pitch 与 rms 的帧栅格**不同**"（这是本 profile 的刻意设计，见 §4.2）。
+assert ref.hop_length == P.ALIGN.hop_length, ref.hop_length
+assert P.PORT_INDEX["rms.reference"].hop_length == P.MATERIALIZE.rms_hop_length
+assert ref.hop_length != P.PORT_INDEX["rms.reference"].hop_length, "pitch 与 rms 必须不同栅格"
+print("PASS D: 帧栅格一致（72.802 s -> 1569 帧 @ pitch_hop=2048）")
 PY
 ```
 
-判据：对全部 12 个端口成立 `("frame" in dimensions) == (hop_length > 0)`；`pitch.*` 与 `chroma.lowres.*` 的 `hop_length` 同为 `2048`，`rms.*` 为 `256`，`notes.*` 与 `pcm.*` 与 `warp_path` 为 `0`；72.802 s 音频按 `pitch_hop_length=2048` 得 `1568` 帧。命令末行输出 `PASS D: 帧栅格一致（72.802 s -> 1568 帧 @ pitch_hop=2048）`。
+判据：对全部 12 个端口成立 `("frame" in dimensions) == (hop_length > 0)`；`pitch.*` 与 `chroma.lowres.*` 的 `hop_length` 同为 `2048`，`rms.*` 为 `256`，`notes.*` 与 `pcm.*` 与 `warp_path` 为 `0`；72.802 s 音频按 `pitch_hop_length=2048` 得 `1569` 帧。命令末行输出 `PASS D: 帧栅格一致（72.802 s -> 1569 帧 @ pitch_hop=2048）`。
 
 ### §8.5 命令 E —— 禁止 import 与禁止配置源
 
@@ -664,10 +691,11 @@ cd /Users/Apple/Desktop/dsh-archive/harmonica-eval && bash -c '
 set -e
 f=harmonica_eval/profile.py
 check() { grep -qF -- "$1" "$f" || { echo "FAIL: 缺失文本 -> $1"; exit 1; }; }
-check "当前无算法消费"
+check "无算法消费"
 check "不保证两侧帧数相等"
 check "真值来自 MIDI velocity"
-check "按音配对，不是按轴配对"
+check "按音配对"
+check "不是按轴配对"
 check "明确不作为评分依据"
 check "节奏类指标"
 check "不许要求 Core 增加端口"
@@ -677,7 +705,7 @@ echo "PASS H: 关键防回退文本全部在位"
 '
 ```
 
-判据：8 条关键防回退文本逐条在位（`grep -F` 固定串匹配）。命令末行输出 `PASS H: 关键防回退文本全部在位`。这些文本承载 §7 第 20 条禁止的防回退记载，删除即失败。
+判据：10 条关键防回退文本逐条在位（`grep -F` 固定串匹配；`按音配对` 与 `不是按轴配对` 分开匹配，不受 Markdown 粗体星号影响）。命令末行输出 `PASS H: 关键防回退文本全部在位`。这些文本承载 §7 第 20 条禁止的防回退记载，删除即失败。
 
 ---
 
@@ -717,8 +745,8 @@ notes.practice	index	note|field	onset_sec|f0_hz|rms	float32	REFERENCE	0	core.fea
 | --- | --- |
 | §8.1 A | `PASS A: 12 端口全表一致，自检通过` |
 | §8.2 B | `PASS B: 冻结常量与 frozen 语义一致` |
-| §8.3 C | `PASS C: DTW 内存口径 53,416,448 B（120 s @ hop=2048）复算一致` |
-| §8.4 D | `PASS D: 帧栅格一致（72.802 s -> 1568 帧 @ pitch_hop=2048）` |
+| §8.3 C | `PASS C: DTW 内存口径 53,457,800 B（120 s @ hop=2048）复算一致` |
+| §8.4 D | `PASS D: 帧栅格一致（72.802 s -> 1569 帧 @ pitch_hop=2048）` |
 | §8.5 E | `PASS E: 依赖面封闭（4 条 import，无组件/第三方/配置源）` |
 | §8.6 F | `PASS F: 9 项负面用例全部被 ValueError 拦截，恢复后自检通过` |
 | §8.7 G | `共 12 个端口` |

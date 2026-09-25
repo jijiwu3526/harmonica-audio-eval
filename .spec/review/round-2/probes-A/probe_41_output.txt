@@ -1,0 +1,30 @@
+######## A. FILE-103 declares WHICH symbols are public? ########
+   FILE-103:225: # 1. 公开符号存在且签名一致
+   FILE-103:298: - [ ] 产物路径：`harmonica_eval/core/features.py`（4 个公开符号全部实现，无 `NotImplementedError`）
+
+######## B. actual public callables in core/features.py ########
+    ['MIN_STABLE_NOTE_SEC', 'VOICED_CONFIDENCE_FLOOR', 'annotations', 'materialize_chroma', 'materialize_notes', 'materialize_pitch', 'materialize_rms', 'npt']
+   aggregate 'produce all ports' entry: NONE
+
+######## C. what does FILE-105 stage 3 claim to receive/produce? ########
+   FILE-105:189: - `pcm.mapped.reference` / `pcm.mapped.practice` —— 阶段 4（`core.surface`）
+   FILE-105:191: - `pcm.warped.practice` —— 阶段 4 按 `warp_path` 做**索引重排**。
+   FILE-105:193: ⇒ 阶段 2 只负责**算对齐**；PCM 的登记与装配**全部**在阶段 4。
+   FILE-105:195: - 阶段 3 `FEATURES`：调用 `harmonica_eval.core.features` 的入口，实参 = 阶段 2 的产出；产出 = profile 决定的**全部**端口缓冲（每个端口的 `PortDescriptor` 与配套数组），**一次性预生成、非惰性**。
+   FILE-105:196: - 阶段 4 `SURFACE`：调用 `harmonica_eval.core.surface` 的入口装配并按 surface.py 冻结的口径 Seal，使 `SurfaceManifest.sealed is True`；每个端口的 `content_hash` 按 `contract.PortDescriptor.content_hash` 冻结的字节级口径计算（`CONTENT_HAS
+
+######## D. FILE-105: is stage 4 = build_surface (which itself does stage 3's job)? ########
+   surface.build_surface: (reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Surface'
+   FILE-104 §4.7 step 5: build_surface calls generate_all_ports() internally
+   generate_all_ports: (reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Mapping[str, npt.NDArray]'
+
+   => stage 4 re-generates all 12 ports (incl. the 8 feature ports stage 3 claims to produce).
+   => stage 3's declared output has no consumer; its declared input (stage 2's warp_path)
+      matches no features entry (all take `samples`).
+
+######## E. FILE-203 +100 vs formula ########
+   FILE-203:94: 帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+   FILE-203:96: - **最后一个音**延伸到 `frame(onset_sec_last) + 100`（默认 1 秒），或数据末尾帧，取其二者中较小。
+   FILE-203:97: - **边界**：`notes` 为空 → 返回 `[]`。单音 → 区间为 `[frame(onset), frame(onset)+100]`。
+   at rms_hop=256, sr=44100: 1 second = 172 frames, but :96 says +100
+   :97 '单音 → 区间为 [frame(onset), frame(onset)+100]' repeats the stale 100.

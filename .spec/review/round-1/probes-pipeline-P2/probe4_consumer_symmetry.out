@@ -1,0 +1,24 @@
+========================================================================
+端口清单（12）与两侧归属：
+port_id                      produced_by    被算法消费?
+  warp_path                  core.align     no 
+  pcm.mapped.reference       core.surface   YES
+  pcm.mapped.practice        core.surface   YES
+  pcm.warped.practice        core.surface   no 
+  pitch.reference            core.features  YES
+  pitch.practice             core.features  YES
+  rms.reference              core.features  YES
+  rms.practice               core.features  YES
+  chroma.lowres.reference    core.features  no 
+  chroma.lowres.practice     core.features  no 
+  notes.reference            core.features  YES
+  notes.practice             core.features  YES
+
+无算法消费（须有 b/c 类理由）: ['warp_path', 'pcm.warped.practice', 'chroma.lowres.reference', 'chroma.lowres.practice']
+
+ALGORITHMS.required_ports 里但不在 PORTS 里的（悬空声明）: (无)
+
+消费者侧每个算法的入口:
+  pitch      entry=harmonica_eval.algorithms.pitch.run required=['pitch.reference', 'pitch.practice', 'notes.reference', 'notes.practice']
+  timing     entry=harmonica_eval.algorithms.timing.run required=['pcm.mapped.reference', 'pcm.mapped.practice', 'notes.reference', 'notes.practice']
+  dynamics   entry=harmonica_eval.algorithms.dynamics.run required=['rms.reference', 'rms.practice', 'notes.reference', 'notes.practice']

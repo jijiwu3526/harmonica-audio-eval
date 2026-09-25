@@ -1,0 +1,10 @@
+assert doc -> True
+len(doc.splitlines()) = 30
+FAIL AssertionError: 30
+  FILE-100:279 requires exactly 31; actual is 30
+  FILE-100:132 states the same invariant.
+  FILE-100:436 freeze table: 'docstring 行数 | 31 | 行 1–31'
+  Reality: AST node spans lines 1-31 (end_lineno=31), so the SOURCE
+  occupies 31 lines, but the docstring VALUE has 30 lines
+  (opening ''' and closing ''' are delimiters, not content).
+  => the two readings are conflated in the BI; the assertion as written fails.

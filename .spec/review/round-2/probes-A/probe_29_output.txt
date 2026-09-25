@@ -1,0 +1,28 @@
+=== FILE-300: host/__init__ docstring keys + line claims ===
+  BI:223: E4 由语言保证，**不需要**这行；加了会破坏 E2/INV-300-4。
+  actual host/__init__ doc lines: 28
+  actual file lines: 39
+
+=== FILE-001: package __init__ claims ===
+  BI:186: | INV-001-3 | `PUBLIC_SUBMODULES` **恰好含 6 个名字且含 `cockpit`**，类型是 `tuple` | `assert isinstance(PUBLIC_SUBMODULES, tuple)` 且 `"cockpit" in PUBLIC_SUBMODULES` |
+  BI:241: assert len(h.PUBLIC_SUBMODULES) == 6, h.PUBLIC_SUBMODULES
+  actual __version__ = 0.1.0
+  actual __all__ = []
+  actual PUBLIC_SUBMODULES = ('contract', 'profile', 'core', 'algorithms', 'host', 'cockpit')
+
+=== FILE-004: claims '12 ports'? ===
+  actual len(PORTS) = 12
+  BI: `profile.py` 是「数据面里有什么」的**唯一定义处**。数据面身份 = `f(reference, practice, PROFILE_VERSION)`。端口清单是封闭集合：本文件列出的 12 个端口在 Seal 时全部生成；本文件未列出的端口永不存在。算法需要额外数据时的唯一合法路径
+  BI: 2. **数据面无从生成。** 12 个端口的定义（`port_id` / `units` / `dimensions` / `field_names` / `element_type` / `timeline_basis` / `hop_length` / `produced_by`）全部消失，`
+  BI: | `max_surface_bytes` | `int` | 字节（B） | 恒 `536870912`（= `512 * 1024 * 1024`，即 512 MiB） | 实测 | 数据面总量上限 512 MB。超出 → `CORE_BUILD_FAILED`。依据：预生成清单（**12 个端
+  BI: ### §4.7 `PORTS: tuple[PortSpec, ...]` —— 12 个端口全表 ★
+  BI: | INV-4-11 | 帧类端口必须声明 `hop_length > 0`，非帧类必须 `== 0` | 派生（检查 5） | 断言：`pitch.reference / pitch.practice / chroma.lowres.reference / chroma.lowres.practi
+  BI: | INV-4-12 | 端口对称性：`X.reference` 与 `X.practice` 要么都有、要么都没有（唯一例外 `pcm.warped.*`） | 派生（检查 7） | 断言：对 12 个端口施加检查 7 的同款推导，`twin` 全部存在；`notes.practice` 必须存在
+  BI: 判据：对全部 12 个端口成立 `("frame" in dimensions) == (hop_length > 0)`；`pitch.*` 与 `chroma.lowres.*` 的 `hop_length` 同为 `2048`，`rms.*` 为 `256`，`notes.*` 与 `pcm.
+  BI: 判据：输出恰好 12 行端口 + 1 行 `共 12 个端口`，且 12 行与 §4.7 表逐字段相同（`timeline_basis` 以 `.name` 打印，故为 `REFERENCE` / `WARPED`，无枚举 repr 差异）。
+  BI: | 下游产物（由其他文件生成，本文件只约束其内容与总量） | 数据面目录（12 个端口文件） | 写入路径由 `core.surface` 决定，不在本文件范围。本文件约束的是：内容为 12 个端口、总量 `<= 536870912` B；超出即 `CORE_BUILD_FAILED`。 |
+  BI: 共 12 个端口
+  BI: | §8.7 G | `共 12 个端口` |
+
+  distinct produced_by: ['core.align', 'core.features', 'core.surface']
+  FILE-004 INV-4-15/23 claim 'produced_by 只出现 3 个值': True

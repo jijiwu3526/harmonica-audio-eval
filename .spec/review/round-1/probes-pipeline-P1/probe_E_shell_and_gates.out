@@ -1,0 +1,36 @@
+== 1. 每个 .py 是否都是空壳（函数体全 raise NotImplementedError）==
+  harmonica_eval/__init__.py                     funcs= 0 stubs= 0
+  harmonica_eval/__main__.py                     funcs= 7 stubs= 7
+  harmonica_eval/algorithms/__init__.py          funcs= 1 stubs= 1
+  harmonica_eval/algorithms/dynamics.py          funcs= 6 stubs= 6
+  harmonica_eval/algorithms/pitch.py             funcs= 4 stubs= 4
+  harmonica_eval/algorithms/timing.py            funcs= 5 stubs= 5
+  harmonica_eval/cockpit/__init__.py             funcs= 1 stubs= 1
+  harmonica_eval/cockpit/app.py                  funcs=10 stubs=10
+  harmonica_eval/contract.py                     funcs=13 stubs= 0
+  harmonica_eval/core/__init__.py                funcs= 0 stubs= 0
+  harmonica_eval/core/align.py                   funcs= 5 stubs= 5
+  harmonica_eval/core/api.py                     funcs= 7 stubs= 7
+  harmonica_eval/core/features.py                funcs= 4 stubs= 4
+  harmonica_eval/core/ingest.py                  funcs= 5 stubs= 5
+  harmonica_eval/core/surface.py                 funcs= 7 stubs= 7
+  harmonica_eval/host/__init__.py                funcs= 0 stubs= 0
+  harmonica_eval/host/app.py                     funcs=13 stubs=13
+  harmonica_eval/profile.py                      funcs= 1 stubs= 0
+
+== 2. FILE-104 门禁 4（禁端口字面量） vs §4.4 要求 PRODUCER_DISPATCH 键=port_id ==
+  L364: | 派发表的形态 | 模块级常量 `PRODUCER_DISPATCH: Mapping[str, Callable]`，**键 = `port_id`，值 = 真实的生产者可调用对象** |
+  L366: | 调用形态 | `PRODUCER_DISPATCH[port_id](...)`，**按每个生产者自己的真实签名**传参（见下表） |
+  L870: # 4 · 端口名硬编码扫描：端口 ID 字面量命中数必须为 0
+  L871: python -c "import inspect, harmonica_eval.core.surface as m; s=inspect.getsource(m); hit=[k for k in ['pcm.mapped','pcm.warped','pitch.','chroma.','rm
+  L1040: - [ ] 源码中不出现 `pcm.mapped`、`pcm.warped`、`pitch.`、`chroma.`、`rms.`、`notes.`、`warp_path.` 这七个端口 ID 字面量中的任何一个（端口名只能来自 `profile.PORTS`）。
+  L1078: - 命令 4 的 stdout：`no-hardcoded-port-ids`。
+
+== 3. 若按 §4.4 写死派发表，源码必然出现这些字面量 ==
+  'pcm.mapped' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4
+  'pcm.warped' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4
+  'pitch.' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4
+  'chroma.' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4
+  'rms.' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4
+  'notes.' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4
+  'warp_path.' 是 §4.4 派发表键的必然子串 -> 会命中门禁 4

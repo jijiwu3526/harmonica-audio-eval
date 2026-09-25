@@ -1,0 +1,94 @@
+=== skeleton signature (frozen by SHELL, cannot change) ===
+   (deviations_cents: 'object') -> 'object'
+   params: ['deviations_cents']
+   -> sample_rate NOT a parameter
+
+=== FILE-201 §4.3 text ===
+  237: ### 4.3 `summarize_deviations(deviations_cents) -> dict`
+  238: 
+  239: - **输入**：`deviations_cents: list[float] | NDArray` —— §4.2 产出的逐音偏差
+  240: - **输出**：`dict`，**键名以 `algorithms.PAYLOAD_SCHEMAS["pitch"]` 为唯一权威**，
+  241:   **恰好 5 个键，一字不得增删**：
+  242:   ```python
+  243:   {
+  244:     "per_note_cents":   list[float],  # 带符号逐音偏差，长度 == n_notes_used
+  245:     "median_abs_cents": float,        # 中位**绝对**偏差
+  246:     "off_pitch_ratio":  float,        # 超过 MAX_CENTS_DEVIATION 的音占比 ∈ [0,1]
+  247:     "n_notes_used":     int,          # 参与统计的音数（**必须报告**）
+  248:     "sample_rate":      int,          # ★ 由 run() 填入，本函数不收此参数则返回时省略
+  249:   }
+  250:   ```
+  251:   ★ 由于 `sample_rate` 是"结果的成因"而非统计量，**本函数签名里没有它**；
+  252:   故本函数返回**前 4 个键**，由 `run()` 补上 `sample_rate` 得到完整 5 键。
+  253:   若实现者选择让本函数直接收 `sample_rate` 并返回 5 键，**也允许**
+  254:   （两种都不违反契约），但**必须在文档里写清选了哪种**。
+  255: 
+  256: - **算法口径**（写死）：
+  257:   ```python
+  258:   vals = np.asarray(deviations_cents, dtype=np.float64)
+
+=== contradiction summary ===
+  §4.3 heading says: '恰好 5 个键，一字不得增删'
+  §4.3 body code returns 4 keys (no sample_rate)
+  §4.3 then says: '若实现者选择让本函数直接收 sample_rate 并返回 5 键，也允许'
+  BUT skeleton signature is summarize_deviations(deviations_cents) -> object
+      -> 'also allowed' branch is IMPOSSIBLE without changing the frozen signature
+  AND run() must add sample_rate; is that stated? see §4.4
+  288: ### 4.4 `run(surface) -> AlgorithmResultEnvelope`
+  289: 
+  290: **职责**：算法入口。流程：读端口 → 比较 → 汇总 → 装信封。
+  291: 
+  292: - **输入**：`surface: AlgorithmDataContract`（**只读**，只有 `read()` 与 `manifest()`）
+  293: - **输出**：`AlgorithmResultEnvelope`（字段见 `contract.py`）：
+  294:   ```
+  295:   algorithm_id       = ALGORITHM_ID        ("pitch")
+  296:   algorithm_version  = ALGORITHM_VERSION   ("1.0.0")
+  297:   status             = "OK" | "FAILED" | "INCOMPATIBLE"
+  298:   # ★ 更正（P1 审查 F10）：原写 "SUCCEEDED" —— 契约的冻结取值域是
+  299:   #   {'OK','FAILED','INCOMPATIBLE'}（contract.py 的 AlgorithmResultEnvelope）。
+  300:   #   写 "SUCCEEDED" 会被 C1 的 schema 校验判为非法。
+  301:   required_ports     = ("pitch.reference", "pitch.practice", "notes.reference", "notes.practice")
+  302:   consumed_ports     = 实际成功读取的端口元组
+  303:   payload            = §4.3 的 5 键字典（失败时为 {}）
+  304:   error_code         = ErrorCode 的值 或 None
+  305:   error_detail       = 人类可读说明 或 None
+  306:   elapsed_sec        = perf_counter 差值（float）
+  307:   ```
+  308: 
+  309: - **算法口径**（顺序写死）：
+  310:   1. `t0 = time.perf_counter()`
+  311:   2. `man = surface.manifest()` —— 校验四个必需端口都在（缺任一 → 失败信封）
+  312:   3. `ref_pitch = surface.read("pitch.reference")`，其余三个同理
+  313:   4. `res = compare_pitch_curves(ref_pitch, prac_pitch, ref_notes, prac_notes, sample_rate)`
+  314:   5. `payload = summarize_deviations(res["per_note_cents"])`
+  315:   6. `payload["sample_rate"] = <两侧的采样率>` —— **补上第 5 个键**
+  316:   7. 装信封返回，`elapsed_sec = time.perf_counter() - t0`
+  317: 
+  318: - **★ 失败语义（本函数最容易写错的地方）**：
+  319:   **任何失败都必须返回 `status="FAILED"` 的信封，绝不抛异常。**
+  320:   理由：算法失败不应穿透到 C1，否则故障无法隔离 —— 一个算法崩了会带崩整条流水线。
+  321:   用 `try/except Exception` 包住 2–6 步，在 except 里装失败信封：
+  322:   - `error_code = ErrorCode.ALGORITHM_FAILED.value`
+  323:   - `error_detail = f"{type(e).__name__}: {e}"`
+  324:   - `payload = {}`
+  325:   - ★ **不留 `error_code=None`**：失败却无码，C1 无法分类。
+  326: 
+  327: - **边界**：
+  328:   | 情形 | 行为 |
+  329:   | --- | --- |
+  330:   | 必需端口缺失 | 失败信封，`ALGORITHM_FAILED` |
+  331:   | `surface.read()` 抛异常 | 失败信封，`ALGORITHM_FAILED` |
+  332:   | 两侧音符全部配不上 | **成功**信封，`payload` 里 `n_notes_used=0`（这是有效结论："一个音都没对上"） |
+  333:   | `sample_rate` 拿不到 | 失败信封（因为它是结果的成因，缺它结果不可信） |
+  334:   | 任何未预期异常 | 失败信封，`ALGORITHM_FAILED`，detail 带异常类型 |
+  335: 
+  336: - **不变量**：
+  337:   - **本函数永不抛异常**（这条可机械断言：用会抛的 mock surface 调它）；
+  338:   - 返回的 `algorithm_id` / `algorithm_version` 恒为常量；
+  339:   - `status == "FAILED"` 时 `error_code` 必非 `None`；
+  340:   - `elapsed_sec` 必为有限非负数
+  341: 
+  342: ---
+  343: 
+  344: ## 5 · 失败语义
+  345: 

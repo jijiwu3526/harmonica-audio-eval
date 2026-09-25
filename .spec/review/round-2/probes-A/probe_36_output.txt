@@ -1,0 +1,57 @@
+=== FILE-203 new note_spans section ===
+  77: ### `note_spans(notes, rms_hop_length, sample_rate) -> list[tuple[int, int]]`
+  78: 
+  79: ★★ **本版更正（第三轮盲审 A 的 probe 08）：原签名与算法两处都错。** ★★
+  80: 
+  81: - **签名**：原写 `note_spans(notes: list[dict])` —— 但**同文件 §4.1 的表格**
+  82:   又写 `notes.reference` 经 `surface.read()` 取出后是 `(n_note, 3)` 的
+  83:   **ndarray**（取 `.data` 得 ndarray，列号用
+  84:   `descriptor.field_names.index("onset_sec")` 查）。
+  85:   **同一份文件给了两种互斥的表示法。**
+  86: - **算法**：原写帧率「每秒 100 帧，公式 `int(round(t * 100))`」——
+  87:   **实测没有任何端口是 100 fps**：`pitch.*` 的 hop 是 2048（44100/2048 ≈ **21.5** fps），
+  88:   `rms.*` 的 hop 是 256（≈ **172.3** fps）。100 fps 是**凭空写的数字**。
+  89: 
+  90: **本版冻结**（以 ndarray 表示法为准，与 §4.1 一致）：
+  91: - **输入**：`notes` —— `(n_note, 3)` 的 `float32` ndarray（`notes.*` 端口的 `read().data`）；
+  92:   第 `onset_sec` 列的列号**必须**用 `field_names.index("onset_sec")` 查。
+  93: - **帧率不由本文件假设**：由调用方传入 `rms_hop_length` 与 `sample_rate`，
+  94:   帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+  95:   **禁止**写死任何帧率数字（原 `100` 已删除）。
+  96:   - **最后一个音**延伸到 `frame(onset_sec_last) + 100`（默认 1 秒），或数据末尾帧，取其二者中较小。
+  97: - **边界**：`notes` 为空 → 返回 `[]`。单音 → 区间为 `[frame(onset), frame(onset)+100]`。
+  98: - **不变量**：返回区间左端 ≤ 右端；区间互不相交、覆盖从首音到末音之间的所有帧。
+  99: 
+  100: ### `align_by_note(ref_rms_db, prac_rms_db, ref_spans, prac_spans) -> dict`
+
+=== where does rms_hop_length come from for note_spans? any grep ===
+  77: ### `note_spans(notes, rms_hop_length, sample_rate) -> list[tuple[int, int]]`
+  93: - **帧率不由本文件假设**：由调用方传入 `rms_hop_length` 与 `sample_rate`，
+  94: 帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+  165: 2. `note_spans(notes.reference, rms_hop_length, sr)` 得 `ref_spans`
+  166: ★ 传入帧率参数：帧号换算需要 `rms_hop_length` 与 `sample_rate`，
+  168: 3. `note_spans(notes.practice, rms_hop_length, sr)` 得 `prac_spans`
+
+=== FILE-203 §3 allowed imports (does it allow ..profile?) ===
+  39: 
+  40: ## 3 · 你能用的东西（依赖清单，封闭）
+  41: 
+  42: **可以 import**：
+  43: - Python 标准库：`math`（`math.log10` 钳位对数转换），`statistics`（`median`, `mean`），`typing`（类型注解）
+  44: - 第三方：无
+  45: - 本包内：
+  46:   - `harmonica_eval.contract.AlgorithmDataContract`
+  47:   - `harmonica_eval.contract.AlgorithmResultEnvelope`
+  48:   - `harmonica_eval.core.ingest.SILENCE_RMS_THRESHOLD`（仅用于语义一致性说明，**不**越过端口直接 import；如需判静音，使用 `DB_FLOOR`）
+  49: 
+  50: **禁止 import**：
+  51: - `numpy` / `scipy` / `librosa` / 任何第三方信号库
+  52: - `harmonica_eval.algorithms.timing` / `pitch` / `score`（跨算法模块 import 属于上层调度范畴，本模块不得越权）
+  53: - 任何 `harmonica_eval.algorithms` 之外的模块路径
+  54: - 任何不在上述清单的本包内符号
+  55: 
+  56: ---
+  57: 
+  58: ## 4 · 你要实现什么（行为规格）
+  59: 
+  60: ### `ALGORITHM_ID: str`

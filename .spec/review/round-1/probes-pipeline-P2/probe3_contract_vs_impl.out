@@ -1,0 +1,37 @@
+========================================================================
+[A] FILE-002 §4.3 第 6 步要求 series 元素含 n_points（点数元信息）
+    contract.UiSeries 字段: ['key', 'label', 't', 'values', 'unit', 'timeline_basis', 'source_port']
+    'n_points' in fields ? False
+    FILE-002: 6. `series` = 按投影原序的列表，每个元素键序固定为：`key` → `label` → `unit` → `timeline_basis` → `n_points`。`timeline_basis` 写成枚举名（规则同第 4 步），取值必须落在 `{"REFEREN
+    FILE-002: | 投影缺 `n_points` 之类的点数元信息 | 停止：**禁止**用 `len(values)` 遍历数值替代 | 停止并上报（§10） |
+    FILE-002: assert list(s.keys()) == ["key","label","unit","timeline_basis","n_points"], list(s.keys())
+    FILE-002: assert isinstance(s["n_points"], int)
+    FILE-002: - [ ] 步骤 5：顶层键序、元素键序、`schema_version == 1`、`timeline_basis` 取值、`n_points` 为 `int` 全部成立；产物与 `run_headless` 视图的 `key` 集合相等、`value` 的 `repr` 逐位
+    FILE-002 §5 明确禁止用 len(values) 替代 ->
+       | 投影缺 `n_points` 之类的点数元信息 | 停止：**禁止**用 `len(values)` 遍历数值替代 | 停止并上报（§10） |
+       4. §4 的行为规格**不足以确定唯一实现**（例如：`UiSeries` 不暴露点数元信息，而 §5 已禁止用 `len(values)` 替代）。
+
+[B] FILE-400 launch_cockpit 需要 app 侧的 6 个符号
+    LOCAL_BIND_HOST        app.py has? True
+    LOCAL_BIND_PORT        app.py has? False
+    EXIT_OK                app.py has? True
+    EXIT_STARTUP_FAILED    app.py has? False
+    EXIT_SIGTERM           app.py has? False
+    build_plots            app.py has? True
+    app.py 实际公开常量: ['COMMAND_LABELS', 'EXIT_OK', 'EXIT_START_FAILED', 'LOCAL_BIND_HOST']
+    FILE-401 §4.2 冻结的 app 侧常量名: LOCAL_BIND_HOST / EXIT_OK / EXIT_START_FAILED / COMMAND_LABELS
+    -> 命名分叉: EXIT_STARTUP_FAILED(FILE-400) vs EXIT_START_FAILED(FILE-401/app.py)
+
+[C] FILE-104 read() warp_path 时长上界 = (n-1)*hop/sr，warp_path.hop_length 实际值
+    warp_path.hop_length = 0  dimensions = ('warp_point', 'axis')
+    -> upper = (n-1)*0/sr = 0.0；任何 t1>0 的 warp_path 读取都抛 ContractViolation
+    FILE-104 原文:
+       | `f == "warp_path"` | 见下方「warp_path 点筛选」 | 同左 | `(n - 1) * hop / sr` |
+       若该端口 0 行，`warp_path` 的时长上界按 `(n - 1) * hop / sr` 在 `n = 0` 时
+       为负数 —— 实现取 `max(0.0, (n - 1) * hop / sr)`，故空表的时长上界是 `0.0`，
+
+[D] contract 承诺 'warp_path 时间窗按 reference_frame 换算' —— 需要 hop，但 hop=0
+      contract.py:453: `warp_path` 特殊：它是**路径点**表，时间窗按
+      contract.py:454: `reference_frame` 换算后的秒值筛选（因为它的 basis 是 REFERENCE）。
+      contract.py:455: 注意其 `unit="index"` 指的是**列语义**（帧号），不是时间单位。
+      contract.py:456: 

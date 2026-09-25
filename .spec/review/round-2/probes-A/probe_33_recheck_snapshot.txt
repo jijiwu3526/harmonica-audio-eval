@@ -1,0 +1,25 @@
+############ A. FILE-100 docstring invariant (probe 27/28) ############
+  len(doc.splitlines()) = 30  (BI requires == 31)
+  src lines             = 53  (BI requires == 53)
+
+############ B. FILE-100 criterion B: declared vs produced (probe 26) ############
+  declared = ['align', 'api', 'features', 'ingest', 'surface']
+  produced = ['align', 'features', 'surface']
+  equal    = False   <-- BI asserts this MUST be equal
+
+############ C. dynamics: 'error=' kwarg (probe 08) ############
+  envelope fields: ['algorithm_id', 'algorithm_version', 'status', 'required_ports', 'consumed_ports', 'payload', 'error_code', 'error_detail', 'elapsed_sec']
+  'error=' REJECTED -> AlgorithmResultEnvelope.__init__() got an unexpected keyword argument 'error'
+
+############ D. summarize_deviations signatures (probe 06/07) ############
+  pitch.compare_pitch_curves(ref_pitch: 'object', prac_pitch: 'object', ref_notes: 'object', prac_notes: 'object', sample_rate: 'int') -> 'object'
+  pitch.summarize_deviations(deviations_cents: 'object') -> 'object'
+  timing.match_onsets(ref_onsets: 'object', prac_onsets: 'object', tolerance_sec: 'float' = 0.1) -> 'object'
+  timing.compute_deviations(matched: 'object') -> 'object'
+  timing.summarize_deviations(deviations_ms: 'object', n_unpaired: 'int') -> 'object'
+  dynamics.align_by_note(ref_rms_db: 'object', prac_rms_db: 'object', ref_spans: 'object', prac_spans: 'object') -> 'object'
+  dynamics.compute_deltas(aligned: 'object') -> 'object'
+  dynamics.summarize_deltas(deltas_db: 'object', n_unpaired: 'int') -> 'object'
+  PAYLOAD_SCHEMAS['pitch']   = ('per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used', 'sample_rate')
+  PAYLOAD_SCHEMAS['timing']  = ('per_note_onset_ms', 'median_onset_ms', 'spread_ms', 'early_ratio', 'late_ratio', 'on_time_ratio', 'n_notes_used', 'n_unpaired')
+  PAYLOAD_SCHEMAS['dynamics']= ('per_note_delta_db', 'median_db', 'spread_db', 'n_notes_used', 'n_unpaired')

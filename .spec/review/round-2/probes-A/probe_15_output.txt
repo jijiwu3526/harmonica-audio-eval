@@ -1,0 +1,43 @@
+=== generate_all_ports signature (skeleton, frozen) ===
+   generate_all_ports(reference, practice, sample_rate, warp_path)
+   -> warp_path is an INPUT
+
+=== but §4.4 dispatch table has a row producing warp_path ===
+  345: core.align.align                (reference, practice)           # 2 参
+  388: | `("core.align", "index", ("warp_point","axis"), REFERENCE)` | `warp_path` | `core.align.align` |
+  406: | `core.align` 那一行 | `core.align.align` | `(reference, practice)` |
+
+=== §4.4 step 3: '每个端口的生成者由 produced_by 指名' ===
+  317: 取值域：两列均**非递减**，且
+  318: `reference_frame ∈ [0, len(reference))`、`practice_frame ∈ [0, len(practice))`。
+  319: - **输出**：`Mapping[str, npt.NDArray]`，实现在**必须**返回普通 `dict`。
+  320: 键集合与 `profile.PORT_INDEX` 的键集合**完全一致**：
+  321: `set(返回值的键) == set(profile.PORT_INDEX.keys())`。
+  322: 多一个键或少一个键都抛 `CoreBuildError(CORE_BUILD_FAILED)`（见 §5）。
+  323: - **算法口径**：
+  324: 1. `expected = set(profile.PORT_INDEX.keys())`。
+  325: 2. 对 `port_id in profile.PORTS`（**按 `PORTS` 元组的声明顺序**遍历，
+  326: `PORTS` 是 `tuple[PortSpec, ...]`，`PORT_INDEX` 是它的字典投影 ——
+  327: 两份必须一致）。
+  328: 3. 每个端口的生成者由 `PortSpec.produced_by` 指名。实现**不得**在本文件内
+  329: 另写特征提取代码；只做一次查表调用。
+  330: 4. **调用约定（★ 本版重写，上一版是错的，且不可满足）**
+  331: 
+  332: ★★ **上一版原文（已作废）**：
+
+=== §4.4 boundary: warp_path (0,2) empty -> '不抛错，由 produced_by 指名的生成者决定行为' ===
+  526: - `warp_path` 为形状 `(0, 2)` 的空数组 → **不抛错**，由
+  806: - `warp_path` 为 `(0, 2)` → 形状检查通过，进入生成流程。
+
+=== CONTRADICTION ===
+  If the dispatch row for core.align RE-COMPUTES warp_path from (reference, practice),
+  then the warp_path INPUT parameter is dead -- and the caller's alignment
+  (api.py stage 2, and FILE-105's 'warp_path from stage 2') is discarded.
+  If instead the row forwards the input, the dispatch row is not a producer.
+  FILE-104 never says which. Both readings are consistent with the text.
+
+=== what does FILE-105 say about who supplies warp_path to stage 4? ===
+  169: 产出 = **warp 路径点**（`warp_path`，一个 `(n_ref_frames, 2)` 的 `int32` 数组）。
+  175: `npt.NDArray`，**只返回 `warp_path`**，不产任何 PCM。
+  180: - `pcm.warped.practice` —— 阶段 4 按 `warp_path` 做**索引重排**。
+  182: ⇒ 阶段 2 只负责**算对齐**；PCM 的登记与装配**全部**在阶段 4。

@@ -1,0 +1,32 @@
+== PORTS: produced_by -> 模块是否可解析 ==
+  warp_path                  produced_by=core.align     OK module
+  pcm.mapped.reference       produced_by=core.surface   OK module
+  pcm.mapped.practice        produced_by=core.surface   OK module
+  pcm.warped.practice        produced_by=core.surface   OK module
+  pitch.reference            produced_by=core.features  OK module
+  pitch.practice             produced_by=core.features  OK module
+  rms.reference              produced_by=core.features  OK module
+  rms.practice               produced_by=core.features  OK module
+  chroma.lowres.reference    produced_by=core.features  OK module
+  chroma.lowres.practice     produced_by=core.features  OK module
+  notes.reference            produced_by=core.features  OK module
+  notes.practice             produced_by=core.features  OK module
+
+== 该模块里有哪些『可作为生成者』的公开可调用对象（含 4 参约定检查）==
+-- core.align (/Users/Apple/Desktop/dsh-archive/harmonica-eval/harmonica_eval/core/align.py)
+     compute_alignment_features(samples: 'npt.NDArray') -> 'npt.NDArray'   4-arg-convention=NO
+     compute_warp_path(ref_features: 'npt.NDArray', prac_features: 'npt.NDArray') -> 'npt.NDArray'   4-arg-convention=NO
+     assert_monotonic(warp_path: 'npt.NDArray') -> 'None'   4-arg-convention=NO
+     measure_coverage(warp_path: 'npt.NDArray', n_ref_frames: 'int') -> 'float'   4-arg-convention=NO
+     align(reference: 'npt.NDArray', practice: 'npt.NDArray') -> 'npt.NDArray'   4-arg-convention=NO
+-- core.surface (/Users/Apple/Desktop/dsh-archive/harmonica-eval/harmonica_eval/core/surface.py)
+     build_descriptor(port_id: 'str', data: 'npt.NDArray', sample_rate: 'int') -> 'PortDescriptor'   4-arg-convention=NO
+     seal(data: 'npt.NDArray') -> 'npt.NDArray'   4-arg-convention=NO
+     generate_all_ports(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Mapping[str, npt.NDArray]'   4-arg-convention=YES
+     assert_budget(ports: 'Mapping[str, npt.NDArray]') -> 'int'   4-arg-convention=NO
+     build_surface(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Surface'   4-arg-convention=YES
+-- core.features (/Users/Apple/Desktop/dsh-archive/harmonica-eval/harmonica_eval/core/features.py)
+     materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'   4-arg-convention=NO
+     materialize_rms(samples: 'npt.NDArray') -> 'npt.NDArray'   4-arg-convention=NO
+     materialize_chroma(samples: 'npt.NDArray') -> 'npt.NDArray'   4-arg-convention=NO
+     materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'   4-arg-convention=NO

@@ -150,11 +150,29 @@
 - **边界**：`samples` 长度 0 ⇒ 返回形状 `(0,)` 的空数组，不抛异常。全零输入 ⇒ 返回全 `0.0`（静音是真实测量值，不是失败）。单元素输入 ⇒ 返回 1 帧。输入含 NaN/inf ⇒ 抛 `ErrorCode.CORE_BUILD_FAILED`（见 §5）。
 - **不变量**：输出无 NaN、无 inf；输出全部 `>= 0.0`；**本函数不做 dB 换算** —— 转 dB 是算法侧的表达选择。
 
-### `materialize_chroma(samples: npt.NDArray) -> npt.NDArray`
+### `materialize_chroma(samples: npt.NDArray, sample_rate: int) -> npt.NDArray`
 
-- **输入**：`samples` 为 1-D `float32` 单声道 PCM；空数组为合法输入。本函数**不接收** `sample_rate`。
+★★ **本版更正（第三轮盲审 B 的 BLOCK-9）：签名加 `sample_rate`。** ★★
+
+原签名只有 `samples`，并明写「本函数**不接收** `sample_rate`」——
+但算法口径要求调 `librosa.feature.chroma_stft`，
+而该函数**必须**知道采样率才能把 FFT bin 映射到音级。
+实现者拿不到 `sr` 只能自己假设，而假设错了**不报错、不抛异常**：
+
+| 传入 `sr` | 440 Hz（应为 A）落到 |
+| --- | --- |
+| `44100`（本仓真实值） | bin 9 = **A** ✅ |
+| `22050`（**librosa 的默认值**） | bin 9 = A（恰好也对，但纯属巧合） |
+| `1`（随便假设一个） | bin 4 = **E** ❌ |
+
+**最危险的是"忘了传"**：`librosa.feature.chroma_stft` 的 `sr` 默认
+`22050`，本仓真实采样率是 `44100` —— 漏传不会报错，
+只是频率轴整体错一倍。规格必须把 `sr` 变成**必填参数**，
+让"忘了传"变成 `TypeError` 而不是静默错值。
+
+- **输入**：`samples` 为 1-D `float32` 单声道 PCM；`sample_rate` 为 int（Hz，本 profile = 44100）；空数组为合法输入。
 - **输出**：2-D `float32` ndarray，形状 `(n_frames, 12)`，字段顺序取自 `contract.FIELD_LAYOUTS['chroma']`，**bin 0 = C**（不是 A）；bin 索引 `k` 对应音级 `(C, C#, D, D#, E, F, F#, G, G#, A, A#, B)[k]`。
-- **算法口径**：`librosa.feature.chroma_stft`，帧参数取 `profile.MATERIALIZE.frame_length`（窗长）/ `profile.ALIGN.hop_length`（帧移 = 2048，与 `profile.PORTS` 中 `chroma.lowres.*` 声明的 `hop_length` 一致），`n_chroma = 12`，`tuning = 0.0`（不估计调音偏移，保证可复现），`norm = np.inf`（逐帧无穷范数归一化），`center = True`。**低分辨率**：`n_chroma` 固定 12，不做 36/120 维高阶 chroma。
+- **算法口径**：`librosa.feature.chroma_stft`，**`sr=sample_rate` 必传**（不得依赖库的默认值），帧参数取 `profile.MATERIALIZE.frame_length`（窗长）/ `profile.ALIGN.hop_length`（帧移 = 2048，与 `profile.PORTS` 中 `chroma.lowres.*` 声明的 `hop_length` 一致），`n_chroma = 12`，`tuning = 0.0`（不估计调音偏移，保证可复现），`norm = np.inf`（逐帧无穷范数归一化），`center = True`。**低分辨率**：`n_chroma` 固定 12，不做 36/120 维高阶 chroma。
 - **边界**：`samples` 长度 0 ⇒ 返回形状 `(0, 12)` 的空数组，不抛异常。全零输入（静音）⇒ 返回全 `0.0` 的 `(n_frames, 12)`（不抛异常）。输入含 NaN/inf ⇒ 抛 `ErrorCode.CORE_BUILD_FAILED`（见 §5）。
 - **不变量**：输出第二维恒为 12；输出无 NaN、无 inf；逐帧 L∞ 范数为 `0.0`（静音帧）或 `1.0`。**本端口明确不作为评分依据** —— chroma 八度不变，无法区分 C4 与 C5；保留在数据面里是为了让审查者能重跑对齐、验证 `warp_path` 不是凭空来的。
 
@@ -168,7 +186,26 @@
   3. 仅保留时长 `>= MIN_STABLE_NOTE_SEC`（= 0.150 秒）的片段成音；短于此的片段**丢弃**（不合并、不补零、不产生行）。
   4. 每音一行：`onset_sec` = 片段首帧时间（秒，以 `samples[0]` 为 0.0，= 帧索引 × `pitch_hop_length` ÷ `sample_rate`）；`f0_hz` = 片段内 `voiced == 1` 帧的 `f0_hz` **中位数**（Hz，绝对音高，不 chroma 化）；`rms` = 片段在时间上覆盖的 `rms` 帧的**中位数**（线性 RMS）。时间覆盖口径：`rms` 帧索引 `j` 满足 `j × rms_hop_length` 落在 `[片段起始样本, 片段结束样本)` 内。
   5. 输出行按 `onset_sec` **升序**排列。
-- **边界**：`pitch` 为空或无任何满足时长阈值的片段 ⇒ 返回形状 `(0, n_fields)` 的空数组，不抛异常。`rms` 为空 ⇒ 抛 `ErrorCode.CORE_BUILD_FAILED`（见 §5），**不得**用 0 或该片段外数据填充。片段中位数恰好落在两帧之间 ⇒ 取两值算术平均（`numpy.median` 默认口径，不插值到其它值）。
+- **边界**：★★ **本版更正（第三轮盲审 B 的 BLOCK-8）：原文「`rms` 为空 ⇒ 抛 `CORE_BUILD_FAILED`」与本文件 INV-103-12 及 §8 判据 4 互斥，已按下述优先级改写。** ★★
+
+  判定**按序**，命中即停：
+
+  | 序 | 条件 | 行为 |
+  | --- | --- | --- |
+  | 1 | `pitch` 为空（0 行）**或**无任何满足时长阈值的片段 | 返回 `(0, n_fields)` 空数组，**不检查 `rms`** |
+  | 2 | `pitch` 非空但 `rms` 为空 | 抛 `ErrorCode.CORE_BUILD_FAILED` |
+
+  **为什么第 1 条不检查 `rms`**：`pitch` 为空意味着**根本没有片段**，
+  而 `rms` 只在"为每个片段取中位数"时才被用到 —— 无从取片段时，
+  `rms` 的形状与内容**与结果无关**。
+  若此时仍要求抛错，就会出现"输入是纯静音（合法）却报 `CORE_BUILD_FAILED`"
+  的荒谬结果，且与本文件 §5 表格「纯静音输入 ⇒ 降级为空结果（合法输入）」
+  直接冲突。
+
+  **为什么第 2 条要抛**：有音却无能量帧 ⇒ 数据面自相矛盾，
+  属显式失败（宪章 §5.6 禁止静默降级）。
+
+  **不得**用 0 或该片段外数据填充。片段中位数恰好落在两帧之间 ⇒ 取两值算术平均（`numpy.median` 默认口径，不插值到其它值）。
 - **不变量**：输出无 NaN、无 inf；`onset_sec` 严格递增（升序，且因片段互不重叠而不相等）；每行 `f0_hz > 0.0`；每行对应的片段时长 `>= 0.150` 秒；输出行数 `<=` `pitch` 中 `voiced == 1` 的帧数。
 
 ## 5 · 失败语义
@@ -203,7 +240,7 @@
 | INV-103-9 | `notes` 只对 `voiced` 且连续时长 `>= MIN_STABLE_NOTE_SEC` 的片段成音 | `assert (np.diff(notes[:,0]) > 0).all()`；`assert notes.shape[0] <= (pitch[:,1]==1).sum()`；对每个 `onset_sec` 断言对应片段帧数 × hop ÷ sr `>= MIN_STABLE_NOTE_SEC` |
 | INV-103-10 | `notes` 行按 `onset_sec` 升序且无重复 | `assert (np.diff(notes[:,0]) > 0).all()` |
 | INV-103-11 | 输出不含 NaN / inf（任何端口、任何输入） | `assert not np.isnan(out).any() and not np.isinf(out).any()`，对 `pitch` / `rms` / `chroma` / `notes` 四个输出各断言一次 |
-| INV-103-12 | 空输入返回空数组而非抛异常 | `assert materialize_pitch(np.zeros(0, np.float32), sr).shape == (0, len(FIELD_LAYOUTS['pitch']))`；`assert materialize_rms(np.zeros(0, np.float32)).shape == (0,)`；`assert materialize_chroma(np.zeros(0, np.float32)).shape == (0, 12)`；`assert materialize_notes(np.zeros((0, len(FIELD_LAYOUTS['pitch'])), np.float32), np.zeros(0, np.float32), sr).shape == (0, len(FIELD_LAYOUTS['notes']))` |
+| INV-103-12 | 空输入返回空数组而非抛异常 | `assert materialize_pitch(np.zeros(0, np.float32), sr).shape == (0, len(FIELD_LAYOUTS['pitch']))`；`assert materialize_rms(np.zeros(0, np.float32)).shape == (0,)`；`assert materialize_chroma(np.zeros(0, np.float32), sr).shape == (0, 12)`；`assert materialize_notes(np.zeros((0, len(FIELD_LAYOUTS['pitch'])), np.float32), np.zeros(0, np.float32), sr).shape == (0, len(FIELD_LAYOUTS['notes']))` |
 
 ## 7 · 边界（明确不做）
 
@@ -246,7 +283,7 @@ sr = AUDIO.sample_rate
 z = np.zeros(0, np.float32)
 assert f.materialize_pitch(z, sr).shape == (0, len(L['pitch']))
 assert f.materialize_rms(z).shape == (0,)
-assert f.materialize_chroma(z).shape == (0, 12)
+assert f.materialize_chroma(z, sr).shape == (0, 12)
 assert f.materialize_notes(np.zeros((0, len(L['pitch'])), np.float32), z, sr).shape == (0, len(L['notes']))
 q = np.zeros(sr, np.float32)
 assert not np.isnan(f.materialize_pitch(q, sr)).any()
@@ -271,9 +308,26 @@ vo = p[p[:, 1] == 1]
 assert len(vo) > 0 and abs(np.median(vo[:, 0]) - 440.0) < 5.0
 r = f.materialize_rms(sig)
 assert (r >= 0.0).all() and r.max() <= 1.0 and abs(r.max() - 0.4/np.sqrt(2)) < 0.02
-c = f.materialize_chroma(sig)
+# ★ 更正（⑲ 检查发现）：原写 `f.materialize_chroma(sig)` ——
+#   本版签名已加 sample_rate（BLOCK-9），漏传即 TypeError。
+c = f.materialize_chroma(sig, sr)
 assert c.shape[1] == 12
 assert np.allclose(np.linalg.norm(c, ord=np.inf, axis=1)[np.linalg.norm(c, ord=np.inf, axis=1) > 0], 1.0)
+
+# ★★ 新增判据（⑳ 执行发现：原先**没有任何判据**能抓住 sr 用错）★★
+#   盲审 B 指出：BLOCK-9 的修复只落到骨架签名上，
+#   §8 里没有任何断言能在 sr 传错时变红 —— 那是"能写但测不出"。
+#   下面用**已知音高**的正弦做正向判据：若 sr 不是 44100，
+#   pitch class 会整体错位，此断言立刻失败。
+#   实测（sr=1 时）：440 Hz → bin 4 (E)，而正确是 bin 9 (A)。
+_names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+for _f0, _want in ((440.00, 'A'), (261.63, 'C'), (659.26, 'E')):
+    _t = np.arange(sr, dtype=np.float64) / sr
+    _tone = np.sin(2 * np.pi * _f0 * _t).astype(np.float32)
+    _cc = f.materialize_chroma(_tone, sr)
+    _got = _names[int(np.argmax(_cc.mean(axis=0)))]
+    assert _got == _want, (_f0, 'expected', _want, 'got', _got, '—— sr 用错了吗？')
+print('chroma pitch-class 正确（440→A / 261.63→C / 659.26→E）')
 n = f.materialize_notes(p, r, sr)
 assert n.shape[1] == len(__import__('harmonica_eval.contract', fromlist=['x']).FIELD_LAYOUTS['notes'])
 assert (np.diff(n[:, 0]) > 0).all() if n.shape[0] > 1 else True

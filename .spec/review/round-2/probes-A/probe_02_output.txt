@@ -1,0 +1,31 @@
+n_ports            = 12
+n_distinct_keys    = 7
+SPEC CLAIM         = 7  -> MATCH
+
+  ('core.align', 'index', ('warp_point', 'axis'), <TimelineBasis.REFERENCE: 'REFERENCE'>)
+      -> ['warp_path']
+  ('core.surface', 'amplitude', ('sample',), <TimelineBasis.REFERENCE: 'REFERENCE'>)
+      -> ['pcm.mapped.reference', 'pcm.mapped.practice']
+  ('core.surface', 'amplitude', ('sample',), <TimelineBasis.WARPED: 'WARPED'>)
+      -> ['pcm.warped.practice']
+  ('core.features', 'hz', ('frame', 'field'), <TimelineBasis.REFERENCE: 'REFERENCE'>)
+      -> ['pitch.reference', 'pitch.practice']
+  ('core.features', 'rms', ('frame',), <TimelineBasis.REFERENCE: 'REFERENCE'>)
+      -> ['rms.reference', 'rms.practice']
+  ('core.features', 'chroma', ('frame', 'bin'), <TimelineBasis.REFERENCE: 'REFERENCE'>)
+      -> ['chroma.lowres.reference', 'chroma.lowres.practice']
+  ('core.features', 'index', ('note', 'field'), <TimelineBasis.REFERENCE: 'REFERENCE'>)
+      -> ['notes.reference', 'notes.practice']
+
+--- claimed table in FILE-104 §4.4, transcribed ---
+claimed key                                                            in actual?   claimed-ports-vs-actual
+('core.align', 'index', ('warp_point', 'axis'), <TimelineBasis.REFERENCE: 'REFERENCE'>) True         ['warp_path'] vs ['warp_path'] OK
+('core.features', 'hz', ('frame', 'field'), <TimelineBasis.REFERENCE: 'REFERENCE'>) True         ['pitch.practice', 'pitch.reference'] vs ['pitch.practice', 'pitch.reference'] OK
+('core.features', 'rms', ('frame',), <TimelineBasis.REFERENCE: 'REFERENCE'>) True         ['rms.practice', 'rms.reference'] vs ['rms.practice', 'rms.reference'] OK
+('core.features', 'chroma', ('frame', 'bin'), <TimelineBasis.REFERENCE: 'REFERENCE'>) True         ['chroma.lowres.practice', 'chroma.lowres.reference'] vs ['chroma.lowres.practice', 'chroma.lowres.reference'] OK
+('core.features', 'index', ('note', 'field'), <TimelineBasis.REFERENCE: 'REFERENCE'>) True         ['notes.practice', 'notes.reference'] vs ['notes.practice', 'notes.reference'] OK
+('core.surface', 'amplitude', ('sample',), <TimelineBasis.REFERENCE: 'REFERENCE'>) True         ['pcm.mapped.practice', 'pcm.mapped.reference'] vs ['pcm.mapped.practice', 'pcm.mapped.reference'] OK
+('core.surface', 'amplitude', ('sample',), <TimelineBasis.WARPED: 'WARPED'>) True         ['pcm.warped.practice'] vs ['pcm.warped.practice'] OK
+
+ALL 7 CLAIMED ROWS MATCH ACTUAL: True
+actual keys NOT in claimed table: []

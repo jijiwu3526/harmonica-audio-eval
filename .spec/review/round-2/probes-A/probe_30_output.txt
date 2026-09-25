@@ -1,0 +1,71 @@
+=== actual profile.PORTS (12) ===
+port_id                    units      dims                   elem     basis      hop    produced_by
+warp_path                  index      ('warp_point', 'axis') int32    REFERENCE  0      core.align
+pcm.mapped.reference       amplitude  ('sample',)            float32  REFERENCE  0      core.surface
+pcm.mapped.practice        amplitude  ('sample',)            float32  REFERENCE  0      core.surface
+pcm.warped.practice        amplitude  ('sample',)            float32  WARPED     0      core.surface
+pitch.reference            hz         ('frame', 'field')     float32  REFERENCE  2048   core.features
+pitch.practice             hz         ('frame', 'field')     float32  REFERENCE  2048   core.features
+rms.reference              rms        ('frame',)             float32  REFERENCE  256    core.features
+rms.practice               rms        ('frame',)             float32  REFERENCE  256    core.features
+chroma.lowres.reference    chroma     ('frame', 'bin')       float32  REFERENCE  2048   core.features
+chroma.lowres.practice     chroma     ('frame', 'bin')       float32  REFERENCE  2048   core.features
+notes.reference            index      ('note', 'field')      float32  REFERENCE  0      core.features
+notes.practice             index      ('note', 'field')      float32  REFERENCE  0      core.features
+
+=== FILE-004 §4.7 table rows (as written) ===
+  230: ### §4.7 `PORTS: tuple[PortSpec, ...]` —— 12 个端口全表 ★
+  231: 
+  232: 类型写死为 **`tuple[PortSpec, ...]`**，**不是 `dict`**。这是封闭端口清单的载体，长度**恰好 12**，顺序为下表自上而下。
+  233: 
+  234: ★★ **真实踩过的坑**：有工具按 `dict` 读 `PROFILE.PORTS`（例如执行 `PORTS.items()` / `PORTS["pitch.reference"]` / `PORTS.get(...)`），结果**整个端口信号为空** —— 遍历得到的是 `PortSpec` 对象而非键，取值全部落空，且**不报错**。按 `port_id` 查询必须用 `PORT_INDEX`（`dict[str, PortSpec]`），不得用 `PORTS`。
+  235: 
+  236: | # | `port_id` | `units` | `dimensions` | `field_names` | `element_type` | `timeline_basis` | `hop_length` | `produced_by` | 存在理由（`rationale` 要点） |
+  237: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  238: | 1 | `warp_path` | `index` | `("warp_point","axis")` | `("reference_frame","practice_frame")` | `int32` | `REFERENCE` | `0` | `core.align` | 对齐的唯一产物。实测仅 165 KB（120 s），却是其余全部端口的生成依据 —— 相对 DTW 代价矩阵是 1/5300。 |
+  239: | 2 | `pcm.mapped.reference` | `amplitude` | `("sample",)` | `()` | `float32` | `REFERENCE` | `0` | `core.surface` | 逃生口甲：算法永远能拿到参考 PCM 自行做特有预处理，因此 profile 只决定「快不快」，不决定「能不能」。 |
+  240: | 3 | `pcm.mapped.practice` | `amplitude` | `("sample",)` | `()` | `float32` | `REFERENCE` | `0` | `core.surface` | 逃生口乙：练习演奏保留源时间。节奏类指标**只能**在这条轴上算 —— 用 warped 轴报抢拍拖拍是构造性错误（SPEC §5.5）。 |
+  241: | 4 | `pcm.warped.practice` | `amplitude` | `("sample",)` | `()` | `float32` | `WARPED` | `0` | `core.surface` | 时间归一化后的练习演奏，与参考等长。★ 更正：`pitch` 与 `dynamics` 都**没有**使用它（两者走的都是 `notes.*` / `rms.*`，见 `algorithms.ALGORITHMS` 的 `required_ports`）。它当前**无算法消费**；保留的真实理由是数据面保证：算法永远能拿到时间归一化后的 PCM 自行做特有预处理。 |
+  242: | 5 | `pitch.reference` | `hz` | `("frame","field")` | `("f0_hz","voiced","confidence")` | `float32` | `REFERENCE` | `2048` | `core.features` | 逐帧 f0 + voiced 标志 + 置信度（field 维）。预生成是因为它是音准算法的**直接**输入，现算不划算。 |
+  243: | 6 | `pitch.practice` | `hz` | `("frame","field")` | `("f0_hz","voiced","confidence")` | `float32` | `REFERENCE` | `2048` | `core.features` | 练习侧音高曲线，与参考同轴（`REFERENCE`），即两侧都保留各自的源时间、都没有被拉伸对齐。★ 修正：原文「两条曲线可以逐帧直接相减得到音分误差」**不成立** —— `REFERENCE` 只保证各自未被归一化，**不保证两侧帧数相等**。正确路径是用 `notes.*` 的 `onset_sec` 按音配对后再比较。 |
+  244: | 7 | `rms.reference` | `rms` | `("frame",)` | `()` | `float32` | `REFERENCE` | `256` | `core.features` | 逐帧 RMS。力度对比需要它。★ §20 盲审修正：真值**不是** MIDI velocity（数据面里没有 MIDI 通路：ingest 只解码音频，features 从音频派生）。故力度指标是「练习相对参考的能量差」，不是「相对乐谱的绝对力度差」。 |
+  245: | 8 | `rms.practice` | `rms` | `("frame",)` | `()` | `float32` | `REFERENCE` | `256` | `core.features` | 同上。与参考同轴以便逐帧比较。 |
+  246: | 9 | `chroma.lowres.reference` | `chroma` | `("frame","bin")` | `("C","C#","D","D#","E","F","F#","G","G#","A","A#","B")` | `float32` | `REFERENCE` | `2048` | `core.features` | 对齐的输入。保留在数据面里是为了**可复现**：审查者能用它重跑对齐，验证 `warp_path` 不是凭空来的。**明确不作为评分依据**（chroma 是八度不变的）。 |
+  247: | 10 | `chroma.lowres.practice` | `chroma` | `("frame","bin")` | 同第 9 行（12 个音名，顺序完全相同） | `float32` | `REFERENCE` | `2048` | `core.features` | 同上，练习侧。 |
+  248: | 11 | `notes.reference` | `index` | `("note","field")` | `("onset_sec","f0_hz","rms")` | `float32` | `REFERENCE` | `0` | `core.features` | 参考侧逐音摘要（起音时刻/音高/能量）。它让算法能按**音**而不是按**帧**组织结果，从而输出「第 7 个音偏低 40 音分」这种可定位的结论。 |
+  249: | 12 | `notes.practice` | `index` | `("note","field")` | `("onset_sec","f0_hz","rms")` | `float32` | `REFERENCE` | `0` | `core.features` | ★ 盲审补齐的对称项。练习侧逐音摘要，与 `notes.reference` **同轴**（都在源时间网格上）。没有它，「按音对齐」在练习侧**无索引可用** —— `dynamics` 只能退而用「WARPED 轴」当代理，而那是一个无法满足的约束（数据面里没有 WARPED 轴的 rms）。正确机制是**按音配对**，不是按轴配对。 |
+  250: 
+  251: **端口清单是封闭的**：不得新增、不得删除、不得修改任何 `port_id`。上表 12 行即全部。清单外端口**永不存在**；端口对称性唯一例外是 `pcm.warped.*` **刻意只有练习侧**（参考无需被拉伸到自己）。
+  252: 
+  253: `notes.*` 的 `port_id` 不对称历史（★ 必须理解，否则会「顺手改回去」）：第一版只有 `notes.reference`，没有 `notes.practice`，而 `pitch` / `timing` / `dynamics` **三者都声称**「可定位到第几个音」。这是端口表的**结构性缺陷**，不是某个算法少声明了一个端口 —— `pitch.py` 说「产出逐音误差（音分，可定位到第几个音）」却无从知道第几个；`timing.py` 声明了 `notes.reference`（唯一声明者）；`dynamics.py` 说「逐音能量差」而练习侧无索引可用。两个独立盲审模型各自复现了后果（`dynamics` 的轴自相矛盾），根因在此：**「按音比较」这个能力原先只有一半。** 补齐 `notes.practice` 是修复，不得回退。
+  254: 
+  255: ### §4.8 `PORT_INDEX: dict[str, PortSpec]`
+  256: 
+  257: - **输入**：无（模块级推导值）。
+  258: - **输出**：`dict[str, PortSpec]`，键为 12 个 `port_id`，值为对应 `PortSpec` 实例。构造口径**逐字**为 `{p.port_id: p for p in PORTS}`。
+  259: - **算法口径**：字典推导，保持 `PORTS` 的插入顺序（Python 3.7+ 保证）。键集合 == `{p.port_id for p in PORTS}`，`len(PORT_INDEX) == 12`。
+  260: - **边界**：空输入不适用。若 `PORTS` 存在重复 `port_id`，字典推导会**静默取后者**（不抛异常）—— 故重复检测必须在 `assert_profile_integrity()` 里做，且该调用在 `PORT_INDEX` 之后执行前已 import 期生效。
+  261: - **不变量**：`set(PORT_INDEX) == set(PORTS[i].port_id for i in range(12))`；`PORT_INDEX["warp_path"].produced_by == "core.align"`；`surface.py` 用它来驱动生成与校验。按 `port_id` 查询**一律**走这里，不得遍历 `PORTS`。
+  262: 
+  263: ### §4.9 `TimelineBasis` 的语义（★ 逐字口径）
+  264: 
+  265: `TimelineBasis` 由 `contract` 定义，`profile` 只使用其两个成员的语义如下。**必须逐字遵守，不得外推**：
+  266: 
+  267: - **`TimelineBasis.REFERENCE`**：只表示**保留源时间、未归一化**。它**不**表示两侧帧号一一对应，**不**表示两侧帧数相等，**不**表示两端口可直接逐帧相减。本 profile 中 11 个端口使用它，其中 `pitch.reference` 与 `pitch.practice` 虽**同轴**（都在各自的源时间网格上）却因参考与练习是两段独立录音、帧数 `= 各自时长 / pitch_hop_length`（默认不同）而**不可逐帧对齐**。实测：本数据集 01 的全部 wav 恰好都是 72.802 s（1568 帧），把该缺陷掩盖了；换一首时长不同的练习曲即失效。正确路径是用 `notes.*` 的 `onset_sec` **按音配对**后再比较。
+  268: - **`TimelineBasis.WARPED`**：表示时间归一化后的轴。本 profile 中**仅** `pcm.warped.practice` 使用它。参考侧**没有**对应的 WARPED 端口（参考无需被拉伸到自己），故数据面里**不存在**任何 WARPED 轴的 `rms` / `pitch` / `notes`。凡要求「在 WARPED 轴上按帧比较」的约束都是**无法满足的约束**，必须改写为按音配对。
+  269: - **`pcm.mapped.practice` 与 `pcm.warped.practice` 的时间基准对比（★ 强制）**：`pcm.mapped.practice` 是 `REFERENCE`，`pcm.warped.practice` 是 `WARPED`（逐字见第 3、4 行 `timeline_basis=`）。因此 `pcm.mapped.practice` 是「练习演奏保留源时间」，节奏类指标**只能**在它这条轴上算；在 warped 轴上报抢拍拖拍是**构造性错误**（SPEC §5.5）。
+  270: 
+  271: ### §4.10 `assert_profile_integrity() -> None`
+  272: 
+  273: - **输入**：无参数。读取模块级 `PORTS`（闭包引用）与 `contract` 的 `CORE_REQUIRED_PORTS`、`FIELD_LAYOUTS`、`UNITS_VOCABULARY`。
+  274: - **输出**：`None`（全部通过时）。**失败即抛，不返回布尔值** —— 配置错误不该被忽略。
+  275: - **算法口径**：docstring 声明「检查六件事」，实际实现 8 项检查（编号 1–5、7、8，其中第 7、8 项标注了修正来源）。逐项口径写死如下，顺序即执行顺序，任一项抛出即中止，后续检查不执行：
+  276: 
+  277: | 序 | 检查 | 口径（逐字） | 失败时抛出的消息要点 |
+  278: | --- | --- | --- | --- |
+  279: | 1 | 端口清单封闭：无重复 `port_id` | `ids = [p.port_id for p in PORTS]`；`duplicates = {i for i in ids if ids.count(i) > 1}`；非空即抛 | `端口清单存在重复: {sorted(duplicates)}` |
+  280: | 2 | 逃生口存在：`CORE_REQUIRED_PORTS` 全部被声明 | `missing = [p for p in CORE_REQUIRED_PORTS if p not in ids]`；非空即抛 | `违反数据面保证（本仓自定）：缺少必需端口 {missing}。任何 profile 都必须含两份对齐 PCM，否则算法无法自行做特有预处理。` |
+  281: | 3 | 每个端口都有非空 `rationale` | `no_rationale = [p.port_id for p in PORTS if not p.rationale.strip()]`；非空即抛（故纯空白也算空） | `以下端口未说明存在理由: {no_rationale}。端口清单封闭的前提是「每个端口都能回答为什么需要它」。` |
+  282: | 4 | 多维度端口的字段顺序与 `FIELD_LAYOUTS` 一致 | 对每个 `spec`：若 `len(spec.dimensions) <= 1` 则要求 `not spec.field_names`（声明了即抛）；否则取 `prefix = spec.port_id.split(".")[0]`，查 `FIELD_LAYOUTS.get(prefix)`，为 `None` 即抛，再要求 `tuple(spec.field_names) == tuple(expected)`，不等即抛 | 单维：`端口 {port_id} 是单维，不应声明 field_names`；缺定义：`端口 {port_id} 是多维，但 contract.FIELD_LAYOUTS 中没有 '{prefix}' 的字段定义。多维端口必须有明确字段顺序，否则下游会静默错位读取。`；不一致：`端口 {port_id} 的 field_names={...} 与契约定义的 {...} 不一致。` |
+  283: | 5 | 帧类端口必须声明 `hop_length`，非帧类必须留 0 | 对每个 `spec`：`is_frame_based = "frame" in spec.dimensions`；若 `is_frame_based and spec.hop_length <= 0` 即抛；若 `not is_frame_based and spec.hop_length != 0` 即抛 | 前者：`端口 {port_id} 含 'frame' 维度，但未声明 hop_length。read(time_range) 的单位是秒，没有帧移就无法唯一换算出帧号 —— 实现者只能猜，而猜错不会报错，只会静默返回错误时间窗的数据。`；后者：`端口 {port_id} 不含 'frame' 维度，但声明了 hop_length={...}。非帧类端口声明帧移会产生误导（读的人会以为它也有帧结构）。` |
+  284: | 6 | `units` 必须在受控词表内（G10 修正） | 对每个 `spec`：`spec.units not in UNITS_VOCABULARY` 即抛 | `端口 {port_id} 的 units='{...}' 不在 contract.UNITS_VOCABULARY 内。\n合法取值：{sorted(UNITS_VOCABULARY)}\n若确实需要新单位，先加进词表 —— 否则下游按字符串相等判断端口语义时会静默漏配。` |

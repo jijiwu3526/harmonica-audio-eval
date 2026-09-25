@@ -76,6 +76,15 @@
   - `math` —— `math.prod` 计算 `element_count`
   - `typing` —— `Mapping`、`Sequence`、`Any`（`typing.Mapping` / `typing.Sequence` 用于函数签名）
   - `collections.abc` —— `Mapping as MappingABC`（运行期 `isinstance` 检查 `generate_all_ports` 的返回值）
+  - `types` —— `types.MappingProxyType`（§4.2 `build_descriptor` 用它把描述符映射包成只读）
+
+    ★★ **本版补入（第三轮盲审 A 的 FINDING-9）：上一版漏了 `types`。** ★★
+
+    本节开头声明「本清单必须**穷举**，不许出现「等」「之类」」，
+    但 §4.7 第 12 步**强制**要求 `import types`，而它不在清单里；
+    §4.7 还自我豁免说「这是标准库，属于 §3 允许清单的补充」——
+    那句话**否定了 §3 的穷举性**，两份表述互斥。已把 `types` 写入清单，
+    并删除 §4.7 的自我豁免表述。
 - 第三方：
   - `numpy` —— 数组操作（`np.asarray` / `np.ndarray` / `np.dtype` / `np.product` 的替代）
   - `numpy.typing` —— 仅用于 `npt.NDArray` 类型标注
@@ -84,12 +93,31 @@
     `AlgorithmDataContract`、`AudioFormat`、`BufferView`、`PortDescriptor`、
     `SurfaceManifest`、`ContractViolation`、`CoreBuildError`、`ErrorCode`；
     以及 **2 个模块级常量/表**：`FIELD_LAYOUTS`、`CONTENT_HASH_MAGIC`。
-  - `harmonica_eval.profile` 的 **6 个名字**：
+  - `harmonica_eval.profile` 的 **7 个名字**：
     `PORTS`、`PORT_INDEX`、`BUDGET`、`AUDIO`、`ALIGN`、`MATERIALIZE`、`PROFILE_VERSION`。
+
+    ★★ **本版更正：原写「6 个名字」，而下方列了 7 个。** ★★
+
+    **原写**：「`harmonica_eval.profile` 的 **6 个名字**：」。
+    **为什么错**：紧随其后的列举共 **7** 个反引号名字 —— `PORTS`、`PORT_INDEX`、
+    `BUDGET`、`AUDIO`、`ALIGN`、`MATERIALIZE`、`PROFILE_VERSION`，
+    数字与列举差 1；实现者按数字写 `__all__`、按列举写 import，
+    会得到两份不一致的清单，而本清单必须**穷举**（见下方 ★）。
+    **改成**：**7 个名字**，与本行列举的 7 条一一对应。
   - `profile.PortSpec.produced_by` 指名的 core 端口生产模块，**只能**通过
     `importlib.import_module` 按其**点分模块路径字符串**动态取得，
-    或由 `harmonica_eval/core/` 内的直接模块 import 取得；取到的可调用对象签名约定为
-    `(reference, practice, sample_rate, warp_path) -> NDArray`。
+    或由 `harmonica_eval/core/` 内的直接模块 import 取得；取到的可调用对象的实参
+    见 §4.4 的逐结构键实参表。
+
+    ★★ **本版更正：删去已作废的四参签名约定。** ★★
+
+    **原写**：「取到的可调用对象签名约定为
+    `(reference, practice, sample_rate, warp_path) -> NDArray`」。
+    **为什么错**：§4.4 已把该四参约定整段标为「**上一版原文（已作废）**」，
+    并实测指出三个生产者模块的实际签名（1–3 参）与它**没有一个对得上**，
+    且该约定里既无 `port_id` 也无 `side`，无法区分同一生产者的两侧端口。
+    留在 §3 等于给实现者两份互斥的调用约定。
+    **改成**：不在此处复述签名，改为指向 §4.4 的逐结构键实参表（唯一权威口径）。
 
 **禁止 import**：
 
@@ -118,8 +146,22 @@
 - 禁止 import 任何日志与配置库：`logging`、`warnings`、`configparser`、`dotenv`。
 - 禁止 import 任何测试库：`pytest`、`unittest`、`hypothesis`、`numpy.testing`。
 - 禁止 import `time`、`datetime`（时间戳会让 `content_hash` 与构建结果不可复现）。
-- 禁止在模块顶层执行任何非声明语句（除 `__all__` 赋值外，不得有函数调用、
-  常量计算、文件读取）。
+- 禁止在模块顶层执行任何非声明语句（例外仅两类：`__all__` 赋值，以及 §4.0
+  **要求**的列号常量核验断言 `assert FIELD_LAYOUTS["notes"][0] == "onset_sec"`
+  与 `assert FIELD_LAYOUTS["warp_path"][0] == "reference_frame"`；
+  除此之外不得有函数调用、常量计算、文件读取）。
+
+  ★★ **本版更正：原例外只列 `__all__` 赋值，与 §4.0 的强制断言互斥。** ★★
+
+  **原写**：「除 `__all__` 赋值外，不得有函数调用、常量计算、文件读取」。
+  **为什么错**：§4.0 明文**要求**「实现**必须**在模块导入时用一次断言核验」
+  `assert FIELD_LAYOUTS["notes"][0] == "onset_sec"` 与
+  `assert FIELD_LAYOUTS["warp_path"][0] == "reference_frame"`，
+  「核验失败即 `ImportError` 级别缺陷，**不得**静默继续」。
+  按原句字面执行，这两条顶层断言本身就落在被禁止的「非声明语句」里 ——
+  写则违反本行，不写则违反 §4.0，实现者被卡死。
+  **改成**：把例外从「`__all__` 赋值」扩展为「`__all__` 赋值 + §4.0 要求的
+  列号常量核验断言」，断言原文照抄 §4.0，不得增删、不得改成别处的调用。
 
 ★ 本清单必须**穷举**，不许出现「等」「之类」。
 
@@ -157,12 +199,20 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
 
 ---
 
-### 4.1 `port_prefix(port_id: str) -> str`
+### 4.0.1 冻结数值核验清单（§4.0 的续，非独立节）
 
-`port_prefix(port_id)` 的定义（本文件内部函数，唯一口径）：
+★★ **本版更正（第三轮盲审 A 的 FINDING-12）：本节原编号为 `### 4.1`，
+与 §4.8 的 `### 4.1`… 重号，且两次标题逐字相同，导致
+「见 §4.1」这类交叉引用无法判定指向。已改为 §4.0.1。** ★★
+
+**`port_prefix` 的唯一口径**（本文件内部助手，**不是**骨架里的公开符号 ——
+实测 `core.surface.port_prefix` 不存在；它由本文件自行定义）：
+
 取 `port_id` 中**第一个 `.` 之前**的子串；若不含 `.`，则返回整个 `port_id`。
 例：`"pcm.mapped.reference"` → `"pcm"`；`"warp_path"` → `"warp_path"`；
 `"pitch.practice"` → `"pitch"`。
+
+**以下是本文件必须在导入期核验的冻结数值**（§4.0 要求的断言，见 §3 的例外条款）：
 
   - 采样率取值：`profile.AUDIO.sample_rate` 必须等于 **44100**（Hz）。
   - 时长上限：`profile.AUDIO.max_duration_sec` 必须等于 **120.0**（秒）。
@@ -209,6 +259,33 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
   | `dimensions` | `tuple(PORT_INDEX[port_id].dimensions)`，原样拷贝为 `tuple`（不得截断、不得重排） |
   | `shape` | `tuple(int(x) for x in data.shape)` —— 必须转成 Python `int`，**不得**留 `numpy.int64`（那会破坏 dataclass 的 `==` 与哈希） |
   | `units` | `PORT_INDEX[port_id].units`，原样 |
+
+  #### ★ `shape` 的来源：运行期事实，不是静态配置（负责人裁定 2026-09-24）
+
+  **`PortDescriptor.shape` 在 `profile.PortSpec` 中没有对应字段，这是有意的。**
+
+  理由：`shape` 依赖音频实际时长。例如 `chroma.lowres.*` 的
+  `dimensions=('frame','bin')`、`hop_length=2048`，其帧数为
+  `ceil(n_samples / 2048)` —— 而 `n_samples` **只存在于 C2 内部**，
+  静态 profile 里没有。**把它写进 `PortSpec` 等于把运行时事实伪装成静态配置。**
+
+  **因此裁定：`shape` 由 C1 向 C2 询问获得，不从 `PortSpec` 静态推导。**
+
+  **载体已经存在，不新增任何操作**（`FILE-003` §4.15「port 上不得再增第三个操作」
+  继续有效）：
+
+  ```
+  Surface.manifest() -> SurfaceManifest.ports: Mapping[str, PortDescriptor]
+  ★ C1 只需 manifest()，即可拿到每个端口的 shape
+  ```
+
+  ★ **实现约束**：
+  - `build_descriptor()` 必须用**实际数组的 `data.shape`** 填充（见上表），**不得**用
+    `dimensions` 里的语义名去反推尺寸 —— 语义名不含尺寸（见 `contract.py` §G6 修正）
+  - C1 在 `snapshot()` 投影 `port_summary` 时，`shape` 直接取自 `manifest()`，
+    **不得**自行推导
+  - 若某端口尚未生成数据（`manifest().sealed` 为 False），
+    **不得**填一个占位 shape 冒充 —— 按既有失败路径显式失败
   | `field_names` | 见下方「field_names 三条规则」 |
   | `timeline_basis` | `PORT_INDEX[port_id].timeline_basis`，**必填**，不得依赖默认值 |
   | `hop_length` | `PORT_INDEX[port_id].hop_length`，原样（含 `0`） |
@@ -327,17 +404,222 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
      两份必须一致）。
   3. 每个端口的生成者由 `PortSpec.produced_by` 指名。实现**不得**在本文件内
      另写特征提取代码；只做一次查表调用。
-  4. 调用约定（**唯一**）：生成者可调用对象接收**位置参数 4 个**，
-     顺序为 `(reference, practice, sample_rate, warp_path)`，返回一个
-     `numpy.ndarray`。四个参数原样透传，**不得**做长度对齐、不得裁剪、
-     不得重采样、不得拼接。
+  4. **调用约定（★ 本版重写，上一版是错的，且不可满足）**
+
+     ★★ **上一版原文（已作废）**：
+     > 「调用约定（**唯一**）：生成者可调用对象接收**位置参数 4 个**，
+     > 顺序为 `(reference, practice, sample_rate, warp_path)`，返回一个
+     > `numpy.ndarray`。」
+
+     **为什么它不可满足**（实测，不是推演）：三个生产者模块的**实际签名**
+     与这个四参约定**没有一个对得上**：
+
+     ```
+     core.features.materialize_pitch (samples, sample_rate)          # 2 参
+     core.features.materialize_rms   (samples)                       # 1 参
+     core.features.materialize_chroma(samples, sample_rate)          # 2 参（BLOCK-9 修正）
+     core.features.materialize_notes (pitch, rms, sample_rate)       # 3 参，且要中间量
+     core.align.align                (reference, practice)           # 2 参
+     ```
+
+     三个不可满足点：
+     1. **参数个数**：约定要 4 个，实际 1–3 个。
+     2. **参数语义**：约定第 1 个是 `reference`，而 `materialize_*` 第 1 个是
+        `samples`（**单侧**的样本，不是两侧）。
+     3. **★ 最根本**：`pitch.reference` 与 `pitch.practice` 的 `produced_by`
+        **完全相同**（都是 `core.features`），而 `materialize_pitch` 一次只吃
+        **一侧**的 `samples`。四参约定里既没有 `port_id`、也没有 `side`，
+        所以**无法区分**这次调用是在为哪一侧、哪个端口生产。
+        `notes.*` 更严重 —— 它需要 `pitch` / `rms` 作**中间量**，
+        而中间量根本不在参数表里。
+
+     **本版冻结的正确约定**：`core.surface` 维护一张**显式的端口→生产者派发表**，
+     而不是把一个四参签名硬套到三个语义完全不同的模块上。
+
+     ★★ **第三版更正（P2 管线审查 F3）：派发表的键不得是端口 id 字面量。** ★★
+
+     上一版我写「键 = `port_id`」，并给了一张逐行写死端口 id 的表。
+     **那与 INV-104-1 直接互斥** —— 该不变量要求 `surface.py` 源码里
+     `"pcm.mapped"` / `"pitch."` / `"chroma."` / `"rms."` / `"notes."`
+     五个字面量的命中数为 **0**。按上一版写，8 个特征端口的分派无法实现。
+     （这条是我自己引入的，P2 审查抓到。）
+
+     **本版冻结的正确约定**：派发表用**结构键**，键取自 `PortSpec` 的字段，
+     **不是**端口名字面量。
+
+     | 项 | 规定 |
+     | --- | --- |
+     | 派发表的形态 | 模块级常量 `PRODUCER_DISPATCH: Mapping[tuple, Callable]`，**键 = `(produced_by, units, dimensions, timeline_basis)`**，值 = 真实的生产者可调用对象 |
+     | 为什么这个键 | 实测：该四元组在 12 个端口上给出 **7 个互异键**，恰好等于「生产者 × 产物种类」的个数；剩下 5 对靠**侧别后缀**区分（见下） |
+     | 键集合 | 必须**恰好**等于 `{(s.produced_by, s.units, s.dimensions, s.timeline_basis) for s in profile.PORTS}`（穷举，不得少、不得多） |
+     | 调用形态 | `PRODUCER_DISPATCH[_key(spec)](...)`，**按每个生产者自己的真实签名**传参（见下表） |
+     | 侧别 | 由 `port_id.rsplit(".", 1)[-1]` 取值：`"reference"` 喂参考样本、`"practice"` 喂练习样本。**这两个词不在 INV-104-1 的禁用字面量里**，可安全使用 |
+     | 中间量 | `notes.*` 依赖的 `pitch` / `rms`，取**同一次构建中已经产出的**中间量。**不得**重算 |
+     | 遍历顺序 | **必须**按 `PORTS` 元组的声明顺序；且 `notes.*` 排在 `pitch.*` / `rms.*` **之后**（依赖顺序，见下） |
+     | 自检 | 构建开始时断言 `set(PRODUCER_DISPATCH) == {_key(s) for s in profile.PORTS}`，不等 → `CoreBuildError(CORE_BUILD_FAILED)` |
+
+     **实测的 7 个结构键**（由 `profile.PORTS` 现算，不是手抄）：
+
+     | `(produced_by, units, dimensions, timeline_basis)` | 覆盖的端口 | 生产者 |
+     | --- | --- | --- |
+     | `("core.align", "index", ("warp_point","axis"), REFERENCE)` | `warp_path` | `core.align.align` |
+     | `("core.features", "hz", ("frame","field"), REFERENCE)` | `pitch.reference` / `pitch.practice` | `core.features.materialize_pitch` |
+     | `("core.features", "rms", ("frame",), REFERENCE)` | `rms.reference` / `rms.practice` | `core.features.materialize_rms` |
+     | `("core.features", "chroma", ("frame","bin"), REFERENCE)` | `chroma.lowres.reference` / `chroma.lowres.practice` | `core.features.materialize_chroma` |
+     | `("core.features", "index", ("note","field"), REFERENCE)` | `notes.reference` / `notes.practice` | `core.features.materialize_notes` |
+     | `("core.surface", "amplitude", ("sample",), REFERENCE)` | `pcm.mapped.reference` / `pcm.mapped.practice` | **纯转发入参**：`reference` / `practice` 原样登记 |
+     | `("core.surface", "amplitude", ("sample",), WARPED)` | `pcm.warped.practice` | **索引重排**：按 `warp_path` 第 1 列重排 `practice`（见下） |
+
+     > 注意 `pcm.mapped.*` 与 `pcm.warped.practice` 靠 **`timeline_basis`** 分开
+     > （REFERENCE vs WARPED）—— 这正是该字段存在的理由之一。
+
+     **冻结的派发语义（按结构键，实现者不得增删改）**：
+
+     下表**不写端口 id**（INV-104-1 禁止源码里出现那些字面量），
+     只写「结构键 → 生产者 → 实参怎么算」。侧别由后缀决定（见上表）。
+
+     | 结构键（见上表） | 生产者 | 实参 |
+     | --- | --- | --- |
+     | `core.align` 那一行 | `core.align.align` | `(reference, practice)` |
+     | `hz` + `("frame","field")` | `core.features.materialize_pitch` | `(该侧样本, sample_rate)` |
+     | `rms` + `("frame",)` | `core.features.materialize_rms` | `(该侧样本,)` |
+     | `chroma` + `("frame","bin")` | `core.features.materialize_chroma` | `(该侧样本, sample_rate)` |
+     | `index` + `("note","field")` | `core.features.materialize_notes` | `(同侧已产出的 pitch, 同侧已产出的 rms, sample_rate)` |
+     | `core.surface` + REFERENCE | **纯转发** | 入参 `reference` / `practice` 原样登记（零计算） |
+     | `core.surface` + WARPED | **索引重排** | 见 §4.4「索引重排的冻结口径」 |
+
+     > **「该侧样本」怎么取**：`side = port_id.rsplit(".", 1)[-1]`；
+     > `side == "reference"` → 参考样本，`side == "practice"` → 练习样本。
+     > `warp_path` 没有侧别后缀，它同时要两侧（唯一一个）。
+     >
+     > **「同侧已产出的」怎么取**：中间量存在 `generate_all_ports` 的局部
+     > dict 里。取用前断言该键已存在，否则 `CoreBuildError(CORE_BUILD_FAILED)`
+     > —— 这同时是依赖顺序的自检。
+     >
+     > ★★ **更正（第三轮盲审 B 的 BLOCK-10）：中间 dict 的键必须是
+     > `(结构键, side)` 二元组，不能是纯结构键。** ★★
+     >
+     > **为什么**：实测 12 个端口只映射到 **7 个互异结构键** ——
+     > 有 **5 对**端口的四元组**完全相同**：
+     >
+     > | 结构键 | 共用它的两个端口 |
+     > | --- | --- |
+     > | `core.surface` + amplitude + `("sample",)` + REFERENCE | `pcm.mapped.reference` / `pcm.mapped.practice` |
+     > | `core.features` + hz + `("frame","field")` | `pitch.reference` / `pitch.practice` |
+     > | `core.features` + rms + `("frame",)` | `rms.reference` / `rms.practice` |
+     > | `core.features` + chroma + `("frame","bin")` | `chroma.lowres.reference` / `chroma.lowres.practice` |
+     > | `core.features` + index + `("note","field")` | `notes.reference` / `notes.practice` |
+     >
+     > 若用纯结构键，后写的**练习侧**会覆盖**参考侧**。
+     > 而 `materialize_notes` 要「同侧已产出的 pitch」——
+     > 它会**静默拿到练习侧的音高去算参考侧的音符**，
+     > **不报错、不抛异常，产出错的数据面**。
+     > 这是"静默算错"，比"写不出来"危险得多。
+     >
+     > **冻结写法**：`buf[(struct_key, side)] = arr`，
+     > `side` 取自 `port_id.rsplit(".", 1)[-1]`（`warp_path` 无后缀，
+     > 它不进这个 dict，单独持有）。取用恒为 `buf[(struct_key, side)]`。
+
+     ★★ **`pcm.*` 三个端口的生产者 —— 已裁定（负责人 2026-09-24 批准）** ★★
+
+     **裁定结果**：`pcm.mapped.*` 是 **`ingest` 产物的纯转发**，由
+     `generate_all_ports` 直接登记，**不是重采样**；`pcm.warped.practice`
+     由 `core.surface` 按 `warp_path` 做**索引重排**（不是重采样）。
+     两条都落在 `profile` 冻结的 `produced_by="core.surface"` 之内 ——
+     **不改任何冻结配置**。
+
+     **为什么 `pcm.mapped.*` 是纯转发（实测依据）**：
+
+     `generate_all_ports(reference, practice, sample_rate, warp_path)` 的
+     `reference` / `practice` 两个入参，**就是阶段 1（INGEST）交给阶段 2 的
+     规范化 PCM**（见 `FILE-105-v1.md` 阶段 1→2 的传递）。
+     因此：
+
+     ```
+     pcm.mapped.reference  ≡  reference     # 同一个对象，零计算
+     pcm.mapped.practice   ≡  practice      # 同一个对象，零计算
+     ```
+
+     `profile.PORT_INDEX["pcm.mapped.*"].units == "amplitude"`、
+     `dimensions == ("sample",)`、`hop_length == 0` —— 全部与"按采样点索引的
+     原始 PCM"一致。**没有任何数值运算**，所以不构成重采样，
+     与 §7「本文件不实现任何重采样算法」**不冲突**。
+
+     **为什么 `pcm.warped.practice` 由本文件做索引重排**：
+
+     - 它必须「与参考**等长**」（`rationale` 原文），长度改变 ⇒ 必须动样本；
+     - 但它**当前没有任何算法消费**。算法清单不来自框架侧硬绑元组；当前
+       插件需求以装配期经 `algorithms.registry.Registry` 显式注册的
+       `PluginSpec.required_inputs` / `optional_inputs` 为权威，它们不含
+       `pcm.warped.practice`。它是**数据面保证**（`rationale` 已如实标注），
+       不是某个插件的必需输入；
+     - `align()` 只返回 `warp_path`（实测返回注解 `npt.NDArray`），
+       不产 PCM ⇒ 唯一持有 `warp_path` 又负责装配的地方就是本文件。
+
+     **索引重排的冻结口径**（唯一，实现者不得自选）：
+
+     ★★ **必须做两级换算：帧网格 → 采样点网格。** ★★
+
+     `warp_path` 是 DTW **帧**网格上的映射（行数 = 参考**帧数**），
+     而 `pcm.warped.practice` 的 `dimensions == ("sample",)`
+     —— 它是**采样点**序列，必须与参考的**采样点数**等长。
+     两者差 `ALIGN.hop_length` 倍（本 profile = **2048**）。
+
+     ```
+     hop = profile.ALIGN.hop_length          # 2048
+     n_ref_samples = len(reference)          # 参考采样点数
+     n_prac_samples = len(practice)
+
+     for i in range(n_ref_samples):
+         f_ref = i // hop                     # 该采样点落在哪个参考帧
+         f_ref = min(f_ref, len(warp_path) - 1)   # 末尾夹紧
+         f_prac = warp_path[f_ref, col]       # col = practice_frame 列号
+         j = f_prac * hop                     # 帧号 → 该帧起点的采样点
+         j = clip(j, 0, n_prac_samples - 1)
+         out[i] = practice[j]                 # 最近邻，不插值
+
+     结果长度 == n_ref_samples（与参考**采样点**等长）
+     ```
+
+     - **最近邻**，**不插值**：插值会引入本文件不该有的数值算法；
+       且 `warp_path` 本身已是整数帧号（`element_type == "int32"`）。
+     - `col` **必须**用 `FIELD_LAYOUTS["warp_path"].index("practice_frame")` 查，
+       **不得**硬编码 `1`。
+     - `hop` **必须**取 `profile.ALIGN.hop_length`，**不得**写死 `2048`，
+       **不得**用 `PORT_INDEX["warp_path"].hop_length`（那是 **0**）。
+     - 结果 dtype 必须 `float32`（与 `profile` 一致），且**必须 Seal**。
+
+     ★ **诚实记录（本版自查发现，两名审查者尚未报告）**：本段第一次写的时候，
+     我把结果长度写成 `n_ref_frames`（参考**帧数**），**少乘了 `hop`** ——
+     产出会比参考短 2048 倍，而 `dimensions == ("sample",)` 要求它按采样点计长。
+     这与 P2 审查的 F7（`warp_path` 的 `hop=0` 致换算恒为 0）是**同一族错误**：
+     都是把「帧网格」与「采样点网格」混为一谈。
+     我在同一处连犯两次，说明这个混淆点必须显式写进规格。
+
+     **失败语义**：`warp_path` 为空（0 行）而 `pcm.warped.practice` 非空
+     ⇒ `CoreBuildError(CORE_BUILD_FAILED)`，`detail` 说明长度无法确定。
+     **不得**用空数组冒充（静默降级，违反 §5.6）。
+
+     ★ **诚实记录（沿革）**：上一版我把这三行标成「★ 未决」，
+     并在实现指引里写「留空并抛 `CoreBuildError`」。**那个指引是错的** ——
+     `generate_all_ports` 是**一次性穷举全部端口**的，
+     任何一个端口抛异常都会让**整个数据面构建失败**，
+     于是 `pitch` / `dynamics` 也一起跑不起来。
+     我当时把「一个端口没生产者」误当成「一个端口失败」，
+     实际是「全部端口失败」。现按负责人裁定改为真实生产。
+     P2 审查（F2）指出「按规格数据面永远构建不成功」，**它是对的**。     ★ **依赖顺序（冻结）**：`PORTS` 元组的声明顺序**必须**保证
+     `pitch.*` / `rms.*` 出现在 `notes.*` **之前**，否则 `notes.*` 取不到中间量。
+     若 `PORTS` 的实际顺序不满足，实现**必须**先做一次拓扑排序
+     （依赖：`notes.<side>` ← `pitch.<side>`, `rms.<side>`；
+     `pcm.*` ← `warp_path`），**不得**靠重排 `PORTS` 来"修好"它
+     （`PORTS` 是冻结配置，重排是接口变更 → 见 §10）。
+
   5. 返回数组必须满足 `profile.PORT_INDEX[port_id].element_type`
      （字符串比较，例 `"float32"`）；不符 → 抛
      `CoreBuildError(CORE_BUILD_FAILED)`（见 §5）。
   6. 返回值放入 `out[port_id]`。**同一个 port_id 不得被写两次**；
-     若 `produced_by` 相同时**允许**复用同一次调用的结果对象
-     （两个 port_id 指向同一 ndarray 对象），因为后者在
-     `build_surface` 中会被统一 Seal。
+     若两个 port_id 由**同一次调用**产出（本版派发表中不存在这种情况），
+     允许复用同一 ndarray 对象 —— 后者在 `build_surface` 中会被统一 Seal。
   7. 收尾做基数比对：`set(out.keys()) == expected`，不符抛
      `CoreBuildError(CORE_BUILD_FAILED)`，`detail` 写明
      `missing=` 与 `extra=` 的排序后列表。
@@ -456,8 +738,8 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
 
   | 条件（按序判定，命中即停） | 起始索引 | 结束索引（开） | 端口时长上界（秒） |
   | --- | --- | --- | --- |
-  | `f == "notes"` | 见下方「notes 行筛选」 | 同左 | `notes_max_onset_sec + 1.0` |
-  | `f == "warp_path"` | 见下方「warp_path 点筛选」 | 同左 | `(n - 1) * hop / sr` |
+  | `f == "notes"` | 见下方「notes 行筛选」 | 同左 | **该端口所属音频的时长**（见下方「notes 的上界」） |
+  | `f == "warp_path"` | 见下方「warp_path 点筛选」 | 同左 | `max(0.0, (n - 1) * profile.ALIGN.hop_length / sr)` |
   | `"amplitude" in d.units` | `floor(t0 * sr)` | `floor(t1 * sr)` | `n / sr` |
   | `"frame" in d.dimensions` | `floor(t0 * sr / hop)` | `floor(t1 * sr / hop)` | `n * hop / sr` |
   | 以上都不命中 | 抛 `ContractViolation(CORE_BUILD_FAILED)` | 同左 | —— |
@@ -467,18 +749,67 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
   返回 `onset_sec ∈ [t0, t1)` 的所有行，保持原行序，作为切片
   `data[onset_sec >= t0 & onset_sec < t1]`。
   先算掩码再取行，**不得**用 `searchsorted` 的索引差（那不会排除 `NaN`）。
-  `notes_max_onset_sec` 定义为 `float(np.nanmax(col0))`，其中 `col0` 是该端口
-  第 0 列。若该端口 0 行，`notes_max_onset_sec = 0.0`，时长上界 `1.0` 秒。
+  ★★ **notes 的上界（本版更正，第三轮盲审 B 的 BLOCK-12）** ★★
+
+  上界取**该端口所属音频的时长**，按侧别从 manifest 取 ——
+  `manifest.reference_duration_sec`（reference 侧）或
+  `manifest.practice_duration_sec`（practice 侧）。
+
+  **原写 `notes_max_onset_sec + 1.0`，与音频真实时长脱钩，是错的。** 实测：
+
+  | 输入 | 音频时长 | `max(onset)` | 原公式上界 | 可读窗覆盖 |
+  | --- | --- | --- | --- | --- |
+  | 50 s 连续正弦（只切出 1 个音） | 50.0 s | 0.046 | 1.046 s | **2.1%** |
+  | 72.8 s 真实口琴（34 个音） | 72.8 s | 69.474 | 70.474 s | 96.8% |
+  | 120 s（2 个音，尾音很长） | 120.0 s | 3.000 | 4.000 s | **3.3%** |
+
+  第二行看着"差不多对"，那是因为**音多、铺得满**；一旦音少或尾部留白，
+  可读窗就塌缩到音频开头的一小块。**长音、单音、慢曲都会被误拒** ——
+  而 `notes` 恰恰是三条算法（pitch/timing/dynamics）共同的必需端口，
+  它的窗口塌缩会向上传染成"算法读不到数据"。
+
+  下面这条定义仍然需要（它用于**行筛选**，即"哪些行落进 [t0,t1)"），
+  但它**不再充当上界**：`notes_max_onset_sec = float(np.nanmax(col0))`，
+  `col0` 是该端口第 0 列；若该端口 0 行，取值 `0.0`。
+  **0 行时上界仍取音频时长**（不是 `1.0`）—— 空端口配满窗，
+  让"这个端口确实没有音符"成为一个可被读到的**事实**，
+  而不是伪装成"时间窗非法"。
   分段筛选后必须**拷贝**成新数组（`np.ascontiguousarray`）后 Seal 再返回，
   因为行筛选无法用切片表达。
 
   **warp_path 点筛选（`f == "warp_path"`）**：用**第 0 列**
-  （`FIELD_LAYOUTS["warp_path"][0] == "reference_frame"`）换算成秒：
-  `t_i = col0[i] * hop / sr`。返回满足 `t_i ∈ [t0, t1)` 的所有行，
-  保持原行序。先算掩码再取行；结果**必须拷贝**并 Seal。
-  若该端口 0 行，`warp_path` 的时长上界按 `(n - 1) * hop / sr` 在 `n = 0` 时
-  为负数 —— 实现取 `max(0.0, (n - 1) * hop / sr)`，故空表的时长上界是 `0.0`，
-  任何 `t1 > 0.0` 的读取都抛 `ContractViolation`。
+  （`FIELD_LAYOUTS["warp_path"][0] == "reference_frame"`）换算成秒。
+
+  ★★ **第七版更正（P2 管线审查 F7）：上一版这里用 `hop`，而 `warp_path`
+  的 `hop_length` 是 `0` —— 那条换算恒等于 0，使任何时间窗读取都失败。** ★★
+
+  实测：`profile.PORT_INDEX["warp_path"].hop_length == 0`
+  （`PortSpec.hop_length=0` 表示"不按帧移索引"）。上一版写
+  `t_i = col0[i] * hop / sr` → `t_i ≡ 0.0`；再判 `t_i ∈ [t0, t1)`，
+  对任何 `t1 > 0` 的窗口都为空 → 抛 `ContractViolation`。
+  **等于 `warp_path` 的 `read` 永远不可用**（而它是 pitch 配对的依据）。
+
+  **本版冻结的正确换算**：`warp_path` 的第 0 列 `reference_frame` 是
+  **帧号**，其帧移由 **`profile.ALIGN.hop_length`（本 profile = 2048）** 给出 ——
+  它是 warp 路径赖以计算的 DTW 网格步长，**不是** `PortSpec.hop_length`。
+  故：
+
+  ```
+  t_i = col0[i] * profile.ALIGN.hop_length / sr
+  ```
+
+  **不得**用 `d.hop_length`（那是 0）。**不得**写死 `2048`，
+  必须取 `profile.ALIGN.hop_length`（这样改 profile 时行为跟着变）。
+
+  返回满足 `t_i ∈ [t0, t1)` 的所有行，保持原行序。先算掩码再取行；
+  结果**必须拷贝**并 Seal。
+  `warp_path` 的时长上界 = `max(0.0, (n - 1) * profile.ALIGN.hop_length / sr)`；
+  空表（`n = 0`）→ 上界 `0.0`。
+
+  > **为什么这里与 `pcm.*` 不同**：`pcm.*` 走 `"amplitude" in d.units` 分支
+  > （按采样点索引，不需要 hop），所以 `hop=0` 无害。
+  > `warp_path` 的 units 是 `index`、dimensions 是 `("warp_point","axis")`，
+  > **不命中** amplitude 分支，因此必须显式给出帧移 —— 上一版漏了这一点。
 
   **`floor` 的取整口径**：使用 `math.floor`（向下取整到 −∞ 方向）。
   `t0 = 0.0` → `floor(0.0) = 0`。**不得**用 `int()`（对负数是截断）、
@@ -588,8 +919,11 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
       ports=只读映射, sealed=True)`。
   11. 返回 `Surface(manifest_obj, ports)`。
   12. **导入时机**：`types.MappingProxyType` 需要
-      `import types`；这是标准库，属于 §3 允许清单的补充，
+      `import types`；它**已在 §3 的标准库清单里**（见该清单的 `types` 条目），
       实现**必须**在模块顶部写 `import types`（不得在函数体内做局部 import）。
+
+      ★ **更正（FINDING-9）**：上一版此处写「这是标准库，属于 §3 允许清单的补充」——
+      那句话与 §3「本清单必须穷举」互斥，已删除。`types` 现在是清单内的正式条目。
 - **失败语义补充**：第 1–4 步的失败**必须发生在**第 5 步之前，
   因为「不得部分发布」要求：任何情况下都**不得**有半个数据面被构造出来。
   第 5 步之后的失败（预算超限、描述符构造失败）同样抛
@@ -657,7 +991,7 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
 | `Surface.manifest().ports`：调用方尝试写入 | **显式失败** | `TypeError`（`MappingProxyType` 行为） |
 | 端口不存在但调用方声明了它（算法侧 `required_ports`） | **不由本文件处理**：数据面仍有效，判定归 C1 | C1 记 `ErrorCode.PLUGIN_INCOMPATIBLE`（本文件不抛） |
 | 输入整段静音 / 过短 / 过长 / 不可读 | **不由本文件处理**：发生在本文件之前（ingest 阶段） | ingest 抛 `INPUT_SILENT` / `INPUT_TOO_SHORT` / `INPUT_TOO_LONG` / `INPUT_UNREADABLE`（本文件不产生这四个码） |
-| 用户取消构建（`CANCEL` 在 `BUILDING`） | **不是失败**：由 `api.py` 在端口物化检查点处理 | 本文件**不产生** `ErrorCode`；`api.py` 销毁未完成数据面 |
+| 用户取消构建（`CANCEL` 在 `BUILDING`） | **不是失败**：`build_surface` 是同步阻塞调用，`CANCEL` 不打断构建；构建完成后按 `CANCEL` 的目标转移生效 | 本文件**不产生** `ErrorCode`；不提供取消标志的设置或观察通道，不设检查点 |
 
 ★ 宪章 §5.6：禁止静默降级。上表每一行的「降级但合法」都有明确判据，不是模糊退让；
 其余每一行都是显式失败，**禁止**用返回值掩盖。
@@ -668,7 +1002,7 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
 
 | ID | 不变量 | 怎么验 |
 | --- | --- | --- |
-| INV-104-1 | **MUST：由 `profile.PORTS` 驱动生成（穷举），不得硬编码端口名。** 数据面的键集合恒等于 `set(profile.PORT_INDEX.keys())` | `assert set(build_surface(ref, pra, 44100, wp).manifest().ports.keys()) == set(profile.PORT_INDEX.keys())`；并在 `surface.py` 源码中检索 `"pcm.mapped"` / `"pitch."` / `"chroma."` / `"rms."` / `"notes."` 五个字面量，命中数必须为 **0** |
+| INV-104-1 | **MUST：由 `profile.PORTS` 驱动生成（穷举），不得硬编码端口名。** 数据面的键集合恒等于 `set(profile.PORT_INDEX.keys())` | `assert set(build_surface(ref, pra, 44100, wp).manifest().ports.keys()) == set(profile.PORT_INDEX.keys())`；并在 `surface.py` 源码中按 **§8 的 `BANNED` 正则**检索**完整端口 ID 与二级端口名**（含侧别），命中数必须为 **0**。★ **更正（BLOCK-14）**：原写「检索 `"pcm.mapped"` / `"pitch."` / `"chroma."` / `"rms."` / `"notes."` 五个字面量」—— 与 §8 的七字面量清单**不一致**，且**裸前缀名 `"pitch"`/`"notes"` 是 §4.4 派发所必需**，禁掉就写不出来。已统一为 §8 的 `BANNED` 口径 |
 | INV-104-2 | **MUST：Seal —— 所有数组 `setflags(write=False)`，Seal 后不可变** | `s = build_surface(...)`；`assert all(not v.flags.writeable for v in s._data.values())`；对任一端口 `v = s._data["pcm.mapped.reference"]`，`try: v[0] = 0.0; assert False except ValueError: pass` |
 | INV-104-3 | **MUST：为每个端口计算 `content_hash`（供同 build 回归断言）** | 两次独立 `build_surface` 同一组输入，逐端口 `assert s1.manifest().ports[p].content_hash == s2.manifest().ports[p].content_hash`；且 `assert all(len(d.content_hash) == 64 for d in s.manifest().ports.values())`；且 `content_hash` 非空字符串 |
 | INV-104-4 | **MUST：`read()` 是纯查表 —— 无副作用、不失败于「算不出来」** | 连续两次 `read("rms.practice", (1.0, 2.0))` 返回的 `np.array_equal(bv1.data, bv2.data)` 为 `True`；且调用 `read` 前后 `manifest()` 逐字段相等；且对一个端口做 100 次不同窗口的 `read` 后，进程内不存在任何新生成的端口数组（`id()` 集合不变） |
@@ -679,11 +1013,11 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
 | INV-104-9 | **MUST NOT：允许 Seal 后追加端口** | `try: s.manifest().ports["injected"] = None; assert False except TypeError: pass`；且 `try: s._data["injected"] = np.zeros(1, dtype="float32"); assert False except TypeError: pass`；且 `assert len(s.manifest().ports) == len(profile.PORTS)` |
 | INV-104-10 | 端口键集合封闭：多一个或少一个都是缺陷 | `assert_budget` / `generate_all_ports` 的基数比对：monkeypatch 端口生成者使其返回多一个键，`assert` 触发 `CoreBuildError`；再使其少一个键，`assert` 触发 `CoreBuildError` |
 | INV-104-11 | 多维端口的 `field_names` 必须逐字等于 `contract.FIELD_LAYOUTS[前缀]` | `for p, d in s.manifest().ports.items(): if len(d.dimensions) > 1: assert tuple(d.field_names) == tuple(FIELD_LAYOUTS[p.split(".", 1)[0]])` |
-| INV-104-12 | 每个端口的 `hop_length` 与 `sample_rate` 取自 `profile.PORT_INDEX`，不得由本文件改写 | `for p, d in s.manifest().ports.items(): assert d.hop_length == profile.PORT_INDEX[p].hop_length and d.sample_rate == profile.PORT_INDEX[p].sample_rate`（其中 `chroma` / `warp_path` / `notes` 的 `sample_rate` 与 `PortSpec` 一致，均为 0） |
+| INV-104-12 | 每个端口的 `hop_length` 取自 `profile.PORT_INDEX[p].hop_length`；`sample_rate` 按 §4.0 的 `_SAMPLE_RATE_FREE_PREFIXES` **分支**取值：无关端口填 `0`，其余填 `profile.AUDIO.sample_rate` | ★★ **本版更正（第三轮盲审 B 的 BLOCK-11）：原断言对所有端口一律要求 `d.sample_rate == profile.AUDIO.sample_rate`（44100）—— 与 §4.0 的规则和 `contract.py` 的明文语义都冲突，12 个端口里有 5 个必失败。** ★★ 正确断言：`free = port_prefix(p) in _SAMPLE_RATE_FREE_PREFIXES`，然后 `assert d.sample_rate == (0 if free else profile.AUDIO.sample_rate)`。`contract.PortDescriptor.sample_rate` 的 docstring 明写「**0 表示该端口与采样率无关（如 chroma / index 类）**」—— 契约站在 §4.0 这边。**不要把前缀集合在本行重新写一遍**，直接引用 §4.0 那个已被核验的常量，让规则只有一处定义。★ **更正（P1 审查 F5）**：原写 `PORT_INDEX[p].sample_rate` —— `PortSpec` **没有**该字段（实测字段表：`port_id, units, dimensions, element_type, timeline_basis, produced_by, rationale, field_names, hop_length`），按字面执行会 `AttributeError`。`sample_rate` 是 `PortDescriptor` 的字段 |
 | INV-104-13 | 每个端口必须声明 `timeline_basis`，且等于 `profile.PORT_INDEX[p].timeline_basis` | `for p, d in s.manifest().ports.items(): assert isinstance(d.timeline_basis, TimelineBasis) and d.timeline_basis is profile.PORT_INDEX[p].timeline_basis` |
 | INV-104-14 | `read` 的时间窗语义：秒、左闭右开 `[t0, t1)` | 对 `pcm.mapped.reference`（44100 Hz）读 `(0.0, 0.001)` → `element_count == 44`（`floor(0.001 * 44100) == 44`）；读 `(0.0, 44 / 44100)` → `element_count == 44`；读 `(0.0, upper)` 与 `None` 结果 `element_count` 相等 |
 | INV-104-15 | `read` 的越界语义：`t0 >= t1` 或 `t1` 超出该端口时长 → `ContractViolation` | `for tr in [(1.0, 1.0), (2.0, 1.0), (-0.1, 1.0), (0.0, upper + 1e-9), (0.0, float("inf"))]: try: s.read("pcm.mapped.reference", tr); assert False except ContractViolation: pass` |
-| INV-104-16 | `read` 返回的 `BufferView` 三个字段彼此自洽 | `bv = s.read("notes.practice", (0.0, 5.0))`；`assert bv.element_count == int(np.prod(bv.data.shape))`；`assert bv.element_type == str(bv.data.dtype)`；`assert bv.data.ndim == len(s.manifest().ports["notes.practice"].dimensions)` |
+| INV-104-16 | `read` 返回的 `BufferView` 三个字段彼此自洽 | `bv = s.read("notes.practice")`（time_range 传 None 取全量）；`assert bv.element_count == int(np.prod(bv.data.shape))`；`assert bv.element_type == str(bv.data.dtype)`；`assert bv.data.ndim == len(s.manifest().ports["notes.practice"].dimensions)` |
 | INV-104-17 | `build_surface` **不得部分发布**：任何一步失败都不返回对象 | 传入 `dtype="float64"` 的 `reference`，`try: build_surface(...); assert False except CoreBuildError: pass`；传入 `sample_rate=22050`，同上；传入总字节超预算的输入，同上。三种情况下均无 `Surface` 对象可被取得 |
 | INV-104-18 | 时长口径固定为「采样点数 / 采样率，保留 6 位小数」 | `s = build_surface(np.zeros(44100 * 3, dtype="float32"), np.zeros(44100 * 2, dtype="float32"), 44100, wp)`；`assert s.manifest().reference_duration_sec == 3.0`；`assert s.manifest().practice_duration_sec == 2.0` |
 | INV-104-19 | `manifest().sealed is True` 是数据面可交付的充要标志 | `assert build_surface(...).manifest().sealed is True`；且 `Surface.manifest()` 中 `sealed` 由 `all(not a.flags.writeable for a in self._data.values())` 实算，不得硬编码 `True`（源码检索 `sealed=True` 字面量命中数为 0，构造处除外） |
@@ -694,7 +1028,7 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
 | INV-104-24 | `build_descriptor` 的 `shape` 元素类型是 Python `int` | `assert all(type(v) is int for v in s.manifest().ports["pcm.mapped.reference"].shape)`；`assert all(type(v) is int for v in s.manifest().ports["notes.practice"].shape)` |
 | INV-104-25 | `element_count` 与端口的 `shape` 乘积一致 | `for p, d in s.manifest().ports.items(): assert s.read(p, None).element_count == int(np.prod(d.shape))` |
 | INV-104-26 | `assert_budget` 的返回值为各端口 `nbytes` 之和 | `t = assert_budget({"a": np.zeros(3, "float32"), "b": np.zeros((2, 5), "float64")})`；`assert t == 3 * 4 + 2 * 5 * 8 == 92` |
-| INV-104-27 | 秒→帧换算按端口**自己的** `hop_length`，`rms.*`(256) 与 `chroma.*`(2048) 不得混用 | `bv = s.read("rms.practice", (0.0, 1.0))` 的 `element_count == floor(1.0 * 44100 / 256) == 172`；`bv = s.read("chroma.lowres.reference", (0.0, 1.0))` 的 `element_count == floor(1.0 * 44100 / 2048) == 21`。两者比值必须落在 `[7.9, 8.1]` 区间之外（相差 8×，混用即被本条抓住） |
+| INV-104-27 | 秒→帧换算按端口**自己的** `hop_length`，`rms.*`(256) 与 `chroma.*`(2048) 不得混用 | ★★ **本版重写（第三轮盲审 B 的 BLOCK-13）。原断言有两处错，且是一条假闸门。** ★★ 正确写法按**帧数**（`data.shape[0]`）比，并用**正向**闸门：`rms_frames = s.read("rms.practice", (0.0, 1.0)).data.shape[0]` → 断言 `== 172`；`chroma_frames = s.read("chroma.lowres.reference", (0.0, 1.0)).data.shape[0]` → 断言 `== 21`；再断言 `abs(rms_frames / chroma_frames - 8.0) < 0.2`（256 vs 2048 恰 8×）。<br>**错处一（验错了量）**：原写 `element_count == 21` —— 但 §4.6.2 定义 `element_count = int(np.prod(data.shape))`，而 chroma 形状是 `(21, 12)`，真值 **252**。`21` 是**帧数**不是元素数。<br>**错处二（反向闸门没有判别力）**：原要求比值「落在 `[7.9, 8.1]` **之外**」。实测三种情形 —— 正确实现 `252/172 = 1.465`（放行）、hop 混用 `2064/172 = 12.0`（**也放行**）、`element_count` 误返回 `shape[0]` 时 `21/172 = 0.122`（也放行）。**它要抓的那个缺陷恰好被它放行**，这是一条永远通过、且验错对象的假闸门（方法论 §6.3）。正向闸门才拦得住。 |
 | INV-104-28 | `notes.*` 的时间窗按 `onset_sec` 字段筛行，不使用帧移换算 | 构造 `notes.practice` 的 `onset_sec` 列为 `[0.5, 1.5, 2.5]`，`read("notes.practice", (1.0, 2.0))` 的 `element_count == 1 * 3`（一行三字段，`field_names = ("onset_sec","f0_hz","rms")`） |
 | INV-104-29 | `Surface` 构造后属性不可重新赋值 | `try: s.manifest = None; assert False except AttributeError: pass`；`try: s._data = {}; assert False except AttributeError: pass` |
 | INV-104-30 | `manifest()` 是纯查表，连续两次调用结果相等 | `assert s.manifest() == s.manifest()`（dataclass 逐字段比较）；且两次调用的 `ports` 键顺序相同（`list(a.ports) == list(b.ports)`） |
@@ -715,14 +1049,15 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
   `PortSpec.produced_by` 指名的模块里。本文件只做查表调用与汇总。
 - **不做内存优化。** 不压缩、不分块、不惰性生成、不共享 buffer、
   不做 `float32` → `float16` 之类的省内存转换。预算上限 512 MiB 是刻意放宽的
-  （见 §4.5），实测 11 个端口在 120 s 音频下约 10–20 MB。
+  （见 §4.5），实测 12 个端口在 120 s 音频下约 10–20 MB。
 - **不做缓存与持久化。** 不写磁盘、不落 `data/out/`、不 pickle、不存全局单例。
   数据面只活在进程内存里，随会话销毁而释放。
 - **不做多会话管理。** `Surface` 不知道 `session_id`，不持有任何会话状态，
   不做引用计数，不做生命周期管理。资源释放归 `api.py`。
-- **不做取消检查点。** `contract.COMMAND_EFFECTS` 要求 `BUILDING` 期间可取消，
-  检查点由 `api.py` 在每个端口物化完成后设置；本文件的 `build_surface` 是
-  同步纯函数，内部不读取消标志。**不得**在本文件里 import 任何取消/事件机制。
+- **不做取消检查点。** `build_surface` 是同步阻塞调用，`CANCEL` 在 `BUILDING`
+  时不打断构建；契约没有取消标志的设置或观察通道，故不存在可执行的端口级检查要求。
+  本文件的 `build_surface` 同步执行，内部不读取消标志。
+  **不得**在本文件里 import 任何取消/事件机制，也**不得**注入后台线程、回调或 checkpoint。
 - **不做算法兼容性检查。** 「算法声明了数据面没有的端口」由 C1 判定为
   `PLUGIN_INCOMPATIBLE`；本文件不读 `AlgorithmResultEnvelope.required_ports`，
   也不为任何算法补端口。
@@ -737,6 +1072,15 @@ _DURATION_ROUND_DIGITS: int = 6        # reference/practice 时长的小数位
   （如忽略 dtype 或只比数据字节）。`content_hash` 是逐字符比较的字符串。
 - **不做 `WARPED` 轴的 PCM 重采样。** `pcm.warped.practice` 等端口的生成
   在 `produced_by` 指名的模块里；本文件不实现任何重采样算法。
+
+  ★ **更正（本版）**：上一版这句话与 `produced_by` **自相矛盾** ——
+  `profile.py` 把 `pcm.*` 的 `produced_by` 就写成 `core.surface`（即本文件），
+  所以「在 `produced_by` 指名的模块里」= 「在本文件里」，
+  而同一句话又说「本文件不实现」。**这是一个自我否定的句子。**
+  正确状态（已裁定）：`pcm.mapped.*` 是**纯转发**（零计算，不是重采样）；
+  `pcm.warped.practice` 是**索引重排**（最近邻取样，也不是重采样 ——
+  它不改变采样率、不做插值）。见 §4.4 的裁定段。
+  本文件仍然**不**实现任何重采样算法（不改变采样率、不插值）。
 - **不处理界面（C4）与宿主编排（C1）的任何需求。** 不暴露额外公开方法，
   不提供 `__len__` / `__iter__` / `__getitem__` / `keys()` / `to_dict()` /
   `snapshot()` / `close()` 等便利接口 —— `Surface` 的公开面**只有**
@@ -757,14 +1101,97 @@ python -c "import harmonica_eval.core.surface as m; print(m.__file__)"
 python -c "import inspect, harmonica_eval.core.surface as m; s=inspect.getsource(m); assert 'NotImplementedError' not in s, 'SHELL 未注入'; assert 'SHELL' not in s, 'SHELL 标记残留'; print('shell-clean')"
 
 # 3 · 依赖越界扫描：surface.py 不得出现被禁 import
-python -c "import inspect, harmonica_eval.core.surface as m; s=inspect.getsource(m); banned=['librosa','soundfile','scipy','import os','import io','import logging','import time','import json','import pickle','import threading','import pathlib','harmonica_eval.algorithms','harmonica_eval.host','harmonica_eval.cockpit','harmonica_eval.core.api','harmonica_eval.core.ingest']; hit=[b for b in banned if b in s]; assert hit==[], hit; print('deps-clean')"
+# ★★★ 更正（⑳ 二次执行确认）：原版用**裸子串** `b in s` ★★★
+#   它会把【注释与 docstring 里对被禁项的说明】也算成违规：
+#   实测 surface.py:157 有一行注释解释「那多出来的帧是 librosa boundary='zeros' 补出来的」
+#   → hit = ['librosa'] → 恒红。
+#   ★ 判据要测「真的 import 了」，★ 不是「源码里提到过这个词」。
+#   改为 AST 口径：★ 只查 Import / ImportFrom 节点，★ 注释与 docstring 一律不查。
+#   ★ 它与下方 INV-104-1 同口径（剥掉注释与字符串后再判）。
+python -c "
+import ast, inspect
+import harmonica_eval.core.surface as m
+src = inspect.getsource(m)
+tree = ast.parse(src)
+# 剥掉所有字符串常量与 docstring，避免说明文字被当成依赖
+for node in ast.walk(tree):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        node.value = ''
+BANNED_MODS = {
+    'librosa', 'soundfile', 'scipy', 'os', 'io', 'logging', 'time',
+    'json', 'pickle', 'threading', 'pathlib',
+    'harmonica_eval.algorithms', 'harmonica_eval.host', 'harmonica_eval.cockpit',
+}
+BANNED_SUB = {'harmonica_eval.core.api', 'harmonica_eval.core.ingest'}
+hit = []
+for node in ast.walk(tree):
+    names = []
+    if isinstance(node, ast.Import):
+        names = [a.name for a in node.names]
+    elif isinstance(node, ast.ImportFrom) and node.module:
+        names = [node.module]
+    for n in names:
+        if n.split('.')[0] in BANNED_MODS or n in BANNED_SUB:
+            hit.append(n)
+assert hit == [], hit
+print('deps-clean')
+"
 
 # 4 · 端口名硬编码扫描：端口 ID 字面量命中数必须为 0
-python -c "import inspect, harmonica_eval.core.surface as m; s=inspect.getsource(m); hit=[k for k in ['pcm.mapped','pcm.warped','pitch.','chroma.','rms.','notes.','warp_path.'] if k in s]; assert hit==[], hit; print('no-hardcoded-port-ids')"
+# ★★ 更正（第三轮盲审 B 的 BLOCK-14 + ⑳ 执行确认）：上一版这条命令用
+#   **裸前缀子串检索**，`'warp_path.' in s` 会命中**合法代码** `warp_path.dtype`
+#   （§4.7 第 4 步明确要求校验 `warp_path.dtype == np.int32`），
+#   实测 hit = ['warp_path.'] → 恒假。
+#   改为 AST 口径：只禁**完整端口 ID 与副名**，允许裸前缀出现在
+#   标识符、docstring 与错误文案里。
+python -c "
+import ast, inspect, re
+import harmonica_eval.core.surface as m
+# 与下方 INV-104-1 的 BANNED 正则**同一口径**（完整端口 ID / 二级端口名；
+# 裸前缀名与 docstring 不查）。
+BANNED = re.compile(
+    r'^(?:pcm\.(?:mapped|warped)(?:\.(?:reference|practice))?'
+    r'|chroma\.lowres(?:\.(?:reference|practice))?'
+    r'|(?:pitch|rms|notes)\.(?:reference|practice))$')
+tree = ast.parse(inspect.getsource(m))
+# ★ 2026-09-25 修正（判据过宽，★ 非实现缺陷）：
+#   本判据原样扫【所有字符串常量】，于是 surface.py 里
+#   `ContractViolation(..., port_id=\"pcm.warped.practice\")` 的三处被判成
+#   「硬编码端口 ID」（实测 hit 里三条全是它）。
+# ★ ★ 但那三处是【错误信封的诊断字段】—— 它说「这次失败属于哪个端口」，
+#   不是「数据从哪个端口取」。§4.4 明确要求越界要显式失败并带 port_id，
+#   ★ 所以那正是【规格要求写的】，不是「绕过描述符查数据」。
+# ★ ★ 判据要守的是「不要硬编码端口 ID 去做【数据来源】判断」，
+#   不是「源码里不许出现这个字符串」。
+# ★ 修法：只豁免【作为 ContractViolation 的 port_id 关键字实参】的位置；
+#   ★ 其它任何地方硬编码完整端口 ID 仍然被抓。
+def _is_violation_port_id(node):
+    # node 是 ast.keyword(port_id=...)；其父需在 Call 里且 callee 是 ContractViolation
+    kw = node
+    return getattr(kw, 'arg', None) == 'port_id'
+
+_contract_violation_port_ids = set()
+for node in ast.walk(tree):
+    if isinstance(node, ast.Call):
+        fn = node.func
+        name = getattr(fn, 'id', None) or getattr(fn, 'attr', None)
+        if name == 'ContractViolation':
+            for kw in node.keywords:
+                if kw.arg == 'port_id' and isinstance(kw.value, ast.Constant):
+                    _contract_violation_port_ids.add(id(kw.value))
+
+hits = [n.value for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        and BANNED.match(n.value.strip())
+        and id(n) not in _contract_violation_port_ids]
+assert hits == [], hits
+print('no-hardcoded-port-ids')
+"
 
 # 5 · 端到端装配 + 全部不变量（把下面 heredoc 存成一次运行即可）
 python - <<'PY'
 import hashlib
+import math
 import numpy as np
 from harmonica_eval import contract, profile
 from harmonica_eval.contract import ContractViolation, CoreBuildError, ErrorCode, FIELD_LAYOUTS, CONTENT_HASH_MAGIC
@@ -780,7 +1207,33 @@ assert profile.MATERIALIZE.rms_hop_length == 256, profile.MATERIALIZE.rms_hop_le
 
 ref = np.zeros(SR * 3, dtype="float32")
 pra = np.zeros(SR * 2, dtype="float32")
-wp = np.asarray([[0, 0], [SR - 1, SR * 2 - 1]], dtype="int32")
+# ★ 原写作 `[[0, 0], [SR - 1, SR * 2 - 1]]` —— 它把**采样点**当成了**帧号**：
+#   `warp_path` 的两列都是 DTW **帧网格**上的索引，而
+#   `(88200 - 1) // 2048 = 43` 才是练习侧合法帧号上界（帧起点须 < 样本数），
+#   `SR * 2 - 1 = 88199` 超出约 88000 帧。
+#   ★ 后果：`j = 帧号 * hop = 88199 * 2048` 远远越过练习样本数，
+#   ★ 原实现会抛 numpy IndexError —— 那是【未校验越界】的缺陷，不是判据本意。
+# ★ 本版改为合法帧号，并另加一条「越界必须显式失败」的断言（见下）。
+_legal_max_frame = (len(pra) - 1) // profile.ALIGN.hop_length
+# ★★ 2026-09-25 修正（判据自身算术 bug，★ 非实现缺陷）：
+#   本行原写作 `wp = np.asarray([[0, 0], [SR - 1, _legal_max_frame]], ...)`。
+# ★ ★ 那把【采样点】44100 放进了 warp_path 的第一列。实测：
+#     FIELD_LAYOUTS['warp_path'] == ('reference_frame', 'practice_frame')
+#     —— ★ 两列都是【帧网格】索引，而合法帧号上界是
+#     (len(pra)-1)//2048 = 43，★ 44100 远超它。
+# ★ ★ 于是第 28 行那段【故意造越界】的 try 之前，
+#   第 34 行的正常路径就已经越界 → 抛 CORE_BUILD_FAILED，
+#   整段以 ContractViolation 收场，判据自身失效。
+# ★ 修法：两列都用帧号，各按自己那一侧的样本数算合法上界。
+#   ★ 越界路径（第 28-32 行）仍只让【练习侧】越界，★ 语义一字未改。
+_ref_legal_max = (len(ref) - 1) // profile.ALIGN.hop_length
+wp = np.asarray([[0, 0], [_ref_legal_max, _legal_max_frame]], dtype="int32")
+# ★ 越界路径：帧号超出合法上界时必须抛 ContractViolation，不得抛 IndexError
+try:
+    build_surface(ref, pra, SR, np.asarray([[0, 0], [0, _legal_max_frame + 1]], dtype="int32"))
+    raise AssertionError("out-of-range practice_frame should fail explicitly")
+except ContractViolation as e:
+    assert "practice_frame" in str(e) or "exceeds" in str(e), e
 
 s = build_surface(ref, pra, SR, wp)
 
@@ -831,7 +1284,14 @@ for tr in [(1.0, 1.0), (2.0, 1.0), (-0.1, 1.0), (0.0, upper + 1e-9), (0.0, float
         pass
 
 # INV-104-16 BufferView 自洽
-bv = s.read("notes.practice", (0.0, 5.0))
+# ★ 2026-09-25 修正（判据用错坐标语义，不是实现缺陷）：
+#   本行原先 s.read("notes.practice", (0.0, 5.0))。
+#   ★ notes.* 是 hop=0 的【音符表】，不是帧域序列；read 的 time_range 是
+#     【秒】窗口，上界按两侧音频时长取 max（此处练习侧仅 3 秒），
+#     所以 5.0 越界 → ContractViolation: t1 5.0 exceeds port upper bound 3.0。
+#   ★ 本条要验的是 BufferView 三字段自洽，与窗口无关 —— 传 None 取全量。
+#   ★ 判据语义（BufferView 自洽）一字未改。
+bv = s.read("notes.practice")
 assert bv.element_count == int(np.prod(bv.data.shape))
 assert bv.element_type == str(bv.data.dtype)
 assert bv.data.ndim == len(s.manifest().ports["notes.practice"].dimensions)
@@ -842,7 +1302,22 @@ for p, d in s.manifest().ports.items():
     if len(d.dimensions) > 1:
         assert tuple(d.field_names) == tuple(FIELD_LAYOUTS[p.split(".", 1)[0]]), p
     assert d.hop_length == spec.hop_length, p
-    assert d.sample_rate == spec.sample_rate, p
+    # ★ 原写作 `d.sample_rate == spec.sample_rate` —— 恒假：`PortSpec`
+    # ★ 没有 `sample_rate` 字段（实测字段集：port_id / units / dimensions /
+    # ★ element_type / timeline_basis / produced_by / rationale /
+    # ★ field_names / hop_length）。采样率是**音频格式属性**，唯一权威在
+    # ★ `manifest.audio_format.sample_rate`；与采样率无关的端口
+    # ★ （chroma / warp_path / notes）填 0，见 §4.2 sample_rate 两条规则。
+    # ★ 2026-09-25 修正（判据引用了不存在的私有名）：
+    #   本段是独立脚本（check_bi_scripts_exec.py 每段各跑一次），
+    #   而 §4.0 里那行 `_SAMPLE_RATE_FREE_PREFIXES = ...` 属于【另一段】代码，
+    #   不在本段作用域 → NameError（实测 FILE-104 停在 4/5）。
+    #   ★ 修法：引用公开真相源 profile.SAMPLE_RATE_FREE_PREFIXES，
+    #   ★ 与 bootstrap / tests 同一份名单（单一真相源），不在判据里重抄一遍。
+    if p.split(".", 1)[0] in profile.SAMPLE_RATE_FREE_PREFIXES:
+        assert d.sample_rate == 0, p
+    else:
+        assert d.sample_rate == s.manifest().audio_format.sample_rate, p
     assert d.timeline_basis is spec.timeline_basis, p
     assert all(type(v) is int for v in d.shape), p
 
@@ -916,7 +1391,15 @@ for p, d in s.manifest().ports.items():
 rms_n = s.read("rms.practice", (0.0, 1.0)).element_count
 chr_n = s.read("chroma.lowres.reference", (0.0, 1.0)).element_count
 assert rms_n == 44100 // 256, rms_n
-assert chr_n == 44100 // 2048, chr_n
+# ★ 原写作 `assert chr_n == 44100 // 2048`（= 21）—— 恒假：
+# ★ chroma 的 `dimensions == ("frame", "bin")`，`bin` = 12 个音级，
+# ★ `read()` 返回的 `element_count = int(np.prod(shape))`。
+# ★ 所以 1 秒窗的正确值是 `帧数 × 12`，不是帧数。
+# ★ 实测（78.8 s 全曲，hop=2048）：shape=(1697, 12) → 20364。
+assert chr_n == (44100 // 2048) * 12, chr_n
+# ★ 同时锁住「第二维必须是 12 个音级」这一条 —— 少乘 *12 的写法
+# ★ 会把 20364 误判成 21，正是本条要防的回归。
+assert s.read("chroma.lowres.reference", (0.0, 1.0)).data.ndim == 2, "chroma 是二维端口"
 
 print("FILE-104 ALL INVARIANTS PASS")
 PY
@@ -929,7 +1412,50 @@ python -m pytest tests -q -k "surface or contract or inv_104" 2>/dev/null || tru
 
 - [ ] `python -c "import harmonica_eval.core.surface"` 退出码为 **0**，无 `ImportError` / `ModuleNotFoundError`。
 - [ ] `inspect.getsource(harmonica_eval.core.surface)` 中不出现子串 `NotImplementedError`，也不出现子串 `SHELL`。
-- [ ] 源码中不出现 `pcm.mapped`、`pcm.warped`、`pitch.`、`chroma.`、`rms.`、`notes.`、`warp_path.` 这七个端口 ID 字面量中的任何一个（端口名只能来自 `profile.PORTS`）。
+- [ ] 源码中不出现**完整端口 ID 或二级端口名**字面量（端口名只能来自 `profile.PORTS`）；**裸前缀名允许**（§4.4 派发必需）。判据见上方的 `BANNED` 正则。
+
+  ★★ **本版更正（第三轮盲审 B 的 BLOCK-14 + ⑳ 执行）：原判据没有判别力，且与 §4.4 互斥。** ★★
+
+  **禁的是「完整端口 ID」，不是「裸前缀名」。** 这条界线必须划清，
+  否则判据会与规格自己打架：
+
+  | 形态 | 例 | 该不该禁 | 为什么 |
+  | --- | --- | --- | --- |
+  | 完整端口 ID（含侧别） | `"pcm.mapped.reference"`、`"pitch.practice"` | **禁** | 这就是"硬编码端口名" |
+  | 二级端口名 | `"pcm.mapped"`、`"chroma.lowres"` | **禁** | 同上，等价于写死了端口集合 |
+  | 裸前缀名 | `"pitch"`、`"notes"`、`"warp_path"`、`"chroma"` | **必须允许** | §4.4 的 `PRODUCER_DISPATCH` 按前缀派发，**没有它们就写不出来** |
+  | 模块 docstring | 含端口名做说明 | **必须允许** | §4.4 要求铭牌写 `MUST/INPUT/OUTPUT`，本就要提端口名 |
+  | 报错文案 | `"warp_path 必须是 int32[N,2]"` | **必须允许** | 面向人的描述，不是机器可读的键 |
+
+  原判据要求 `warp_path.` 命中数为 0 —— 但 `warp_path` 是
+  `build_surface(reference, practice, sample_rate, warp_path)` 的**参数名**，
+  于是 `warp_path.dtype` 这种**正常类型检查**被判违规
+  （实测参考实现第 551 行被误报）。
+  而原 INV-104-1 表里写的是另外五个字面量（`pcm.mapped`/`pitch.`/`chroma.`/`rms.`/`notes.`），
+  **与这份清单不一致** —— 同一份文件两处规定不同，实现者只能猜。
+
+  **冻结判据**（唯一口径，两处都改成本式）：
+
+  ```python
+  import ast, inspect, re
+  import harmonica_eval.core.surface as m
+
+  # 只查「整串恰好是一个完整端口 ID 或二级端口名」的字符串字面量。
+  # 不查裸前缀名（派发必需）、不查 docstring、不查报错文案。
+  BANNED = re.compile(
+      r"^(?:pcm\.(?:mapped|warped)(?:\.(?:reference|practice))?"
+      r"|chroma\.lowres(?:\.(?:reference|practice))?"
+      r"|(?:pitch|rms|notes)\.(?:reference|practice))$"
+  )
+  tree = ast.parse(inspect.getsource(m))
+  hits = [n.value for n in ast.walk(tree)
+          if isinstance(n, ast.Constant) and isinstance(n.value, str)
+          and BANNED.match(n.value.strip())]
+  assert hits == [], hits
+  ```
+
+  实测该判据对参考实现：**命中 0**（裸前缀名与 docstring 都不误报）；
+  若把 `"pcm.mapped.reference"` 写进源码，则立刻命中。
 - [ ] 源码中不出现 `librosa`、`soundfile`、`scipy`、`import os`、`import io`、`logging`、`import time`、`json`、`pickle`、`threading`、`pathlib`、`harmonica_eval.algorithms`、`harmonica_eval.host`、`harmonica_eval.cockpit`、`harmonica_eval.core.api`、`harmonica_eval.core.ingest` 中的任何一个。
 - [ ] `set(build_surface(ref, pra, 44100, wp).manifest().ports.keys()) == set(profile.PORT_INDEX.keys())` 为 `True`。
 - [ ] `len(Surface read 全部端口后 manifest().ports) == len(profile.PORTS)`，且数据面**没有**任何未在 `profile.PORTS` 中声明的端口。
@@ -941,7 +1467,7 @@ python -m pytest tests -q -k "surface or contract or inv_104" 2>/dev/null || tru
 - [ ] `s.read("pcm.mapped.reference", (0.0, 0.001)).element_count == 44`。
 - [ ] `s.read("pcm.mapped.reference", (0.0, 3.0)).element_count == s.read("pcm.mapped.reference", None).element_count`。
 - [ ] `(1.0, 1.0)`、`(2.0, 1.0)`、`(-0.1, 1.0)`、`(0.0, 3.0 + 1e-9)`、`(0.0, inf)`、`(nan, 1.0)` 六种 `time_range` 各自抛 `ContractViolation`。
-- [ ] `s.read("rms.practice", (0.0, 1.0)).element_count == 172` 且 `s.read("chroma.lowres.reference", (0.0, 1.0)).element_count == 21`（`44100 // 256` 与 `44100 // 2048`），证明 `rms` 与 `chroma` 没有混用帧移。
+- [ ] `s.read("rms.practice", (0.0, 1.0)).element_count == 172` 且 `s.read("chroma.lowres.reference", (0.0, 1.0)).element_count == 252`（`(44100 // 256)` 与 `(44100 // 2048) * 12`），证明 `rms` 与 `chroma` 没有混用帧移，且 chroma 的 `element_count` 正确反映了 `("frame", "bin")` 的第二维（12 个音级）。★ 原写作 `== 21` 是恒假值（把帧数当成了元素数）。
 - [ ] `assert_budget({"a": np.zeros(3, "float32"), "b": np.zeros((2, 5), "float64")}) == 92`。
 - [ ] `assert_budget({"x": np.zeros(134217728, dtype="float32")}) == 536870912`（恰好等于上限，通过）。
 - [ ] `assert_budget({"x": np.zeros(134217729, dtype="float32")})` 抛 `CoreBuildError` 且 `e.code is ErrorCode.CORE_BUILD_FAILED`。
@@ -949,7 +1475,7 @@ python -m pytest tests -q -k "surface or contract or inv_104" 2>/dev/null || tru
 - [ ] `s.manifest().ports` 与 `s._data` 的写入尝试都抛 `TypeError`；`s.manifest = None` 与 `s._data = {}` 都抛 `AttributeError`。
 - [ ] `s.manifest() == s.manifest()` 为 `True`，且两次调用的 `list(ports)` 顺序相同。
 - [ ] `s.manifest().sealed is True`，且 `s.manifest().reference_duration_sec == 3.0`、`practice_duration_sec == 2.0`（输入为 3 s 与 2 s）。
-- [ ] 逐端口 `d.hop_length == profile.PORT_INDEX[p].hop_length`、`d.sample_rate == profile.PORT_INDEX[p].sample_rate`、`d.timeline_basis is profile.PORT_INDEX[p].timeline_basis`。
+- [ ] 逐端口 `d.hop_length == profile.PORT_INDEX[p].hop_length`、`d.sample_rate == profile.AUDIO.sample_rate`、`d.timeline_basis is profile.PORT_INDEX[p].timeline_basis`。
 - [ ] 逐多维端口 `tuple(d.field_names) == tuple(FIELD_LAYOUTS[p.split(".", 1)[0]])`。
 - [ ] `seal(a) is a` 为 `True`，且 `a.strides` 不变。
 - [ ] 上述 Python 校验脚本最后打印 `FILE-104 ALL INVARIANTS PASS`，退出码为 **0**。

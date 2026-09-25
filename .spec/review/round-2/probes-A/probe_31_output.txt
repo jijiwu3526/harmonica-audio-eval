@@ -1,0 +1,38 @@
+=== §3: 'profile 的 6 个名字' -- count the names actually listed ===
+  89:   - `profile.PortSpec.produced_by` 指名的 core 端口生产模块，**只能**通过
+  90:     `importlib.import_module` 按其**点分模块路径字符串**动态取得，
+  91:     或由 `harmonica_eval/core/` 内的直接模块 import 取得；取到的可调用对象签名约定为
+  92:     `(reference, practice, sample_rate, warp_path) -> NDArray`。
+  claimed = 6; listed = 7 -> ['PORTS', 'PORT_INDEX', 'BUDGET', 'AUDIO', 'ALIGN', 'MATERIALIZE', 'PROFILE_VERSION']
+  MATCH: False
+
+=== §3: contract name count ===
+  84:     `AlgorithmDataContract`、`AudioFormat`、`BufferView`、`PortDescriptor`、
+  85:     `SurfaceManifest`、`ContractViolation`、`CoreBuildError`、`ErrorCode`；
+  86:     以及 **2 个模块级常量/表**：`FIELD_LAYOUTS`、`CONTENT_HASH_MAGIC`。
+  87:   - `harmonica_eval.profile` 的 **6 个名字**：
+  88:     `PORTS`、`PORT_INDEX`、`BUDGET`、`AUDIO`、`ALIGN`、`MATERIALIZE`、`PROFILE_VERSION`。
+  claimed = 8; listed = 8 -> ['AlgorithmDataContract', 'AudioFormat', 'BufferView', 'PortDescriptor', 'SurfaceManifest', 'ContractViolation', 'CoreBuildError', 'ErrorCode']
+
+=== 'types' in §3 allowed import list? ===
+   'types' appears in §3 block: False
+   §3 exhaustiveness claim: ['★ 本清单必须**穷举**，不许出现「等」「之类」。']
+
+=== §4.7 step 12 REQUIRES import types ===
+  794:   11. 返回 `Surface(manifest_obj, ports)`。
+  795:   12. **导入时机**：`types.MappingProxyType` 需要
+  796:       `import types`；这是标准库，属于 §3 允许清单的补充，
+  797:       实现**必须**在模块顶部写 `import types`（不得在函数体内做局部 import）。
+  798: - **失败语义补充**：第 1–4 步的失败**必须发生在**第 5 步之前，
+  799:   因为「不得部分发布」要求：任何情况下都**不得**有半个数据面被构造出来。
+
+=== §3 forbids non-declaration top-level statements; §4.0 REQUIRES import-time assert ===
+  120: - 禁止 import `time`、`datetime`（时间戳会让 `content_hash` 与构建结果不可复现）。
+  121: - 禁止在模块顶层执行任何非声明语句（除 `__all__` 赋值外，不得有函数调用、
+  122:   常量计算、文件读取）。
+  123: 
+  139: 以上三个列号常量**必须**与 `contract.FIELD_LAYOUTS` 对得上；
+  140: 实现**必须**在模块导入时用一次断言核验（`assert FIELD_LAYOUTS["notes"][0] == "onset_sec"`
+  141: 与 `assert FIELD_LAYOUTS["warp_path"][0] == "reference_frame"`），
+  142: 核验失败即 `ImportError` 级别缺陷，**不得**静默继续。
+  143: 

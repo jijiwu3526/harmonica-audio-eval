@@ -1,0 +1,52 @@
+######## FILE-002: is the URI channel now fully landed? ########
+   FILE-002:184: ### 4.2 `run_headless(reference_uri: str, practice_uri: str, out_path: Path) -> UiView`
+   FILE-002:199: ### 4.3 `write_metrics_json(view: UiView, out_path: Path, reference_uri: str, practice_uri: str) -> None`
+   FILE-002:288: 3. `inputs` 固定为 `{"reference": reference_uri, "practice": practice_uri}`，键序固定。★ 两个值取自**本函数的入参**（见本节开头的签名更正），**不得**从 `view` 里翻找、不得新增 `UiScalar` 键去承载路径（`FILE-200` 规定 `
+   FILE-002:325: ### 4.4 `render_report_markdown(view: UiView, reference_uri: str, practice_uri: str) -> str`
+   FILE-002:351: - `state` 文本规则同 §4.3 第 4 步。参考 / 练习两行的值**取自本函数的 `reference_uri` / `practice_uri` 入参**（与 §4.3 第 3 步同源，均为 `main` 的 `args.reference` / `args.practice`）；`describe_inputs`
+   FILE-002:375: ### 4.6 `describe_inputs(reference_uri: str, practice_uri: str) -> str`
+   skeleton write_metrics_json: (view: 'UiView', out_path: 'Path', reference_uri: 'str', practice_uri: 'str') -> 'None'
+   skeleton render_report_markdown: (view: 'UiView', reference_uri: 'str', practice_uri: 'str') -> 'str'
+   -> both agree => F1 RESOLVED by the concurrent edit
+
+######## FILE-002 §4.4 body: does it reference the uri params? ########
+   325: ### 4.4 `render_report_markdown(view: UiView, reference_uri: str, practice_uri: str) -> str`
+   326: 
+   327: - **输入**：C1 投影 + 本次运行的两个输入路径字符串。★ **签名更正**（与 §4.3 同因）：
+   328:   报告正文要求写出「参考 / 练习」两行，而 `UiView` **不携带 URI** ——
+   329:   原签名 `(view)` 同样无法产出这两行。由调用方 `main` 显式传入。
+   330: - **输出**：Markdown 文本（`str`），**以单个 `"\n"` 结尾**，无尾部空行。
+   331: - **算法口径**（骨架固定；`[]` 表示该行仅在条件成立时出现）：
+   332: 
+   333: ```markdown
+   334: # 数值报告
+   335: 
+   336: - 状态：<state>
+   337: - 参考：<reference_uri>
+   338: - 练习：<practice_uri>
+   339: [- 错误码：<error_code>]
+   340: [- 错误详情：<error_detail>]
+   341: 
+   342: ## 标量指标
+
+######## FILE-105 §3 full whitelist ########
+   41: 
+   42: ## 3 · 你能用的东西（依赖清单，封闭）
+   43: 
+   44: **可以 import**：
+   45: - 标准库（穷举，恰 4 个模块）：
+   46:   - `__future__`（仅 `annotations`，文件头已用）
+   47:   - `typing`（仅 `Mapping`，`INTERNAL_STAGES` 的注解用）
+   48:   - `uuid`（仅 `uuid.uuid4().hex`，session_id 生成）
+   49:   - `dataclasses`（仅 `dataclass` / `field`，模块私有会话记录 `_Session`）
+   50: - 第三方：**无。一个都不允许。**
+   51: - 本包内（穷举，恰 6 条 import 的来源）：
+   52:   - `harmonica_eval.contract`：且仅这 5 个名字 —— `HostContract`, `SessionState`, `ContractViolation`, `CoreBuildError`, `ErrorCode`
+   53:   - `harmonica_eval.core.surface`：且仅 `Surface`
+   54:   - `harmonica_eval.core.ingest`、`harmonica_eval.core.align`、`harmonica_eval.core.features`：仅作为 build_surface 的阶段入口调用（入口签名以各自 BUILD-INSTRUCTION 冻结的规格为准，本文件不内联其任何逻辑）
+   55: 
+   56: **禁止 import**：
+   57: - 标准库具名禁入：`os`, `sys`, `pathlib`, `io`, `logging`, `threading`, `asyncio`, `subprocess`, `json`, `pickle`, `random`, `time`, `hashlib`（content_hash 的计算属 surface.py，口径冻结在 
+   58: - 第三方具名禁入：`numpy`, `numpy.typing`, `scipy`, `soundfile`, `librosa`, `pandas`, `torch`（本文件不得接触音频字节与数值计算）
+   59: - 本包具名禁入：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`（门面不得反向依赖调用方或算法）、`harmonica_eval.profile`（profile 解析责任在阶段模块）、core 包内 ingest/align/featu
+   60: - 封闭规则：**凡未列入「可以 import」名单的模块一律禁止**。实现中出现的每一条 import 语句必须逐字落在名单内；发现需要名单之外的东西（尤其需要算法或特征计算）即为宪章 §5.9 违规，停止并 GATE CHALLENGE，不得自行扩单。

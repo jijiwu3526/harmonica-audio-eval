@@ -17,7 +17,7 @@
 | 所属组件 | COMP-C1 Framework / Host |
 | 层级 | L3（symbol / implementation） |
 | 上游 | `__main__.py`（无头）或 `cockpit`（有界面）驱动 |
-| 下游 | C2 经 `HostContract`（**只经契约**）；C3 经 `algorithms.ALGORITHMS` |
+| 下游 | C2 经 `HostContract`（**只经契约**）；C3 经显式 `Registry`（★ 注册归属已裁定：物理装配根是 `algorithms/bootstrap.py`，见 §4.1.1） |
 | 同层邻居 | `host/__init__.py`（包出口，无逻辑） |
 
 ### ★ 先弄清你的身份（这一条曾导致盲审误读）
@@ -57,12 +57,47 @@ UiProjectionPort   C1 → C4 的接口，由**本类**实现
 **可以 import**：
 - 标准库：`time`（`perf_counter`）, `pathlib`（`Path`）, `typing`
 - 第三方：无（**不引入任何第三方**）
-- 本包内：`..contract`（上面列出的全部类型与常量）、`..algorithms.ALGORITHMS`
-  —— ★ 这是**全系统唯一允许的跨界 import**（C1 是装配点，它必须知道有哪些算法）
+- 本包内：`..contract`（上面列出的全部类型与常量）、`..algorithms.registry.Registry`（显式注册表；
+  ★ 本文件**只接收** bootstrap 产出的 Registry，不自己初始化它 —— 见 §4.1.1）、
+  `..core.api`（**仅** `HostCore` 一个符号，见下方 ★ 例外）
+  —— ★ C1 是装配点，它必须知道「有哪些算法」与「用哪个 Core 实现」
 
 **禁止 import**：
-- `..core.*`（C1 只经 `HostContract` 与 C2 对话，不认其内部实现）
 - `..cockpit.*`（不变量 F：C4 缺席时本文件必须照常工作）
+- `..core` 的**内部实现模块**（`core.ingest` / `core.align` / `core.features`
+  / `core.surface` / `core.api` 一律禁止）—— C1 只经 `HostContract` 与 C2 对话，
+  不认其内部实现
+
+**★ 唯一例外（P1 审查 F13 的修正）**：`..core.api` 的 **`HostCore`** 可以 import，
+且**必须** import —— 否则 §4.2 的 `build_default_app()` 无法实现。
+
+★★ **这是一处真实的自相矛盾，上一版无解** ★★
+
+上一版同时要求：
+- §4.2「工厂函数：**构造 `HostCore`** 并注入 `HostApp`」；
+- §3「禁止 import `..core.*`」。
+
+实测 `HostCore` 定义在 `harmonica_eval/core/api.py:57`，
+**唯一**能拿到它的写法就是 import 它。于是实现者只能二选一：
+违反 §3 去 import，或违反 §4.2 不构造 —— **两者都是缺陷**。
+
+**为什么允许 import `core.api.HostCore` 不破坏分层**：
+1. `HostCore` **就是** `contract.HostContract` 的实现者，
+   C1 通过 `HostContract` 的 7 个操作与它对话 —— 依赖的是**契约**，不是实现；
+2. C1 装配点要显式登记插件，职责就是知道“用哪个实现”。
+   这与它使用 `algorithms.registry.Registry` 属于同一类动作；**但注册究竟放 C1 还是独立
+   装配根 `bootstrap.py`，已于 2026-09-24 裁定为后者**（方案甲，GC-204-08 CLOSED），
+   见 §4.1.1；**本文件只接收其产出的 Registry，不自己 import 具体算法**；
+3. 被禁的是 `core.ingest` / `core.align` / `core.features` / `core.surface`
+   —— 那些是 C2 的**内部切分**，C1 不该知道。`core.api` 是 C2 的**门面**，
+   不是内部。
+4. `HostApp.__init__(core: object)` 的形参类型**保持** `object`（或收窄为
+   `HostContract`），**不得**收窄为 `HostCore` —— 那会把 C1 焊死在 C2 的具体类上，
+   使 `HostApp` 无法被测试替身驱动。
+
+**import 清单相应更新**：本包内允许
+`..contract`、`..algorithms.registry.Registry`、`..core.api.HostCore`（**仅此一个符号**）。
+**禁止** `from ..core import *`、禁止 import `core` 包的 `__init__` 的其他导出。
 - **任何信号处理库**：`numpy` / `scipy` / `librosa` / `soundfile` 一律禁止
   （见 §7）
 
@@ -80,23 +115,64 @@ MAX_PROJECTION_POINTS: int = 2000
 **下采样是投影的职责，不是界面的职责**（界面不得重算）。
 
 **不要写端口清单镜像常量**：C1 需要的端口信息来自
-`algorithms.ALGORITHMS[i].required_ports` 与 `surface.manifest()`。
+`Registry.list()` 中各 `PluginSpec` 的 `required_inputs` 与 `surface.manifest()`。
 
 ---
 
 ### 4.1 `__init__(self, core: object) -> None`
 
 - `core` 是 COMP-C2 的 `HostContract` 实现（`HostCore`）。
-- **本方法是全系统唯一的装配点**。算法注册表来自
-  `algorithms.ALGORITHMS`（不是参数，是 import）。
+- **冻结形状（2026-09-24 裁定方案甲，见 §4.1.1）**：插件注册表来自
+  `algorithms.registry.Registry` 的显式注册，而不是算法清单常量；
+  ★ 注册的**物理位置是 `algorithms/bootstrap.py`**，本类只接收其产物。
 - 内部状态至少需：当前 `session_id`（`str | None`）、当前 `SessionState`、
   最近一次 `UiView` 的相关字段、以及核心句柄。
 - **不得**在 `__init__` 里创建会话或触碰文件系统。
 
+### ### 4.1.1 装配根已裁定（GC-204-08 CLOSED，方案甲）
+
+**✅ 负责人已于 2026-09-24 裁定方案甲。** `GC-204-08` 状态为 **CLOSED**
+（台账：`.spec/GATE-CHALLENGES-C3.md:544`，另见该节「已解决」段）。
+
+**冻结的物理事实**：
+
+- 唯一物理装配根是 `harmonica_eval/algorithms/bootstrap.py`（其 Build Instruction 为
+  `FILE-206-v1.md`）——它是全系统唯一 import 具体算法模块的位置，产出已装配 `Registry`。
+- `HostApp` 只接收该 `Registry`，**自身不得 import 具体算法**（不变量甲仍然有效）。
+- 「新增算法不改 Host 逻辑」这条目标改由 `bootstrap` 承接：新增插件时在 bootstrap 注册，
+  不触碰 `host/`。
+
+**★ 本节以下的注册序列不再是「待裁定」，而是冻结的实现依据。**
+
+#### 决策历史（原「未裁定」版本，保留供追溯）
+
+> 以下为裁定前的原文，保留以说明为何当初必须裁定：
+>
+> 当前文档把 `HostApp.__init__` 称为“全系统唯一的装配点”，同时又要求它显式登记具体插件；
+> 但 `host/` 不得 import 任何具体算法实现，两条要求不能同时成立（`harmonica_eval/host/app.py:113-123`）。
+> `GC-204-08` 的状态仍为 **OPEN**，推荐方案是独立 `bootstrap.py` 作为物理装配根，但负责人尚未裁定
+> （原台账引用 `.spec/GATE-CHALLENGES-C3.md:297-349,449-464`）。
+>
+> 因此本文件曾冻结“现状待裁定”而不擅自选择 A/B/C 任一方案：§4.1、§4.2 与 `build_default_app()`
+> 描述的注册序列均只标为**目标形状，待实现、待裁定**。
+
+**★ 裁定未改变、仍然有效的两条要求**：
+
+- 不得声称默认 Registry 已装配——`bootstrap.build_default_registry()` 当前仍为 SHELL，
+  注入完成前不得把它当成可用。
+- **不得**为了过门禁把具体算法 import 塞回 `host/`（那会重新制造 GC-204-08）。
+
+**★ `GC-204-01`（C1 会话 API / G8 矛盾）仍为 OPEN**，阻塞 Cast Freeze
+（`.spec/GATE-CHALLENGES-C3.md:12-87,449-464`）；§4.3 的当前隐式 session 口径不能被
+当作最终裁定。
+
 ### 4.2 `build_default_app() -> HostApp`
 
-- 工厂函数：构造 `HostCore` 并注入 `HostApp`。
-- 本函数是 `__main__.py` 与 `cockpit` 的共同入口。
+- 工厂目标形状：`from ..core.api import HostCore`，构造它并注入 `HostApp`。
+- `core.api.HostCore` 的唯一例外 import 已在本文件明确授权；但**默认 Registry 如何注册仍待
+  `GC-204-08` 裁定**，不得擅自 import 具体算法来补缺，也不得写成已经装配完成。
+- 本函数是 `__main__.py` 与 `cockpit` 的共同入口；当前函数体仍为 SHELL
+  （`harmonica_eval/host/app.py:246-252`）。
 
 ---
 
@@ -106,19 +182,32 @@ MAX_PROJECTION_POINTS: int = 2000
 | --- | --- | --- | --- |
 | `create_session(profile_version: str) -> str` | 无 | 调 C2 建会话；**C1 记住** id；状态 → `CREATED` | `session_id` |
 | `destroy_session(session_id: str) -> None` | 任意 | 调 C2 销毁；状态 → `CLOSED` | `None` |
-| `set_reference(path: str) -> None` | `CREATED`/`INPUT_READY` | 校验路径存在 → 交给 C2；状态 → `INPUT_READY` | `None` |
-| `set_practice(path: str) -> None` | `CREATED`/`INPUT_READY` | 同上 | `None` |
+| `set_reference(session_id: str, uri: str) -> None` | `CREATED`/`INPUT_READY` | 校验 uri 存在 → 交给 C2；状态 → `INPUT_READY` | `None` |
+| `set_practice(session_id: str, uri: str) -> None` | `CREATED`/`INPUT_READY` | 同上 | `None` |
 | `build_surface() -> None` | `INPUT_READY` | 状态 → `BUILDING` → 调 C2 构建 → 成功则 `DATA_READY` | `None` |
 
 **★ 会话跟踪规则（必须逐字遵守）**：
 
 ```
-create_session(profile_version)        → 调 C2 建会话，把 id 记在 C1 里
-set_reference(path) / set_practice(path) → 用 C1 记住的 id 调 C2（**不带** session_id）
-build_surface()                        → 同样用 C1 记住的 id
-run_algorithms()                       → 用 C1 记住的 id
-destroy_session(session_id)            → ★ **带** session_id
+create_session(profile_version)          → 调 C2 建会话，把 id 记在 C1 里
+set_reference(session_id, uri) / set_practice(session_id, uri) → ★ **带** session_id
+build_surface(session_id)               → 同样【带】session_id
+run_algorithms(session_id)              → ★ **带** session_id（与空壳签名一致）
+destroy_session(session_id)             → ★ **带** session_id
+
+★★ **本轮更正（2026-09-24，裁定依据：契约 + 实测）★★
+    原表把 `set_reference(path)` / `set_practice(path)` / `build_surface()`
+    写成「不带 session_id」，与 `contract.HostContract` 冻结的
+    `(session_id, uri)` 直接矛盾。
+    ★ 实测：不带 session_id 无法工作（会话 id 只能由 C1 持有并显式传入）。
+    ★ 故以契约为准，本表与会话跟踪规则同步改为【带 session_id】。
+    ★ 参数名亦由 `path` 统一为契约的 `uri` —— 关键字调用属于契约的一部分。
 ```
+
+★★ **第六版更正（P2 管线审查 F6）**：上一版这里写 `run_algorithms()`（**不带**参数），
+但同一文件 :152 的小节标题与空壳 `host/app.py:179` 都是
+`run_algorithms(self, session_id: str)`。**同一份文件内自相矛盾。**
+本版统一为**带** `session_id`。
 
 为什么只有 `destroy_session` 带：销毁可能发生在**错误恢复路径**上，
 此时 C1 记住的 id 可能已失效。传参比依赖隐含状态更安全
@@ -145,22 +234,48 @@ C2 是通用核心，"uri" 允许未来扩展成非文件来源；C1 是本产�
 
 #### `check_compatibility(algorithm_id: str) -> bool`
 
-- 取该算法的 `required_ports`，逐个查 `surface.manifest().ports`。
+- 取该插件的 `required_inputs`，逐个查 `surface.manifest().ports`。
 - **单向检查**：只判断"有没有"。缺失 → 返回 `False`。
 - **绝不**因为缺端口就去让 C2 生成数据（**核心禁令**）。
 
 #### `run_algorithms(session_id: str) -> Sequence[AlgorithmResultEnvelope]`
 
 - **前置**：状态 == `DATA_READY`，否则抛 `ContractViolation`。
-- **顺序**：遍历 `algorithms.ALGORITHMS`，逐个调用其 `entry(surface)`。
-  返回顺序**必须**与注册表声明顺序一致 ——
-  否则报告顺序会随运行变化，不可复现。
+- **兼容检查边界**：这里只核对 `PluginSpec.required_inputs` 与 manifest 的存在性；runtime 的
+  `resolve_inputs` 才执行 schema/时间轴/dtype/字段/采样率六项检查。两者不得合并成一份
+  “手抄端口规则”（`harmonica_eval/contract.py:538-650`、`harmonica_eval/algorithms/runtime.py:130-178`）。
+- **★ 装配目标序列（待实现、待裁定）**：
+  ```
+  Registry.list() → spec.required_inputs + C2 surface.manifest()
+    → runtime.resolve_inputs(spec, manifest) -> (InputResolution, status)
+    → 原始 InputResolution 仅留在 runtime 私有边界
+    → resolution.as_view() -> ResolutionView
+    → ResolvedSurface(C2 surface, ResolutionView)
+    → 单参 PluginSpec.entry(resolved_surface)
+  ```
+  插件只抵达 `ResolvedSurface` / `ResolutionView`，**不得**拿到原始 `InputResolution`
+  （`harmonica_eval/contract.py:390-413,639-651`；`harmonica_eval/algorithms/runtime.py:65-131`）。
+- **★ 已知未决 / 当前不能工作**：
+  1. `C2 core/surface.py::Surface` 目前**没有** `resolution` 属性
+     （`harmonica_eval/core/surface.py:112-144`）；`ResolvedSurface` 只能计划组合它，不能把 C2 Surface
+     误写成已满足完整 `AlgorithmDataContract`。
+  2. `ResolvedSurface.manifest()` / `read()` / `resolution` 与 `InputResolution.as_view()` 均为 SHELL；
+     `HostApp.run_algorithms` 本身也仍为 SHELL（`harmonica_eval/host/app.py:182-196`）。
+     因此上述序列只是**待实现目标形状**，当前不能端到端工作。
+  3. Registry 注册的**物理根已裁定为 `algorithms/bootstrap.py`**（§4.1.1）；
+     ★ 但 C1 是否应在该序列中构造 `ResolvedSurface` **仍受 BLOCK-2 接线责任影响**
+     （负责人 2026-09-24 裁定方案乙：`InputResolution` 暴露给 C1 供 `consumed_ports ⊆ available`
+     比对，插件仍只看 `ResolutionView`）——**该接线尚未落地，相关函数仍为 SHELL**。
+  4. 原始 `InputResolution` 不出 runtime，故 `consumed_ports ⊆ available` 也不能由 C1 在拿到
+     `ResolvedSurface` 后独立补做；runtime 源码目前把它写成“C1 调用点比较”，与“原始对象不出
+     runtime”发生**新的职责冲突**（`harmonica_eval/algorithms/runtime.py:173-176,229-232`）。
+     这是待裁定项，不能由实现者私造 wrapper、传第二参数或把 available 塞入信封来绕过。
 - **故障隔离**（不变量 D）：
   - 单个算法抛异常 → 捕获 → 转成 `status='FAILED'` 的信封
   - 单个算法失败**不中断**其余算法
   - 不兼容的算法 → `status='INCOMPATIBLE'`，其余照常
 - **结果必须校验**：算法可能返回垃圾（非 `AlgorithmResultEnvelope`、
-  payload 缺键、键多于 schema）。非法 → 转成 `FAILED` 信封，
+  payload 元素非 `UiScalar` / `UiSeries`、元素 `key` 重复或违反自描述约束）。非法 → 转成 `FAILED` 信封，
   但**不得**因校验失败而放弃其他算法。
 - **★ 已知缺口（不隐瞒）**：算法死循环会**卡在此处**，
   v0.1 无超时机制。要在 §10 上报，不要自作主张加线程/信号超时。
@@ -245,7 +360,7 @@ C2 是通用核心，"uri" 允许未来扩展成非文件来源；C1 是本产�
 
 | ID | 不变量 | 怎么验 |
 | --- | --- | --- |
-| INV-301-1 | 状态单调推进，不回退不跳过 | 非法序列必须抛 `ContractViolation` |
+| INV-301-1 | 正常流程状态单调推进，不跳过数据面构建；`CANCEL` 与 `RESET` 是管理操作，允许回退到稳定态 | 非法序列必须抛 `ContractViolation`；`CANCEL` / `RESET` 按 `COMMAND_EFFECTS` 转移 |
 | INV-301-2 | 算法**只能**在 `DATA_READY` 触发 | 在 `BUILDING` 下触发 → 必须抛 |
 | INV-301-3 | 单个算法失败不影响其他算法 | 注入一个必炸算法，其余仍返回 `OK` |
 | INV-301-4 | `run_algorithms` 返回顺序 == 注册表顺序 | 两次运行顺序一致 |
@@ -277,15 +392,61 @@ python3 tools/verify_shell.py             # 空壳期：应通过
 python3 tools/verify_stubs_raise.py       # 空壳期：74/74
 python3 tools/build_virtual_graph.py --check
 python3 -m harmonica_eval --reference <a.wav> --practice <b.wav>   # 端到端
+
+python3 - <<'PY'
+# ★ 判据 2 · import 禁区（用 AST 判 import 语义，不用文本 grep）
+# ★ 理由：grep 会命中注释 / docstring / README / __pycache__/*.pyc，
+#   而判据要问的是「host 真的 import 了 cockpit 吗」。
+# ★ 文本 grep 判 import 语义**天然不可靠** —— 已实证恒红。
+import ast, pathlib, sys
+
+BANNED = ("cockpit",)
+EXEMPT_NAMES = ("numpy", "scipy", "librosa")
+
+violations: list[str] = []
+for path in sorted(pathlib.Path("harmonica_eval/host").rglob("*.py")):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in BANNED or root in EXEMPT_NAMES:
+                    violations.append(f"{path}:{node.lineno} import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                # 相对导入：module 是被导入的模块名（可能为 None）
+                target = node.module or ""
+                root = target.split(".")[0]
+                if root in BANNED or root in EXEMPT_NAMES:
+                    violations.append(f"{path}:{node.lineno} from {'.'*node.level}{target}")
+            elif node.module and node.module.split(".")[0] in BANNED + EXEMPT_NAMES:
+                violations.append(f"{path}:{node.lineno} from {node.module}")
+
+if violations:
+    print("FAIL import 禁区命中：")
+    for line in violations:
+        print("   ", line)
+    sys.exit(1)
+print("OK host/ 的 import 均不触禁区（cockpit / numpy / scipy / librosa）")
+PY
 ```
 
-**验收判据**：
+**验收判据**（★ 前 4 条已机器化，见上方 heredoc）：
 - [ ] 非法状态序列每个都抛 `ContractViolation`（列出实际输出）
 - [ ] 注入必炸算法后，其余算法仍返回 `OK`
 - [ ] 两次 `run_algorithms` 结果顺序一致
-- [ ] `grep -rn "numpy\|scipy\|librosa" harmonica_eval/host/` 为空
-- [ ] `grep -rn "cockpit" harmonica_eval/host/` 为空
+- [x] `host/` 未 import `cockpit` / `numpy` / `scipy` / `librosa`（★ AST 判据，见上）
 - [ ] C4 缺席下 `python3 -m harmonica_eval` 能跑通
+
+★ **判据 4 改用 AST 的原因**（已实证）：
+```
+原写法  grep -rn "cockpit" harmonica_eval/host/  → 要求为空
+实跑    命中 5 处：README.md×2、app.py 注释×2、__pycache__/*.pyc
+AST     真实 import = 0 处
+```
+★ `grep` 测的是「文本里有没有这个词」，判据要问的是「模块有没有真的 import 它」。
+★ **文本 grep 判 import 语义不可靠**；且 `grep -rn` 扫到 `.pyc` 会输出
+★ `Binary file matches` 并**返回 0 退出码**，掩盖真实结果。
 
 ---
 
@@ -310,6 +471,13 @@ python3 -m harmonica_eval --reference <a.wav> --practice <b.wav>   # 端到端
 4. 你需要 C1 支持**多会话**（须加 `session_id` 参数，是契约变更）
 5. 你需要 import 任何信号处理库
 6. 你发现 §4 的规格**不足以确定唯一实现**
+7. 你需要让 C2 Surface 实现 `resolution`、或让 C1 持有原始 `InputResolution`
+   （★ `InputResolution` 暴露给 C1 已由负责人 2026-09-24 裁定为方案乙，见 §4.3；
+   ★ 但该接线尚未落地，若你发现必须越出冻结边界才能完成 → 上报）
+8. 你想把物理装配根从 `algorithms/bootstrap.py` 改到别处
+   （★ 已裁定为 `bootstrap.py`；见 §4.1.1 —— **不得擅自更改**，若你认为裁定有误 → 上报）
+8. 你需要用额外参数、payload 或第二份映射绕过“原始 `InputResolution` 不出 runtime”，以便
+   编排层检查 `consumed_ports ⊆ available`
 
 **上报格式**（宪章 §37）：
 ```
@@ -323,7 +491,7 @@ GATE CHALLENGE
 ```
 
 **绝对禁止**：先做 workaround（§38）；自行加"合理"默认值；
-静默缩小范围。
+静默缩小范围；把 `GC-204-01` / `GC-204-08` 写成已裁定；把任何 SHELL 写成已装配。
 
 ---
 
@@ -333,7 +501,7 @@ GATE CHALLENGE
 | --- | --- | --- |
 | `MAX_PROJECTION_POINTS` | `2000` | 本文件 4.0 |
 | `SessionState` 取值 | `CREATED / INPUT_READY / BUILDING / DATA_READY / FAILED / CLOSED` | `contract.py`（**只有 6 个**） |
-| `AlgorithmResultEnvelope.status` | `'OK' / 'FAILED' / 'INCOMPATIBLE'` | `contract.py` |
+| `AlgorithmResultEnvelope.status` | `'OK' / 'DEGRADED' / 'INCOMPATIBLE' / 'FAILED'` | `contract.py` |
 | `COMMAND_LEGALITY` | 6 条命令的合法状态集 | `contract.py` |
 | `COMMAND_EFFECTS` | 命令效果映射（含 `CANCEL` / `RESET→CREATED`） | `contract.py` |
 | `UI_PAYLOAD_KEYS` | UI 载荷键映射 | `contract.py` |

@@ -1,0 +1,61 @@
+--- F8b stale +100  [specs/FILE-203-v1.md] ---
+  94: 帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+  96: - **最后一个音**延伸到 `frame(onset_sec_last) + 100`（默认 1 秒），或数据末尾帧，取其二者中较小。
+
+  With the NEW formula, 1 second = round(44100/256) = 172 frames, NOT 100.
+  FILE-203:96 still hardcodes '+ 100' and calls it '默认 1 秒' -> inconsistent by 172 vs 100.
+
+--- F11 stale 4-arg  [specs/FILE-104-v1.md] ---
+  91: 或由 `harmonica_eval/core/` 内的直接模块 import 取得；取到的可调用对象签名约定为
+  92: `(reference, practice, sample_rate, warp_path) -> NDArray`。
+
+--- F12 toplevel assert  [specs/FILE-104-v1.md] ---
+  121: - 禁止在模块顶层执行任何非声明语句（除 `__all__` 赋值外，不得有函数调用、
+  122: 常量计算、文件读取）。
+  140: 实现**必须**在模块导入时用一次断言核验（`assert FIELD_LAYOUTS["notes"][0] == "onset_sec"`
+  141: 与 `assert FIELD_LAYOUTS["warp_path"][0] == "reference_frame"`），
+  142: 核验失败即 `ImportError` 级别缺陷，**不得**静默继续。
+
+--- F13 dup heading  [specs/FILE-104-v1.md] ---
+  160: ### 4.1 `port_prefix(port_id: str) -> str`
+  180: ### 4.8 `port_prefix(port_id: str) -> str`
+
+--- F14 stage3/4  [specs/FILE-105-v1.md] ---
+  184: 
+  185: 实测：`core.align.align(reference, practice)` 的返回注解是
+  186: `npt.NDArray`，**只返回 `warp_path`**，不产任何 PCM。
+
+--- F14b whitelist  [specs/FILE-105-v1.md] ---
+  53: - `harmonica_eval.core.surface`：且仅 `Surface`
+
+--- F14c profile assert  [specs/FILE-105-v1.md] ---
+  164: ★★ **本版再更正（第三轮盲审 A 的 probe 18）：上一版这里写
+  331: | INV-105-12 | **`create_session` 的 `profile_version` 被记录且区分会话**：不同 `profile_version` 产生不同数据面 hash（同输入下） | 同一对 uri、`profile_version` 分别为 `"CORE_PROFILE_V0.1"` 与 `"CORE_PROFILE_V0.1-x"` 
+
+--- F14d sr provenance  [specs/FILE-105-v1.md] ---
+  166: import 白名单里**没有 `harmonica_eval.profile`**，且本节末尾又明写
+
+--- F15 stale n_points  [specs/FILE-002-v1.md] ---
+  366: - **单行格式（写死）**：
+  367: `- <label>：单位 <unit>，时间基准 <basis>（<basis 注解>），采样点 <n>，t 轴单位：秒`
+  639: 
+
+--- F16 four-vs-five  [specs/FILE-002-v1.md] ---
+  411: 四个 `raise NotImplementedError("SHELL: FILE-002 待注入实现")` 占位（`build_parser` / `run_headless` / `render_report_markdown` / `write_metrics_json` / `main`，共 5 处）必须被真实实现替换。文件末尾的 `if __name__ 
+
+--- F17 pitch 5v4  [specs/FILE-201-v1.md] ---
+  240: - **输出**：`dict`，**键名以 `algorithms.PAYLOAD_SCHEMAS["pitch"]` 为唯一权威**，
+  241: **恰好 5 个键，一字不得增删**：
+  252: 故本函数返回**前 4 个键**，由 `run()` 补上 `sample_rate` 得到完整 5 键。
+  253: 若实现者选择让本函数直接收 `sample_rate` 并返回 5 键，**也允许**
+  254: （两种都不违反契约），但**必须在文档里写清选了哪种**。
+
+--- F18 warp_path dual  [specs/FILE-104-v1.md] ---
+  388: | `("core.align", "index", ("warp_point","axis"), REFERENCE)` | `warp_path` | `core.align.align` |
+  406: | `core.align` 那一行 | `core.align.align` | `(reference, practice)` |
+
+--- F19 pitch fn keys  [specs/FILE-201-v1.md] ---
+  163: "n_paired": int,                 # 成功配对的音数
+  164: "n_unpaired": int,               # 未能配对的音数（★ 见下"已知缺口"）
+  165: }
+

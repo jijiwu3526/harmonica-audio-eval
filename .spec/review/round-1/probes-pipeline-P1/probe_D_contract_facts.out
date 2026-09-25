@@ -1,0 +1,27 @@
+== 1. warp_path 的 hop_length 与 read() 的 index 换算规则 ==
+  warp_path: units='index' dimensions=('warp_point', 'axis') hop_length=0
+  contract.py:443 规则: units=='index' -> 秒*sample_rate/hop_length
+  hop_length=0 => 除零；contract 只说 warp_path 按 reference_frame 换算后的秒值筛选，
+  未给出该用哪个 hop（且 contract.py:429 明令调用方不得用 ALIGN.hop_length）。
+
+== 2. notes.* units 与字段语义 ==
+  notes.reference: units='index' fields=('onset_sec', 'f0_hz', 'rms') hop=0
+  字段是 (秒, Hz, RMS)，但 units 声明为 'index' —— 单位与内容不符。
+
+== 3. contract 允许的 envelope.status 取值 vs 算法 BUILD-INSTRUCTION ==
+  contract.py:380  docstring: 'OK' | 'FAILED' | 'INCOMPATIBLE'
+  FILE-201:297      status = "SUCCEEDED" | "FAILED"   <-- SUCCEEDED 不在契约取值内
+  FILE-203:129      status='OK'                        <-- 与契约一致
+  pitch.py:158      'status=FAILED 的信封'（未提成功取值）
+
+== 4. 无消费者的端口（含设计豁免）==
+  warp_path                  produced_by=core.align
+  pcm.warped.practice        produced_by=core.surface
+  chroma.lowres.reference    produced_by=core.features
+  chroma.lowres.practice     produced_by=core.features
+
+== 5. SPEC §3 要求的 metrics 键 是否有生产者 ==
+  SPEC 键: ['mean_abs_warp_sec', 'tempo_ratio', 'confidence', 'pitch_cents_mae', 'in_tune_ratio', 'timing_mae_ms', 'energy_db_delta']
+  算法 payload 键: ['early_ratio', 'late_ratio', 'median_abs_cents', 'median_db', 'median_onset_ms', 'n_notes_used', 'n_unpaired', 'off_pitch_ratio', 'on_time_ratio', 'per_note_cents', 'per_note_delta_db', 'per_note_onset_ms', 'sample_rate', 'spread_db', 'spread_ms']
+  SPEC 键中在 payload 里的: []
+  => 无生产者: ['confidence', 'energy_db_delta', 'in_tune_ratio', 'mean_abs_warp_sec', 'pitch_cents_mae', 'tempo_ratio', 'timing_mae_ms']

@@ -1,0 +1,37 @@
+=== ingest public return types (skeleton, frozen) ===
+   decode_to_mono(uri: 'str') -> 'tuple[npt.NDArray, int]'
+   resample_to_profile(samples: 'npt.NDArray', native_sr: 'int') -> 'npt.NDArray'
+   validate_duration(n_samples: 'int', sample_rate: 'int') -> 'float'
+   assert_not_silent(samples: 'npt.NDArray') -> 'float'
+   ingest(uri: 'str') -> 'npt.NDArray'
+
+   ingest() -> NDArray  => returns ONLY samples. No sample_rate, no AudioFormat.
+
+=== who needs sample_rate downstream? ===
+   surface.build_surface(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Surface'
+   surface.generate_all_ports(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Mapping[str, npt.NDArray]'
+   surface.build_descriptor(port_id: 'str', data: 'npt.NDArray', sample_rate: 'int') -> 'PortDescriptor'
+   features.materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+   features.materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+
+=== FILE-105 stage 1 claims ingest yields 'PCM 与其 AudioFormat' ===
+  159: 
+  160: **本版冻结**：
+  161: - 调用形态 = `ingest(uri)`，**逐路**调用，共两次。
+  162: - `profile_version` **不是** `ingest` 的参数。它属于**会话**身份
+  163: （`create_session(profile_version)`），在阶段 1 里只做一次断言：
+  164: `assert s.profile_version == profile.PROFILE_VERSION`，不等 → `CoreBuildError`。
+  165: - 两次调用的**顺序冻结**：先 reference、后 practice。
+  166: - 采样率不由本文件假设：`ingest` 返回的 PCM 已按 `profile.AUDIO.sample_rate`
+  167: 规范化（SPEC §7.4 授权的重采样点唯一地在这里）。
+  168: - 阶段 2 `ALIGN`：调用 `harmonica_eval.core.align` 的入口，实参 = 阶段 1 的产出；
+
+=== FILE-105 forbids importing profile ===
+  59: - 本包具名禁入：`harmonica_eval.host`、`harmonica_eval.algorithms`、`harmonica_eval.cockpit`（门面不得反向依赖调用方或算法）、`harmonica_eval.profile`（profile 解析责任在阶段模块）、core 包内 ingest/align/features/surface 的任何 `_` 私有符号
+  78: | `harmonica_eval/profile.py` | 版本字符串的解析与合法性判定、profile 常量（`AUDIO.max_duration_sec` / `ALIGN.hop_length` / `MATERIALIZE.rms_hop_length`）的读取、端口清单的来源 | api.py **不 import** profile；`profile_version` 在本文件里
+  109: - **输入**：`profile_version: str`。语义 = profile 版本标识（本仓当前取值 `"CORE_PROFILE_V0.1"`）。取值域 = 任意非空 `str`。单位：无。本文件对该字符串**只做两件事**：判非空、存入 `_Session.profile_version`；不解析、不比对本仓已登记版本、不 import `harmonica_eval.profil
+  331: - **不解析 profile**：不 import `harmonica_eval.profile`，不校验 `profile_version` 是否为已知版本，不读取 `AUDIO.max_duration_sec` / `ALIGN.hop_length` / `MATERIALIZE.rms_hop_length`，不决定端口清单。`profile_version` 是不透明字符串。
+
+=== FILE-105 §4.10 constant table: does it state where sr comes from? ===
+  88: **禁止外泄清单（逐条机械可验）**：阶段名 `INGESTING` / `ALIGNING` / `MATERIALIZING` / `SEALING`、端口 id、数组形状、`hop_length`、缓冲对象、`content_hash` 字符串、字节数、耗时、采样率、异常堆栈中的阶段内部类型。判定方法：这 12 类信息在本文件里只以局部变量形式存在，绝不作为任何返回值、任
+  166: - 采样率不由本文件假设：`ingest` 返回的 PCM 已按 `profile.AUDIO.sample_rate`

@@ -50,14 +50,15 @@ build_surface() → 触发预生成（C2 侧）
 destroy_session() → 释放
 ```
 
-**状态机约束**：单调推进，不可回退，不可跳过 `DATA_READY`。
+**状态机约束**：正常流程状态单调推进，不可跳过 `DATA_READY`。
+`CANCEL` / `RESET` 是管理操作，允许回退到稳定态。
 算法**只能**在 `DATA_READY` 下触发；其他状态调用 → 抛 `ContractViolation`。
 
 #### ② 装配（composition root）
 
 C1 是**唯一**知道"有哪些实现"的地方：
 - 实例化 C2 的具体实现
-- 从 `algorithms.ALGORITHMS` 读取算法注册表
+- 从 `algorithms.registry.Registry` 读取显式注册表（由装配点逐个 `register`）
 - 把数据面句柄交给各算法
 
 **C2 不得知道算法的存在；C3 不得知道彼此存在。**

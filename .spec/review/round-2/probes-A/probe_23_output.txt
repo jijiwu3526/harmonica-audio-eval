@@ -1,0 +1,17 @@
+=== core/__init__.py: total 53 lines ===
+  BI:113: ### 4.4 模块 docstring（第 1–31 行）
+  BI:134: ### 4.5 门面说明串（第 42–53 行）
+=== host/__init__.py: total 39 lines ===
+=== __init__.py: total 65 lines ===
+
+=== FILE-100 §4.1 claims 4 top-level AST nodes ===
+  core/__init__.py: 4 top-level nodes
+     Expr
+     ImportFrom
+     Assign
+     Expr
+  host/__init__.py: 4 top-level nodes
+     Expr
+     ImportFrom
+     Assign
+     Expr

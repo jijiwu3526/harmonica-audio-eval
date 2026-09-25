@@ -41,14 +41,22 @@ Product Intent：口琵演奏中的『力度』（气息控制）只能作为**�
 
 **可以 import**：
 - Python 标准库：`math`（`math.log10` 钳位对数转换），`statistics`（`median`, `mean`），`typing`（类型注解）
-- 第三方：无
+- 第三方：`numpy`（`ndarray` / `maximum` / `log10` / `float32` / `asarray` / `isfinite`）
+  ★ **更正**：原写「第三方：无」，但 `to_db` **必须**能处理 `rms.*` 端口的
+  `(n_frame,)` float32 ndarray（12538 帧），而本文件又禁止 import numpy ——
+  **那是不可能同时满足的**。实测后果：审查者 B 的实现只能猜类型，
+  `dynamics` 在真实音频上 3/3 次失败。
+  同一层的 `FILE-201` / `FILE-202` 都**允许** numpy，本文件是三者中唯一的例外，
+  且这个例外不是为了分层，只是漏写。**现与两个同层文件对齐。**
 - 本包内：
   - `harmonica_eval.contract.AlgorithmDataContract`
   - `harmonica_eval.contract.AlgorithmResultEnvelope`
   - `harmonica_eval.core.ingest.SILENCE_RMS_THRESHOLD`（仅用于语义一致性说明，**不**越过端口直接 import；如需判静音，使用 `DB_FLOOR`）
 
 **禁止 import**：
-- `numpy` / `scipy` / `librosa` / 任何第三方信号库
+- `scipy` / `librosa` / 任何第三方**信号**库（`numpy` 已在上方白名单，**不在**本禁令内）
+  ★ 只禁「信号处理库」，不禁「数组库」：本文件需要的是数组**容器**与逐元素
+  数学，不是 DSP。引入 `scipy` / `librosa` 才是越界。
 - `harmonica_eval.algorithms.timing` / `pitch` / `score`（跨算法模块 import 属于上层调度范畴，本模块不得越权）
 - 任何 `harmonica_eval.algorithms` 之外的模块路径
 - 任何不在上述清单的本包内符号
@@ -68,21 +76,72 @@ Product Intent：口琵演奏中的『力度』（气息控制）只能作为**�
 - 语义：线性 RMS 低于 `10 ** (-80.0 / 20)` ≈ `1e-4`（与 `core.ingest.SILENCE_RMS_THRESHOLD` 同量级）视为静音，不参与统计。
 - 引用自 `harmonica_eval/core/ingest.py` 的 `SILENCE_RMS_THRESHOLD` 常量值域，**不得**改动。
 
-### `to_db(rms: float) -> float`
-- **输入**：线性 RMS（非负浮点）。`0` 或负值在钳位后统一当作静音。
-- **算法**：先 `max(rms, 10 ** (DB_FLOOR / 20))` 钳位，再 `20 * math.log10(clamped)`。
-- **边界**：`rms == 0` → 返回 `DB_FLOOR`（-80.0），**永远不返回 -inf**。
-- **不变量**：返回值 ∈ [DB_FLOOR, ∞)；钳位前后单调。
+### `to_db(rms) -> object`
 
-### `note_spans(notes: list[dict]) -> list[tuple[int, int]]`
-- **输入**：`notes.reference` 或 `notes.practice`，list，每项 dict 含 `onset_sec`（float）。
-- **算法**：对第 n 个音，其帧区间为 `[frame(onset_sec_n), frame(onset_sec_{n+1}))`。
-  - `frame(t)` 由 `core.ingest` 提供的帧率换算（每秒 100 帧），公式 `int(round(t * 100))`。
+★★ **本版更正（第三轮盲审 B 的**实现实测**发现）：原签名写 `to_db(rms: float) -> float`
+—— **标量**。但 `run` 的步骤 1 写「读四个端口 → 各转 dB → `to_db`」，
+而 `rms.*` 端口是 **`(n_frame,)` 的 float32 ndarray**（实测
+`dimensions == ("frame",)`、`len == 12538`）—— **是数组，不是标量**。
+规格从未说明数组怎么转，实现者只能自己发明，而发明错了就整支 FAILED。** ★★
+
+**这不是假想缺陷**：审查者 B 照规格实现后，`dynamics` 在真实音频上
+稳定失败（3/3 次），实测报错原文：
+
+```
+ValueError: to_db 需要实数，实得 array([0., 0., 0., ..., 0., 0., 0.],
+                                        shape=(12538,), dtype=float32)
+```
+
+B 的实现处理了 `list` / `tuple`，但端口给的是 **numpy ndarray** —— 猜错了类型。
+根因在规格：**它没说数组该怎么转**。
+
+**本版冻结（两种输入都必须支持，逐字遵守）**：
+
+- **标量**（`int` / `float`）→ 返回 `float`，按下面的算法。
+- **`numpy.ndarray`** → 返回 **同形状的 `float32` ndarray**，逐元素套用同一算法
+  （`np.maximum(rms, 10 ** (DB_FLOOR / 20))` 后 `20 * np.log10(...)`）。
+  **不得**用 Python 循环逐元素调标量分支（12538 帧会慢到不可接受）；
+  **不得**改变形状、**不得**返回 list。
+- **`list` / `tuple`** → 返回同长度的 `float` list（保留，因为验收脚本与测试会传）。
+- **其它任何类型** → 抛 `ValueError`（**不得**静默 `float()` 强转，
+  那会把数组悄悄变成"只有第一个元素"的标量 —— 典型的静默降级）。
+
+- **算法（标量口径，数组逐元素同此）**：
+  先 `max(rms, 10 ** (DB_FLOOR / 20))` 钳位，再 `20 * math.log10(clamped)`。
+- **边界**：`rms == 0` → 返回 `DB_FLOOR`（-80.0），**永远不返回 -inf**。
+- **不变量**：返回值 ∈ [DB_FLOOR, ∞)；钳位前后单调。数组输入时**形状不变**。
+
+### `note_spans(notes, rms_hop_length, sample_rate) -> list[tuple[int, int]]`
+
+★★ **本版更正（第三轮盲审 A 的 probe 08）：原签名与算法两处都错。** ★★
+
+- **签名**：原写 `note_spans(notes: list[dict])` —— 但**同文件 §4.1 的表格**
+  又写 `notes.reference` 经 `surface.read()` 取出后是 `(n_note, 3)` 的
+  **ndarray**（取 `.data` 得 ndarray，列号用
+  `descriptor.field_names.index("onset_sec")` 查）。
+  **同一份文件给了两种互斥的表示法。**
+- **算法**：原写帧率「每秒 100 帧，公式 `int(round(t * 100))`」——
+  **实测没有任何端口是 100 fps**：`pitch.*` 的 hop 是 2048（44100/2048 ≈ **21.5** fps），
+  `rms.*` 的 hop 是 256（≈ **172.3** fps）。100 fps 是**凭空写的数字**。
+
+**本版冻结**（以 ndarray 表示法为准，与 §4.1 一致）：
+- **输入**：`notes` —— `(n_note, 3)` 的 `float32` ndarray（`notes.*` 端口的 `read().data`）；
+  第 `onset_sec` 列的列号**必须**用 `field_names.index("onset_sec")` 查。
+- **帧率不由本文件假设**：由调用方传入 `rms_hop_length` 与 `sample_rate`，
+  帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+  **禁止**写死任何帧率数字（原 `100` 已删除）。
   - **最后一个音**延伸到 `frame(onset_sec_last) + 100`（默认 1 秒），或数据末尾帧，取其二者中较小。
 - **边界**：`notes` 为空 → 返回 `[]`。单音 → 区间为 `[frame(onset), frame(onset)+100]`。
 - **不变量**：返回区间左端 ≤ 右端；区间互不相交、覆盖从首音到末音之间的所有帧。
 
-### `align_by_note(ref_rms_db, prac_rms_db, ref_spans, prac_spans) -> list[tuple[float, float]]`
+### `align_by_note(ref_rms_db, prac_rms_db, ref_spans, prac_spans) -> dict`
+
+★★ **本版更正（第三轮盲审 A 的 probe 07）：返回类型从 `list[tuple[float, float]]`
+改为 `dict`。** 原因：`n_unpaired` 必须在 `run` 层可得，而原来的
+`list[tuple]` **没有任何位置**携带它 —— 「在 run 层由 align_by_note 计算并回传」
+这句话在 `list[tuple]` 的返回类型下是**不可实现的**。
+改为与 `timing.match_onsets` **同构**的 dict（两个算法用同一种形状，
+实现者不必记两套约定）。
 - **输入**：
   - `ref_rms_db`: `list[float]`，长度为 `notes.reference` 的音数
   - `prac_rms_db`: `list[float]`，长度为 `notes.practice` 的音数
@@ -90,8 +149,11 @@ Product Intent：口琵演奏中的『力度』（气息控制）只能作为**�
 - **算法**：取 `min(len(ref), len(prac))`，配对第 0..n-1 个音，**丢弃**多出的音。
   - 每个配对音对的能量 = **该音所在帧区间内** `rms_db` 值的中位（`statistics.median`）。
   - 静音段（能量 ≤ DB_FLOOR）排除：对应音对不进入配对。
-- **输出**：`list[tuple[float, float]]`，每个 tuple = `(ref_db, prac_db)`。
-- **边界**：无可配对的音 → 返回 `[]`。
+- **输出**：`dict`，恰两个键：
+  - `"pairs"`：`list[tuple[float, float]]`，每个 tuple = `(ref_db, prac_db)`
+  - `"n_unpaired"`：`int`，未配上的音数（= `max(n_ref, n_prac) - len(pairs)` 的口径须写死为
+    「两侧中未能与对侧配对的音总数」，即 `(n_ref - len(pairs)) + (n_prac - len(pairs))`）
+- **边界**：无可配对的音 → 返回 `{"pairs": [], "n_unpaired": <总数>}`。
 - **不变量**：返回长度 ≤ min(len(ref), len(prac))；对称性：交换 ref/prac 仅改变 tuple 内顺序，不改变配对数。
 
 ### `compute_deltas(aligned) -> list[float]`
@@ -101,33 +163,52 @@ Product Intent：口琵演奏中的『力度』（气息控制）只能作为**�
 - **边界**：`aligned` 为空 → `[]`。
 - **不变量**：正值 = 练习更强；负值 = 练习更弱；零总和不一定。
 
-### `summarize_deltas(deltas_db) -> dict`
+### `summarize_deltas(deltas_db, n_unpaired) -> dict`
+
+★★ **本版更正（第三轮盲审 A 的 probe 07，与 FILE-202 同族）** ★★
+历史 `PAYLOAD_SCHEMAS["dynamics"]` 含 `n_unpaired`，本节写它
+「在 `run` 层由 `align_by_note` 计算并回传，此处接收」——
+但**没有说它怎么"接收"**：原签名只收 `deltas_db`，
+而 `compute_deltas` 冻结返回 `list[float]`，配对信息在那一步已丢。
+**本版冻结**：由 `run` 从 `align_by_note` 的结果中取出后**显式传入**。
 - **输入**：`compute_deltas` 输出。
 - **算法**：
   - `median_db` = `statistics.median(deltas_db)`（带符号）
   - `spread_db` = `statistics.median([abs(d - median_db) for d in deltas_db])`（**MAD**，绝对中位差，单位 dB）
     - ★ 明确选定：MAD，非 σ。MAD 对离群音更鲁棒，符合『均值相同却感知不同』的需求。
   - `n_notes_used` = `len(deltas_db)`
-  - `n_unpaired` = **在 `run` 层由 `align_by_note` 计算**并回传，此处接收。
+  - `n_unpaired` = **由调用方传入**（`run` 从 `align_by_note` 的返回 dict 取出）。
 - **输出 dict key**：`median_db, spread_db, n_notes_used, n_unpaired`
 - **边界**：`deltas_db` 为空 → `median_db=0.0, spread_db=0.0, n_notes_used=0`；`n_unpaired` 仍回报。
 - **不变量**：永不输出 `pass/fail` / `is_valid` 字段。
 
 ### `run(surface: AlgorithmDataContract) -> AlgorithmResultEnvelope`
-- **输入**：`AlgorithmDataContract`，只读。预期端口存在：
-  - `surface.rms.reference`（`list[float]`）
-  - `surface.rms.practice`（`list[float]`）
-  - `surface.notes.reference`（`list[dict]`，含 `onset_sec`）
-  - `surface.notes.practice`（`list[dict]`，含 `onset_sec`）
+- **输入**：`AlgorithmDataContract`，只读。预期端口存在（★ **更正（P1 审查 F9）**：
+  原写 `surface.rms.reference` 这种**属性式访问** —— 契约上**没有**这种能力，
+  `AlgorithmDataContract` 只有 `manifest()` 与 `read()` **两个**操作。
+  按原规格实现必然 `AttributeError`）：
+
+  | 端口 | 取法 | 形状 |
+  | --- | --- | --- |
+  | `rms.reference` | `surface.read("rms.reference")` | `(n_frame,)` |
+  | `rms.practice` | `surface.read("rms.practice")` | `(n_frame,)` |
+  | `notes.reference` | `surface.read("notes.reference")` | `(n_note, 3)`，第 0 列 `onset_sec` |
+  | `notes.practice` | `surface.read("notes.practice")` | 同上 |
+
+  `read()` 返回 `BufferView`，取 `.data` 得 ndarray；
+  列号**必须**用 `descriptor.field_names.index("onset_sec")` 查，**不得**硬编码 0。
 - **流程**：
   1. 读四个端口 → 各转 dB → `to_db`
-  2. `note_spans(notes.reference)` 得 `ref_spans`
-  3. `note_spans(notes.practice)` 得 `prac_spans`
-  4. `align_by_note` 配对 → `aligned`
-  5. `compute_deltas(aligned)` → `deltas_db`
-  6. `summarize_deltas(deltas_db)` → 指标
-  7. 装 `AlgorithmResultEnvelope(status='OK', payload={...})`
-- **失败**：端口缺失/类型异常 → **不抛出**，返回 `AlgorithmResultEnvelope(status='FAILED', error=<str>)`。
+  2. `note_spans(notes.reference, rms_hop_length, sr)` 得 `ref_spans`
+     ★ 传入帧率参数：帧号换算需要 `rms_hop_length` 与 `sample_rate`，
+     本文件**不得**假设任何帧率（原写「每秒 100 帧」是凭空数字，已删除）
+  3. `note_spans(notes.practice, rms_hop_length, sr)` 得 `prac_spans`
+  4. `matched = align_by_note(...)` → `matched["pairs"]` 与 `matched["n_unpaired"]`
+  5. `compute_deltas(matched["pairs"])` → `deltas_db`
+  6. `summarize_deltas(deltas_db, matched["n_unpaired"])` → 指标
+  7. 将汇总值转换为 4 个 `UiScalar` 并装入 `AlgorithmResultEnvelope(status='OK', payload=[...])`
+- **失败**：`payload=()`，端口缺失/类型异常 → **不抛出**，返回
+  `AlgorithmResultEnvelope(..., status='FAILED', error_code=<ErrorCode 成员>, error_detail=<str>)`。
 - **不变量**：始终返回 `AlgorithmResultEnvelope`；从不抛异常向调用者。
 
 ---
@@ -136,14 +217,24 @@ Product Intent：口琵演奏中的『力度』（气息控制）只能作为**�
 
 | 情形 | 行为 | 抛出 / 返回 |
 | --- | --- | --- |
-| `rms.reference` 或 `rms.practice` 缺失 | 静默降级为不参与统计 | `AlgorithmResultEnvelope(status='FAILED', error='MISSING_RMS_PORT')` |
-| `notes.reference` 或 `notes.practice` 缺失 | 无法按音配对 | `AlgorithmResultEnvelope(status='FAILED', error='MISSING_NOTES_PORT')` |
+| `rms.reference` 或 `rms.practice` 缺失 | 静默降级为不参与统计 | `AlgorithmResultEnvelope(..., status='FAILED', error_code=ErrorCode.ALGORITHM_FAILED, error_detail='MISSING_RMS_PORT')` |
+| `notes.reference` 或 `notes.practice` 缺失 | 无法按音配对 | `AlgorithmResultEnvelope(..., status='FAILED', error_code=ErrorCode.ALGORITHM_FAILED, error_detail='MISSING_NOTES_PORT')` |
 | `onset_sec` 非浮点 / 缺键 | 跳过该音 | 本音不进入配对，`n_unpaired` 递增 |
-| RMS 全部 ≤ DB_FLOOR | 全段静音 | `AlgorithmResultEnvelope(status='OK', payload={'median_db':0.0,'spread_db':0.0,'n_notes_used':0,'n_unpaired':<count>})` |
+| RMS 全部 ≤ DB_FLOOR | 全段静音 | `AlgorithmResultEnvelope(status='OK', payload=[UiScalar(key='median_db', label='中位能量差', value=0.0, unit='db'), UiScalar(key='spread_db', label='离散度', value=0.0, unit='db'), UiScalar(key='n_notes_used', label='参与统计音数', value=0.0, unit='count'), UiScalar(key='n_unpaired', label='未配对音数', value=<count>, unit='count')])` |
 | `deltas_db` 为空但有未配对音 | 仍报告 | `n_notes_used=0`, `n_unpaired>0` |
-| 任何未预期异常 | 不向上抛出 | `AlgorithmResultEnvelope(status='FAILED', error=<repr 限长 128 字>)` |
+| 任何未预期异常 | 不向上抛出 | `AlgorithmResultEnvelope(..., status='FAILED', error_code=ErrorCode.ALGORITHM_FAILED, error_detail=<repr 限长 128 字>)` |
 
 ★ 宪章 §5.6：禁止静默降级为 OK。所有缺端口/类型异常必须走 `status='FAILED'`。
+
+★★ **本版更正（第三轮盲审 A 的 probe 08）：上表原来一律写 `error=<str>` —— `AlgorithmResultEnvelope` **没有** `error` 这个字段；实测它的 11 个字段是
+`algorithm_id / algorithm_version / status / required_ports / consumed_ports /
+payload / error_code / error_detail / elapsed_sec / coverage / warnings`；
+其中 `status` 域为 4 值 `{OK, DEGRADED, INCOMPATIBLE, FAILED}`，
+`payload` 类型为 `Sequence[UiScalar | UiSeries]`。
+自描述 payload 取代了按 `algorithm_id` 索引的 `PAYLOAD_SCHEMAS`。
+按原文实现必然 `TypeError: unexpected keyword argument 'error'`。
+正确形态是**两个字段**：`error_code` 取 `contract.ErrorCode` 的成员、
+`error_detail` 放人类可读的细节字符串。
 
 ---
 
@@ -199,7 +290,12 @@ print('compute_deltas OK')
 ```bash
 python -c "
 from harmonica_eval.algorithms.dynamics import summarize_deltas
-s = summarize_deltas([3.0, -1.0, 2.0])
+# ★ 更正（A 的 FINDING-6 + ⑳ 执行确认）：本函数签名已改为
+#   (deltas_db, n_unpaired) 二参，原写单参调用必然 TypeError。
+#   ★ 本脚本外层是 `python -c "..."`，所以内层**只能用单引号** ——
+#     写成 s["n_unpaired"] 会提前闭合 shell 字符串。
+s = summarize_deltas([3.0, -1.0, 2.0], 0)
+assert s['n_unpaired'] == 0
 assert s['n_notes_used'] == 3
 assert abs(s['median_db'] - 2.0) < 1e-9
 assert s['spread_db'] >= 0.0
@@ -210,7 +306,7 @@ print('summarize_deltas OK')
 
 **验收判据**（可机械判定）：
 - [ ] `python -m pytest tests/test_algorithms/test_dynamics.py` 全绿
-- [ ] `grep -c "AXIS\|TimelineBasis" dynamics.py` == 0
+- [ ] **AST 级**「可执行代码内无 `AXIS` / `TimelineBasis.WARPED`」——见下方判据形态说明
 - [ ] `to_db` 单元单测 5 个 assert 均通过
 - [ ] `compute_deltas` 符号约定 assert 通过
 - [ ] `summarize_deltas` 仅含 `median_db / spread_db / n_notes_used / n_unpaired`
@@ -222,7 +318,46 @@ print('summarize_deltas OK')
 - [ ] `harmonica_eval/algorithms/dynamics.py` 实现完毕，去除所有 `NotImplementedError`
 - [ ] `data/out/test_dynamics.json` —— 黄金向量运行结果
 - [ ] `tests/test_algorithms/test_dynamics.py` 单测产物复制到 stdout 的 pytest 日志
-- [ ] `grep -c "AXIS" dynamics.py` 输出为 `0` 的证据
+- [ ] **AST 级**证据：剥掉注释与 docstring 后，`dynamics.py` 的可执行代码内
+      无 `AXIS` / `TimelineBasis.WARPED` 节点
+
+### ★★ 9.1 判据形态说明：为什么不能用字面 grep ★★
+
+**2026-09-24 更正**：本节原先要求 `grep -c "AXIS\|TimelineBasis" dynamics.py == 0`。
+★ **该判据恒假**，实测命中 2 处，而两处**都在模块 docstring 的 MOLD BREAK 叙述里**：
+
+```
+dynamics.py:41  「并声明 `AXIS = TimelineBasis.WARPED`。这条约束无法满足。」
+dynamics.py:56  「故 `AXIS` 常量已删除 —— 它编码的是一条错误的约束。」
+```
+
+★ **这两处记录的正是「为什么删掉 AXIS」** —— 判据把自己的**决策历史**当成了违规证据。
+★ 要让字面 grep 通过，只能删掉 MOLD BREAK 记录；★ **那会让后来者不知道为什么没有 `AXIS`，
+★ ★ 并可能把它「修回来」** —— 那正是本 MOLD BREAK 要防的事。
+
+★ **正确判据形态**（与 `FILE-201` §8 判据 G 同一形态）：
+```python
+import ast, pathlib
+_tree = ast.parse(pathlib.Path('harmonica_eval/algorithms/dynamics.py').read_text())
+# 只看【可执行代码】：模块级 Assign/AnnAssign、Name、Attribute、Call.func
+# 注释与 docstring 是 ast.Expr(Constant(str))，天然不在其中
+_banned = {'AXIS', 'WARPED'}
+_hit = set()
+for _n in ast.walk(_tree):
+    if isinstance(_n, ast.Assign):
+        for _t in _n.targets:
+            if isinstance(_t, ast.Name) and _t.id in _banned:
+                _hit.add(_t.id)
+    if isinstance(_n, ast.AnnAssign) and isinstance(_n.target, ast.Name) \
+            and _n.target.id in _banned:
+        _hit.add(_n.target.id)
+    if isinstance(_n, ast.Attribute) and _n.attr in _banned:
+        _hit.add(_n.attr)
+assert not _hit, f'可执行代码内出现被禁符号: {sorted(_hit)}'
+```
+
+★ **该形态能分辨「真正用了」与「只是在说明为什么不用」**：
+★ docstring 里的 `AXIS` / `TimelineBasis.WARPED` 是字符串常量，★ **不在 `ast.Assign` / `ast.Attribute` 里**。
 
 ---
 
@@ -262,7 +397,6 @@ GATE CHALLENGE
 | `ALGORITHM_ID` | `"dynamics"` | dynamics.py L70（冻结） |
 | `ALGORITHM_VERSION` | `"1.0.0"` | dynamics.py L71（冻结） |
 | `DB_FLOOR` | `-80.0` | dynamics.py L73 / `core.ingest.SILENCE_RMS_THRESHOLD ≈ 1e-4` |
-| 帧率 | 100 Hz | `core.ingest` 约定 |
+| 帧率 | **由 `sample_rate / <port_id>.hop_length` 导出，各端口不同** | `profile.PORT_INDEX` + `core.surface` |
 | 最后一个音延伸 | 1 秒 | dynamics.py L97（冻结） |
 | `spread_db` 算法 | MAD | dynamics.py L145 声明 |
-</think>DONE .spec/build/FILE-203-v1.md</tool_call>

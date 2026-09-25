@@ -1,0 +1,19 @@
+=== union of PAYLOAD_SCHEMAS keys ===
+   ['early_ratio', 'late_ratio', 'median_abs_cents', 'median_db', 'median_onset_ms', 'n_notes_used', 'n_unpaired', 'off_pitch_ratio', 'on_time_ratio', 'per_note_cents', 'per_note_delta_db', 'per_note_onset_ms', 'sample_rate', 'spread_db', 'spread_ms']
+
+=== FILE-200 rule: UiScalar.key must be drawn from PAYLOAD_SCHEMAS keys ===
+   'UiScalar.key / UiSeries.key 的取值必须取自本表的键名'
+
+=== who builds UiScalars? FILE-301 build_view ===
+   FILE-301:4: > 生成依据：`contract.py`（HostContract / UiProjectionPort / UiView / UiScalar /
+   FILE-301:236: 4. `UiScalar` 只陈述数值与单位，**不下教学结论**（SPEC §1）
+
+=== does FILE-301 specify WHICH keys become scalars / thresholds? ===
+
+=== FILE-002 §4.3 step5: threshold '原样写出' -- who sets it? ===
+   FILE-002:290: 5. `scalars` = 按投影原序的列表，每个元素键序固定为：`key` → `label` → `value` → `unit` → [`threshold`]。`threshold` 仅在投影携带该字段时出现（原样写出，不判定、不与 `value` 比较、不生成布尔结论）。
+   FILE-002:340: - <label> = <value> <unit>（阈值 <threshold> <unit>）
+   FILE-002:350: - **`unit` 格式化（写死）**：`unit` 为 `None` 或空串时，省略` <unit>` 整段（不留多余空格）。`threshold` 为 `None` 时写 `（阈值 N/A）`。
+   FILE-002:351: - **阈值并列**：`threshold` 存在时写 `（阈值 <threshold> <unit>）`；**不判定「合格 / 不合格」**、不与 `value` 比较、不生成布尔结论。
+   FILE-002:399: 本文件**不参与任何数值计算**（`MUST NOT`：不做 DSP、对齐、特征计算或任何数值处理）。因此本文件层面的「阈值 / 容差」集合为**空集**：不存在任何本文件自定义的判定阈值或容差。唯一由本文件固定的数值口径是序列化与格式化，全部写在 §4.0 与 §4.3 / §4.4；其中单位换算因子恒为 `_UNIT_CONVERSI
+   FILE-002:523: assert set(s.keys()) <= {"key","label","value","unit","threshold"}, list(s.keys())

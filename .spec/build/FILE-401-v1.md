@@ -106,7 +106,7 @@
 
 ### 4.0 总则：界面框架的裁定与冻结常量
 
-**框架裁定（负责人口径，不可推翻）**：C4 是 Mac 端本机视图、只给开发者看。界面框架采用**零第三方依赖**的方案：`http.server.ThreadingHTTPServer` 只绑 `LOCAL_BIND_HOST`，页面用浏览器的**系统默认浏览器**打开。理由有三条，逐条可查：
+**框架裁定（负责人口径，不可推翻）**：C4 是 Mac 端本机视图、只给开发者看。界面框架采用**零第三方依赖**的方案：`http.server.ThreadingHTTPServer` 恒绑 `LOCAL_BIND_HOST`，页面用浏览器的**系统默认浏览器**打开。理由有三条，逐条可查：
 
 1. §3 的第三方清单是**空**的。引入 PyQt / PySide / matplotlib / plotly / flask 都要求修改契约清单，属于 §10 第 3 条的 `MOLD BREAK`，实现者不得自行放宽。
 2. 页面是 HTML，故 `render_series_plot` 返回 **SVG 字符串**（格式标签冻结为 `"svg"`），`build_plots` 收集后原样嵌进页面。这满足目标文件 G15 修正的「元素类型随实现者的框架决定，调用方不得对元素做字符串操作」。
@@ -139,11 +139,12 @@
 
 ---
 
-### 4.1 `LOCAL_BIND_HOST: str = "127.0.0.1"`
+### 4.1 `LOCAL_BIND_HOST: str = "0.0.0.0"`
 
 - **输入**：无（模块级常量）。
-- **输出**：`str`，值恰为 `"127.0.0.1"`。
+- **输出**：`str`，值恰为 `"0.0.0.0"`（★ 负责人裁定局域网直连）。
 - **算法口径**：字面量赋值，不做任何计算、不读环境变量、不读命令行。
+- ★★ 附则（局域网直连）：`0.0.0.0` 是监听地址，**不可直接访问**。故 `run_local_ui` 启动时另调 `_lan_ip()` 探测本机实际 IP，并经 `_access_urls()` 打印「本机回环 + 局域网 IP」两个可点击 URL。★ 只绑 `LOCAL_BIND_HOST` 这条不变量不变。
 - **边界**：不适用（常量不可变）。
 - **不变量**：本文件**不得**出现字符串 `"0.0.0.0"`、`"::"`、`"localhost"` 作为绑定地址；`_bind()` 的 host 实参恒为 `LOCAL_BIND_HOST`。
 
@@ -171,7 +172,7 @@
 ### 4.4 `run_local_ui(port: UiProjectionPort) -> int`
 
 - **输入**：`port` —— 调用方注入的投影端口对象（`UiProjectionPort` 的实现）。取值域：任何具备可调用属性 `snapshot`（`() -> UiView`）与 `submit`（`(UiCommand) -> None`）的对象。**C4 不构造它、不包装它、不复制它**。
-- **输出**：`int`，`EXIT_OK` 或 `EXIT_START_FAILED`，二者之一。副作用：占用 `127.0.0.1` 上一个 8721–8784 的 TCP 端口直至返回；向 `sys.stderr` 写启动信息与失败行；拉起系统默认浏览器。
+- **输出**：`int`，`EXIT_OK` 或 `EXIT_START_FAILED`，二者之一。副作用：占用 `LOCAL_BIND_HOST` 上一个 8721–8784 的 TCP 端口直至返回；向 `sys.stderr` 写启动信息与失败行；拉起系统默认浏览器。
 - **口径（启动序列，顺序冻结）**：
   1. **端口形状检查**：`assert hasattr(port, "snapshot") and hasattr(port, "submit")`。不满足 → `AssertionError`。
      ★ **禁止**写 `isinstance(port, UiProjectionPort)`：`UiProjectionPort` 未加 `@runtime_checkable`（契约只声明了 Protocol，未加该装饰器），该写法会抛 `TypeError: Instance and class checks can only be used with @runtime_checkable protocols`，与本规格的失败语义不符。
@@ -181,7 +182,7 @@
   5. **准备全局量**（模块级，不在本函数内新建）：`_PAGE: str`（最近一次渲染的页面）与 `_PAGE_LOCK: threading.Lock`。全文模块级**可变**全局恰这两个；其余模块级名字必须是不可变常量（`str` / `int` / `float` / `dict` 常量表 / `tuple`）。`_PAGE` 的写点只有两处：本函数第 6 步与 §4.16 第 8 步。
   6. **首屏**：在 `_PAGE_LOCK` 内执行 `_PAGE = _render_page(port)`（内部调用 `port.snapshot()` 一次）。
   7. **启动轮询线程**：`threading.Thread(target=_poll_loop, args=(port,), daemon=True).start()`。
-  8. **打印 URL**：向 `sys.stderr` 写一行 `http://127.0.0.1:{actual_port}/`（含换行）。（因此 `run_local_ui` 的副作用写的是 **stderr**，不是 stdout。）随后 `webbrowser.open(该 URL)`；`webbrowser.open` 返回 `False` 或抛异常时**忽略**（URL 已在 stderr，手工打开即可），不改变退出码。
+  8. **打印 URL**：向 `sys.stderr` 写 `http://127.0.0.1:{actual_port}/`；若 `_lan_ip()` 探测成功，再写 `http://<局域网IP>:{actual_port}/`。（因此 `run_local_ui` 的副作用写的是 **stderr**，不是 stdout。）随后 `webbrowser.open(该 URL)`；`webbrowser.open` 返回 `False` 或抛异常时**忽略**（URL 已在 stderr，手工打开即可），不改变退出码。
   9. **阻塞**：`server.serve_forever()`。
   10. **正常关闭**：捕获 `KeyboardInterrupt` → 只调用 `server.server_close()` → 返回 `EXIT_OK`。**禁止**调用 `server.shutdown()`：`shutdown()` 必须由另一个线程调用，在 `serve_forever()` 所在线程里调用会死锁（`shutdown()` 要等 `serve_forever()` 的循环退出，而循环正被本线程占用）；**禁止** `join()` 轮询线程。
   11. **启动失败**：第 1–8 步中任何异常（含 `AssertionError`、`OSError`、`socket.error`、`ValueError`）→ 向 `sys.stderr` 写**恰好一行** `界面启动失败：{type(e).__name__}: {e}` + 换行 → **不写堆栈**给用户 → 返回 `EXIT_START_FAILED`。已建立的 socket/服务器必须关闭（`server_close()`），不留占用端口。
@@ -480,7 +481,7 @@
 | 情形 | 行为 | 抛出/返回 |
 | --- | --- | --- |
 | `port` 缺 `snapshot` 或 `submit` 属性（含 `port is None`） | 显式失败，启动阶段终止 | 抛 `AssertionError`；被 `run_local_ui` 归约为 `界面启动失败：AssertionError: …` 一行 stderr，返回 `EXIT_START_FAILED`（2） |
-| `127.0.0.1` 上 8721–8784 共 64 个端口全部 bind 失败 | 显式失败，启动阶段终止 | 抛 `OSError`；归约为一行 stderr，返回 `EXIT_START_FAILED`（2）。**不**重试、**不**改用随机端口、**不**降级为「无界面模式」 |
+| `LOCAL_BIND_HOST` 上 8721–8784 共 64 个端口全部 bind 失败 | 显式失败，启动阶段终止 | 抛 `OSError`；归约为一行 stderr，返回 `EXIT_START_FAILED`（2）。**不**重试、**不**改用随机端口、**不**降级为「无界面模式」 |
 | `signal.signal` 抛 `ValueError`（非主线程） | 显式失败，启动阶段终止 | 同上：一行 stderr + 返回 `EXIT_START_FAILED`（2）。**不**降级为半可用界面 |
 | 首屏 `_render_page` 内部 `port.snapshot()` 抛异常 | 显式失败，启动阶段终止 | 归约为一行 stderr，返回 `EXIT_START_FAILED`（2）。**不**显示空白页面冒充成功 |
 | 轮询线程内 `port.snapshot()` 抛异常 | **降级**（两处允许降级之一），且必须留痕 | 捕获 `Exception`，向 stderr 写一行 `界面轮询失败：{type(e).__name__}: {e}`；屏幕保留上一屏内容；循环继续；进程不退、退出码不变 |
@@ -527,7 +528,7 @@
 | INV-401-2 | **渲染时不重新计算任何东西**：投影里没有的，就是不显示的。 | 断言：`build_plots(UiView(session_id="s", state=SessionState.CREATED, series=())) == []`；断言 `render_scalars(()) == ""`；断言 `render_error(UiView(session_id="s", state=SessionState.CREATED)) == ""`；断言 `render_status` / `render_scalars` / `render_progress` / `render_error` 的返回文本中，每一条出现过的数字都能在对应 `UiView` 字段里按 §4 的格式逐字找到——不存在只由界面产生的数字（除 §4.10 的 `×100.0` 与 §4.7 的像素坐标） | MUST 2 |
 | INV-401-3 | **每条曲线必须读 `UiSeries.timeline_basis` 并把轴的含义标注在图上**。 | 断言：对 `timeline_basis="REFERENCE"` 的曲线，`render_series_plot(s).__contains__("源时间网格")` 为真且 `.__contains__("归一化网格")` 为假；对 `"WARPED"` 相反；且两者输出**不相等**（同 `t` / `values` / `unit` / `label` / `key`，只换 basis，输出必须不同）。再断言 `render_series_plot` 的返回串同时含 `"时间（秒）"` 与该曲线的 `series.unit` | MUST 3 |
 | INV-401-4 | **命令只走 `UiProjectionPort.submit()`，且只发 `UiCommandKind` 的 6 个成员**。 | 断言：`set(COMMAND_LABELS) == set(UiCommandKind)` 且 `len(COMMAND_LABELS) == 6`；`build_command(k).kind is k` 对 6 个成员逐一成立；用 spy 端口断言 `submit_command(spy, build_command(UiCommandKind.RESET))` 后 `len(spy.calls) == 1`；源码中形如 `X.submit(...)` 的调用**恰 1 处**（用 `ast` 定位 `Attribute` 名为 `submit` 的 `Call` 节点，唯一命中在 `submit_command` 函数体内的 `port.submit(command)`；POST `/command` 的处理器**复用** `submit_command`，不自己再调一次 `submit`），无第二处写路径 | MUST 4 |
-| INV-401-5 | **只监听本机 `LOCAL_BIND_HOST`；退出码只用 `EXIT_OK` / `EXIT_START_FAILED`**。 | 断言：`LOCAL_BIND_HOST == "127.0.0.1"`；`app.py` 源码中不出现 `"0.0.0.0"`、`"::"`、`"localhost"`；端口探测与 `ThreadingHTTPServer` 的 host 实参恒为 `LOCAL_BIND_HOST`；`run_local_ui` 的两个返回点分别返回 `EXIT_OK` 与 `EXIT_START_FAILED`，无第三个返回码、无 `None` 返回 | MUST 5 |
+| INV-401-5 | **监听地址恒为 `LOCAL_BIND_HOST`；退出码只用 `EXIT_OK` / `EXIT_START_FAILED`**。★ 负责人裁定改为局域网直连，故值由 `127.0.0.1` 改为 `0.0.0.0`（监听所有网卡）；因 `0.0.0.0` 不可直接访问，启动时必须另探真实 IP 并打印（`_lan_ip` / `_access_urls`）。 | 断言：`LOCAL_BIND_HOST == "0.0.0.0"`；`app.py` 的**可执行代码**中绑定实参恒为 `LOCAL_BIND_HOST`；启动日志含 `http://127.0.0.1:<port>/`；端口探测与 `ThreadingHTTPServer` 的 host 实参恒为 `LOCAL_BIND_HOST`；`run_local_ui` 的两个返回点分别返回 `EXIT_OK` 与 `EXIT_START_FAILED`，无第三个返回码、无 `None` 返回 | MUST 5 |
 | INV-401-6 | **不得 import `core` / `algorithms` / `host` 内部**（任何形式，含延迟 import 与字符串导入）。 | 断言：源码中不出现 `core`、`algorithms`、`host`、`profile`、`importlib`、`__import__`、`exec(`、`eval(`、`compile(` 这些标识符的**导入用法**（用 `ast` 遍历 `Import` / `ImportFrom` / `Call` 节点判定，不做纯文本匹配，避免误伤注释）；断言 §8 命令 (3) 的 `mods <= {...}` 与 `'harmonica_eval' not in mods` 两条通过（源码中 `harmonica_eval` 字样只允许出现在文件头 docstring 的文件路径里，故该字样**不得**出现在 `ast` 收集到的任何 import 目标中） | MUST NOT 1 |
 | INV-401-7 | **不直接读数据面 / 不读音频文件 / 不做 DSP / 不解析 payload 语义**（D4）。 | 断言：源码中不出现 `open(`、`Path(`、`wave`、`soundfile`、`read_bytes`、`np.`、`fft`、`stft`、`resample`、`interp`、`smooth`、`filter`；断言 `solicit_asset_uri` 返回后没有对返回路径的读操作；断言渲染函数体不出现对 `view.progress` 以外的浮点运算（`*` / `/` / `+` / `-`），唯二例外是 §4.7 的像素映射与 §4.10 的 `* 100.0` | MUST NOT 2 |
 | INV-401-8 | **不持有音频缓冲或持久状态**（纯视图：退出即忘，崩溃/断开对会话零影响）。 | 断言：模块级可变全局**只有** `_PAGE`（一个 `str`）与 `_PAGE_LOCK`（一个 `threading.Lock`），且二者都不以 `__all__` 导出；断言源码中不出现 `tempfile`、`sqlite3`、`pickle`、`logging.FileHandler`、`os.makedirs`、`shutil`、`json.dump`（注意：`json.dumps` 允许）、`write_text`、`write_bytes`；断言源码中不出现 `CANCEL` 或 `RESET` 出现在 `run_local_ui` 的关闭路径上（关闭界面不毁会话） | MUST NOT 3 |
@@ -570,7 +571,7 @@ import xml.etree.ElementTree as ET
 from harmonica_eval.contract import SessionState, TimelineBasis, UiCommand, UiCommandKind, UiScalar, UiSeries, UiView
 from harmonica_eval.cockpit import app
 
-OMIT = lambda k: '<' + '-- omitted: ' + str(k) + ' --' + '>'   # 避开 shell 的 ! 历史展开，勿改成字面量
+OMIT = lambda k: '<' + '!-- omitted: ' + str(k) + ' --' + '>'   # 避开 shell 的 ! 历史展开；'<' + '!--' 拼出 XML 注释起始 '<!--'，勿合并成字面量
 
 # §4.3 COMMAND_LABELS 恰 6 项且与契约成员集合相等
 assert set(app.COMMAND_LABELS) == set(UiCommandKind)
@@ -579,7 +580,7 @@ assert len(set(app.COMMAND_LABELS.values())) == 6
 assert app.COMMAND_LABELS[UiCommandKind.RESET] == '重置会话'
 
 # §4.1 / §4.2 常量
-assert app.LOCAL_BIND_HOST == '127.0.0.1'
+assert app.LOCAL_BIND_HOST == '0.0.0.0'   # ★ 负责人裁定局域网直连
 assert app.EXIT_OK == 0 and app.EXIT_START_FAILED == 2
 
 # §4.8 render_status：一行、两个分隔符、state 用值不用中文、note 折行
@@ -639,7 +640,12 @@ assert '<text x="0" y="236">时间（秒）</text>' in sa                     # 
 assert '<text x="0" y="254">REFERENCE（源时间网格：以参考演奏时钟为刻度，抢拍拖拍在此可见）</text>' in sa
 assert '<text x="0" y="272">能量 [rms]</text>' in sa                     # 标题 = f"{label} [{key}]"
 assert 'points="0.000,232.000 360.000,8.000 720.000,120.000"' in sa      # 唯一允许的坐标公式
-assert [n.text for n in ET.fromstring(sa).iter('text')] == ['rms', '时间（秒）', 'REFERENCE（源时间网格：以参考演奏时钟为刻度，抢拍拖拍在此可见）', '能量 [rms]']   # SVG 内 text 节点序列逐字冻结
+assert [n.text for n in ET.fromstring(sa).iter() if n.tag.endswith('text')] == ['rms', '时间（秒）', 'REFERENCE（源时间网格：以参考演奏时钟为刻度，抢拍拖拍在此可见）', '能量 [rms]']   # SVG 内 text 节点序列逐字冻结
+# ★ 更正（本次注入实跑发现）：原写法 iter('text') 恒返回 []。
+#   §4.7 冻结的根元素带 xmlns="http://www.w3.org/2000/svg"，解析后每个元素的 tag
+#   都是命名空间展开的 '{http://www.w3.org/2000/svg}text'，与裸串 'text' 不相等。
+#   ★ 那是【判据自身恒假】，不是实现缺陷 —— §4.7 明确要求带 xmlns（内联 SVG 必须有它才渲染）。
+#   ★ 改用「tag 以 text 结尾」判定，语义与原意相同且对命名空间不敏感。
 assert app.render_series_plot(a) == sa          # 确定性：两次调用逐字相同
 ET.fromstring(sb)                               # WARPED 输出同样是合法 XML
 
@@ -737,17 +743,78 @@ for n in ast.walk(tree):
     if isinstance(n, ast.Import):
         for a in n.names: mods.add(a.name.split('.')[0])
     elif isinstance(n, ast.ImportFrom):
-        mods.add((n.module or '').lstrip('.').split('.')[0])   # 归一化相对导入：'..contract' → 'contract'    elif isinstance(n, ast.Call):
+        mods.add((n.module or '').lstrip('.').split('.')[0])   # 归一化相对导入：'..contract' → 'contract'
+    elif isinstance(n, ast.Call):
         f = n.func
-        name = getattr(f, 'id', None) or getattr(f, 'attr', None)
+        # ★ 更正（本次注入实跑发现）：原写法 `name = getattr(f, 'id', None) or getattr(f, 'attr', None)`
+        #   把 §4.4 第 8 步明文要求的 `webbrowser.open(url)` 也算成违规，实测报 AssertionError: ['open']。
+        # ★ 区分依据：禁令针对的是【裸 open() 读文件】（INV-401-7「不读音频文件」）；
+        #   而 webbrowser.open 是「拉起浏览器」，是规格冻结的启动步骤。
+        # ★ 故 banned 里只放 Call.func.id（裸函数名），属性调用另行显式列出白名单。
+        name = getattr(f, 'id', None)
         if name in {'import_module', '__import__', 'exec', 'eval', 'compile', 'open'}:
             hit.append(name)
+        attr = getattr(f, 'attr', None)
+        if attr == 'open' and ast.get_source_segment(src, f) != 'webbrowser.open':
+            hit.append(attr)
 assert not (mods & {'numpy','scipy','librosa','matplotlib','plotly','pandas','PyQt5','PySide6','flask','fastapi','requests','aiohttp','soundfile','pydub','pyaudio','sounddevice','tkinter','AppKit','Foundation','pytest'}), mods
 assert 'harmonica_eval' not in mods and 'core' not in mods and 'algorithms' not in mods and 'host' not in mods and 'profile' not in mods and 'importlib' not in mods, mods
-assert mods <= {'__future__','typing','os','sys','json','html','socket','http','socketserver','threading','subprocess','webbrowser','urllib','time','signal','contract'}, mods   # 运行路径的模块集合（inspect / dataclasses 只允许出现在实现者自查脚本里，不在 app.py 中）assert not hit, hit
+assert mods <= {'__future__','typing','os','sys','json','html','socket','http','socketserver','threading','subprocess','webbrowser','urllib','time','signal','contract'}, mods   # 运行路径的模块集合（inspect / dataclasses 只允许出现在实现者自查脚本里，不在 app.py 中）
+assert not hit, hit
 assert 'harmonica_eval' not in src and 'importlib' not in src
-for w in ('0.0.0.0','localhost','重新对齐','换个算法','重试','retry','ErrorCode','HarmonicaError','Traceback','pytest','unittest','sqlite3','pickle','tempfile','shutil','os.makedirs','write_text','write_bytes','__main__','np.','fft','stft','resample','interp','importlib'):
-    assert w not in src, w
+# ★★ 更正（⑳ 执行确认，2026-09-24）：原判据对【整份源码文本】做子串检索 —— 恒假。★★
+#   实测 `assert '重新对齐' not in src` → AssertionError，
+#   但命中的是 `app.py` 模块 docstring 里那条禁令本身
+#   （「在界面上发明新能力（"重新对齐""换个算法试试"都不行…）」）—— 那是【要求】，不是违规。
+#   而那条禁令必须保留（它是架构边界），所以不能靠删文案让判据变绿。
+#   子串检索也分不清「文档里提到」与「真的做成能力」。
+#
+# ★ 正确口径：分两组，用两种 AST 判定（均已实测验证）：
+#   A1 能力类 → 【真正被引用的名字】：字符串常量值 / Call 名 / import 名。
+#      这类词若出现在能力代码里必然被引用，故 AST 口径有效且当前 0 命中。
+#   A2 禁令文案类 → 只查【会被呈现给用户的字符串载体】：
+#      常量表（Assign/AnnAssign 的 Dict/List/Tuple/Set 值）、f-string、
+#      写进 HTTP 响应的实参（write/send/send_header/wfile）、含标记的 HTML 模板串。
+#      ★ 论证：若「重新对齐」真做成界面能力，它【必然】进入上述某个载体；
+#        它【不会】只存在于文档字符串。故查载体即可，不必扫全文。
+#      ★ 陷阱：ast.get_docstring【抓不到属性 docstring】（如 EXIT_START_FAILED 的说明），
+#        tokenize 去注释也无效（docstring 是字符串常量不是注释）——两者都不可用作排除手段。
+# ★ 更正（本次注入实跑发现，2026-09-24 负责人裁定局域网直连）：
+#   '0.0.0.0' 从 A1 禁令中移除 —— 它现在是 LOCAL_BIND_HOST 的合法值。
+#   ★ 原禁令的前提「只监听本机回环」已被负责人裁定推翻（"直接支持就行，这个只是测试，没有安全问题"）。
+#   ★ 收窄为：'localhost' 仍禁（那会让手机访问自己），0.0.0.0 合法。
+A1_CAPABILITY = ('localhost','retry','ErrorCode','HarmonicaError','Traceback',
+                 'pytest','unittest','sqlite3','pickle','tempfile','shutil','__main__',
+                 'np.','fft','stft','resample','interp','os.makedirs','write_text',
+                 'write_bytes','importlib')
+A2_UI_TEXT = ('重新对齐','换个算法','重试')
+_strs, _calls, _imps, _carriers = set(), set(), set(), []
+for _n in ast.walk(tree):
+    if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
+        _strs.add(_n.value)
+    if isinstance(_n, ast.Call):
+        _f = _n.func
+        _nm = getattr(_f, 'attr', None) or getattr(_f, 'id', None)
+        _calls.add(_nm or '')
+        if _nm in {'write', 'send', 'send_header', 'wfile'}:
+            for _a in _n.args:
+                if isinstance(_a, ast.Constant) and isinstance(_a.value, str): _carriers.append(_a.value)
+    elif isinstance(_n, ast.Import):
+        for _a in _n.names: _imps.add(_a.name)
+    elif isinstance(_n, ast.ImportFrom):
+        _imps.add(_n.module or '')
+    # ★ A2 载体收集（AnnAssign 必须算 —— COMMAND_LABELS 带类型注解，只匹配 Assign 会漏）
+    if isinstance(_n, (ast.Assign, ast.AnnAssign)) and isinstance(_n.value, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
+        for _e in ast.walk(_n.value):
+            if isinstance(_e, ast.Constant) and isinstance(_e.value, str): _carriers.append(_e.value)
+    elif isinstance(_n, ast.JoinedStr):
+        _carriers.append(ast.get_source_segment(src, _n) or '')
+    elif isinstance(_n, ast.Constant) and isinstance(_n.value, str) and '<' in _n.value and '>' in _n.value:
+        _carriers.append(_n.value)
+for w in A1_CAPABILITY:
+    assert not (any(w in s for s in _strs) or w in _calls or any(w in i for i in _imps)), f'A1 能力类越界: {w}'
+for w in A2_UI_TEXT:
+    assert not any(w in c for c in _carriers), f'A2 界面文案出现禁用能力: {w}'
 subs = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, 'attr', None) == 'submit']
 assert len(subs) == 1, len(subs)      # 唯一写路径：submit_command 体内的 port.submit(command)，全文件仅此一处
 print('STATIC OK')
@@ -789,18 +856,77 @@ print('CORE SURVIVES WITHOUT C4', len(ok), ok)
 # 该检验在未改动任何文件的前提下证明：内核 import 不经过 C4。
 
 #   —— 反向检查：内核不引用界面（源码级）
-grep -rn "cockpit" harmonica_eval/core harmonica_eval/algorithms harmonica_eval/host harmonica_eval/contract.py || echo "NO KERNEL->C4 REFERENCE"
-# 期望 stdout 恰为：NO KERNEL->C4 REFERENCE
+# ★ 判据 4 · import 禁区（用 AST 判 import 语义，不用文本 grep）
+# ★ 理由：grep 会命中注释 / docstring / README / __pycache__/*.pyc，
+#   而判据要问的是「内核真的 import 了 cockpit 吗」。
+# ★ 文本 grep 判 import 语义**天然不可靠** —— 已实证恒红：
+#   本判据改前实跑命中 19 处文本 + 14 个 .pyc 文件，全部是注释/文档/二进制，
+#   真实 import 违规为 0 处。判据要测的是语义，不是文本。
+python3 - <<'PY'
+# 与 FILE-301 的同类判据同源；覆盖面为 4 个内核目录 + contract.py。
+import ast, pathlib, sys
 
-# (5) 人工冒烟（唯一需要人眼的一步；会打开浏览器，退出码必须为 0 或 2）
-#     注意：launch_cockpit 会阻塞在 serve_forever()，故本段必须用真实终端交互运行。
-#     禁止用 heredoc（`python3 - <<'PY'`）把代码喂到 stdin：那样 stdin 不是 tty，
-#     终端 Ctrl-C 语义与交互窗口的文件选择框行为都不成立。
+# ★ 本判据只禁「内核 → C4」这一条方向。
+# ★ 刻意**不含** numpy / scipy / librosa：它们是内核自己做 DSP 的合法依赖
+#   （实测 contract.py:52、core/surface.py:46 就在用），把它们列为禁区
+#   会让本判据恒红 —— 那正是改前 grep 判据的老毛病（把判据写成不可能通过）。
+#   FILE-301 的判据禁 numpy 等，是因为那里测的是 **C4**，方向相反，不可照搬。
+BANNED = ("cockpit",)
+TARGETS = (
+    "harmonica_eval/core",
+    "harmonica_eval/algorithms",
+    "harmonica_eval/host",
+)
+EXTRA_FILES = ("harmonica_eval/contract.py",)
+
+paths: list[pathlib.Path] = []
+for root in TARGETS:
+    paths.extend(sorted(pathlib.Path(root).rglob("*.py")))
+paths.extend(pathlib.Path(p) for p in EXTRA_FILES)
+
+violations: list[str] = []
+for path in paths:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in BANNED:
+                    violations.append(f"{path}:{node.lineno} import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                target = node.module or ""
+                if target.split(".")[0] in BANNED:
+                    violations.append(
+                        f"{path}:{node.lineno} from {'.'*node.level}{target}"
+                    )
+            elif node.module and node.module.split(".")[0] in BANNED:
+                violations.append(f"{path}:{node.lineno} from {node.module}")
+
+if violations:
+    print("FAIL 内核 import 了界面层：")
+    for line in violations:
+        print("   ", line)
+    sys.exit(1)
+print("OK 内核的 import 均不指向 cockpit")
+PY
+# 期望 stdout 恰为：OK 内核的 import 均不指向 cockpit
+
+# (5) 冒烟：验证 launch_cockpit 真的起服务并在收到关闭信号后返回退出码。
+#
+# ★★ 2026-09-24 修正（阶段态 → 可自动判定的永续判据）★★
+#   本段原为「人工终端里跑，Ctrl-C 退出」，规格自己注明
+#   「launch_cockpit 会阻塞在 serve_forever()，故必须真实终端交互运行」。
+#   ★ 但 check_bi_scripts_exec.py 是【自动抽取并执行】§8 里的代码块 ——
+#   ★ 人工步骤在那条路径上永远判不了，FILE-401 因此长期停在 6/7。
+#   ★ 修法：改成【后台线程起服务 → 探测 → 主动关闭 → 断言退出码】，
+#   ★   仍断言语义（服务真的起过、真的能干净退出），★ 且不依赖人眼。
+#   ★ 判据跟形态走，而不是把一条人工步骤留在自动门禁里。
 python3 -c "
-import sys
+import os, signal, sys, threading, time, urllib.request
 sys.path.insert(0, '.')
 from harmonica_eval.contract import SessionState, UiView, UiCommandKind
 from harmonica_eval.cockpit import launch_cockpit
+
 class DevPort:
     def __init__(self): self.state = SessionState.CREATED; self.sent = []
     def snapshot(self):
@@ -808,13 +934,75 @@ class DevPort:
     def submit(self, command):
         self.sent.append(command)
         if command.kind is UiCommandKind.BUILD_SURFACE: self.state = SessionState.DATA_READY
+
 port = DevPort()
-code = launch_cockpit(port)
+import http.client, socket as _socket
+import harmonica_eval.cockpit.app as _cockpit_app
+
+box = {}
+# ★ 用【子进程】而非子线程跑 launch_cockpit：
+#   run_local_ui 第 4 步对 SIGTERM/SIGINT 调 signal.signal，
+#   而 signal.signal 只允许【主线程】（子线程实测抛
+#   "signal only works in main thread of the main interpreter"）。
+#   ★ 所以在子线程里调它会撞上 except Exception → 被归约成 EXIT_START_FAILED，
+#   ★ 那就测不到「服务真的起过」了。子进程的【主线程】才是合法位置。
+# ★ 关闭靠 os.kill 递交给那个子进程，由它自己注册的 handler 处理。
+pid = os.fork()
+if pid == 0:                                   # ── 子进程：主线程合法装 handler ──
+    try:
+        os._exit(launch_cockpit(port) & 0xFF)
+    except BaseException:
+        os._exit(3)
+
+def _wait_http(timeout: float = 20.0) -> str | None:
+    """轮询 8721–8784 直到某个端口真的返回 200。返回该端口。"""
+    import urllib.request
+    end = time.time() + timeout
+    while time.time() < end:
+        for candidate in range(8721, 8785):
+            try:
+                with urllib.request.urlopen(f'http://127.0.0.1:{candidate}/', timeout=0.3) as r:
+                    if r.status == 200:
+                        return f'http://127.0.0.1:{candidate}'
+            except Exception:
+                continue
+        time.sleep(0.1)
+    return None
+
+# ★ 端口从 8721–8784 逐个探测（_pick_port 的实际范围）——
+#   不硬编码单个端口，否则「端口被占用时自动顺延」这条能力测不到。
+base = None
+body = ''
+deadline = time.time() + 20
+while time.time() < deadline and base is None:
+    for candidate in range(8721, 8785):
+        try:
+            with urllib.request.urlopen(f'http://127.0.0.1:{candidate}/', timeout=0.3) as r:
+                if r.status == 200:
+                    base = f'http://127.0.0.1:{candidate}'
+                    body = r.read().decode('utf-8')
+                    break
+        except Exception:
+            continue
+
+base = _wait_http(20.0)
+assert base is not None, '服务未在 20 秒内开始监听'
+import urllib.request
+with urllib.request.urlopen(base + '/', timeout=3) as r:
+    body = r.read().decode('utf-8')
+assert 'developer smoke' in body or 'dev-1' in body, body[:200]
+print('OK 服务已起并返回真实页面：', base)
+
+# 关闭：§4.4 第 10 步 —— SIGINT 触发 KeyboardInterrupt → server_close → EXIT_OK。
+# ★ 信号递给【子进程】，由它自己注册的主线程 handler 处理；
+# ★ 父进程不装 handler，所以不会被误伤（实测先前版本 EXEC_FAIL KeyboardInterrupt）。
+os.kill(pid, signal.SIGINT)
+_, status = os.waitpid(pid, 0)
+code = os.waitstatus_to_exitcode(status)
 assert code in (0, 2), code
-print('EXIT', code, 'SENT', [c.kind.value for c in port.sent])
-"
+print('EXIT', code, 'SENT', [c.kind.value for c in port.sent])"
 echo "exit=$?"
-# 期望：地址只能是 http://127.0.0.1:8721/ … :8784/ 之一；按 Ctrl-C 后 print 出 EXIT 0；且 SENT 里**不含** CANCEL / RESET
+# 期望：★ 打印行含 http://127.0.0.1:<port>/ （port 落在 8721–8784），★ 且探测到局域网 IP 时另有一行 http://<LAN_IP>:<port>/；退出码 0；且 SENT 里**不含** CANCEL / RESET
 ```
 
 **验收判据**（可机械判定，非「看起来对」）：

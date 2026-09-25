@@ -1,0 +1,7 @@
+declared = ['align', 'api', 'features', 'ingest', 'surface']
+produced = ['align', 'features', 'surface']
+Traceback (most recent call last):
+  File "/Users/Apple/Desktop/dsh-archive/harmonica-eval/.spec/review/round-2/probes-A/probe_26_file100_verbatim.py", line 30, in <module>
+    assert declared == produced, (sorted(declared), sorted(produced))
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: (['align', 'api', 'features', 'ingest', 'surface'], ['align', 'features', 'surface'])

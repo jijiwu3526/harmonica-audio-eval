@@ -1,0 +1,46 @@
+=== raw file: quote delimiters ===
+  line 1 : "'''"
+  line 30: '    .spec/build/FILE-100-v1.md'
+  line 31: "'''"
+  line 32: ''
+
+=== AST docstring node ===
+  node lineno: 1  end_lineno: 31
+  len(raw.splitlines()) = 30
+  len(raw.split('\n')) = 31
+
+=== C.__doc__ (runtime) ===
+  len(C.__doc__.splitlines()) = 30
+
+=== FILE-100 spec claims ===
+  BI:69: | 0 | `Expr`（`Constant(str)`） | 1–31 | 模块 docstring |
+  BI:113: ### 4.4 模块 docstring（第 1–31 行）
+  BI:132: - **不变量**：`harmonica_eval.core.__doc__` 非空且 `len(harmonica_eval.core.__doc__.splitlines()) == 31`。
+  BI:279: assert len(doc.splitlines()) == 31, len(doc.splitlines())
+  BI:436: | docstring 行数 | `31` | 行 1–31 |
+
+=== §8 verification code for this invariant ===
+  BI:269: seen = {type(n).__name__ for n in ast.walk(tree)}
+  BI:270: assert seen & BANNED == set(), seen & BANNED
+  BI:271: 
+  BI:272: # INV-100-3：不导入子模块、不做 re-export
+  BI:273: for bad in ("ingest", "align", "features", "surface", "api"):
+  BI:274:     assert f".{bad}" not in src.replace("core." + bad, ""), bad
+  BI:275: 
+  BI:276: # INV-100-8：docstring 10 键
+  BI:277: doc = tree.body[0].value.value
+  BI:278: assert doc, "module docstring is empty"
+  BI:279: assert len(doc.splitlines()) == 31, len(doc.splitlines())
+  BI:280: pos = [doc.index(k) for k in KEYS]
+  BI:281: assert pos == sorted(pos) and len(set(pos)) == 10, pos
+  BI:282: assert re.search(r"^FILE-ID:\s+FILE-100\s*$", doc, re.M)
+  BI:283: assert re.search(r"^COMPONENT:\s+COMP-C2 Audio Core\s*$", doc, re.M)
+  BI:284: assert ".spec/build/FILE-100-v1.md" in doc
+  BI:285: assert "只声明公开面，不含逻辑" in doc
+  BI:286: assert "公开面必须与 profile.PORTS 的 produced_by 所指模块一致" in doc
+  BI:287: assert "import host / algorithms / cockpit（任何形式）" in doc
+  BI:288: assert "在包导入期做重量级 import（numpy 之外不加载重型依赖）" in doc
+  BI:289: assert "在此处 re-export 子模块的内部符号" in doc
+  BI:290: assert re.search(r"^OUTPUT:\s*\n\s*__all__\s*$", doc, re.M)
+  BI:291: 
+  BI:292: # 4.5 门面串

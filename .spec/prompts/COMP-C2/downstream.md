@@ -73,7 +73,7 @@ harmonica_eval/core/api.py         门面：CONTRACT-HOST-v1 的 7 个操作
 - 代价矩阵是 **float64**（librosa 行为），故占用是 `N²×8B`，不是 4B
 - `global_constraints=True` **不减少**矩阵分配，只约束路径、降低耗时
 - 得到路径后**立即释放**代价矩阵（不要返回它、不要存起来）
-- 必须验证路径**单调**（参考索引不回退）；违反 → `ALIGNMENT_UNRECOVERABLE`
+- 必须验证路径**单调**（参考索引单调不减）；违反 → `ALIGNMENT_UNRECOVERABLE`
 - 无法建立有效映射时 → 抛 `ALIGNMENT_UNRECOVERABLE`，
   **严禁**静默退化为"逐点硬比"（宪章 §5.6）
 
@@ -114,8 +114,10 @@ create_session / set_reference / set_practice / build_surface
 status / acquire_surface / destroy_session
 ```
 
-**状态机**：`CREATED → INPUT_READY → BUILDING → DATA_READY`，
-任一状态可 → `FAILED`，结束 → `CLOSED`。**单调推进，不可回退**。
+**正常流程状态单调推进**：`CREATED → INPUT_READY → BUILDING → DATA_READY`，
+不跳过 `DATA_READY`；任一状态可 → `FAILED`，结束 → `CLOSED`。
+`CANCEL` / `RESET` 是管理操作，允许回退到稳定态。
+**C2 不负责会话状态机，此处为越界描述；状态编排由 C1 负责。**
 
 `status()` **只返回 `SessionState` 的六个值之一**；内部阶段
 （INGESTING / ALIGNING / BUILDING_PORTS…）**不得外泄**。

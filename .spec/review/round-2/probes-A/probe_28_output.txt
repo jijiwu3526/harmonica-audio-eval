@@ -1,0 +1,23 @@
+  PASS  INV-100-9a len(src.splitlines())==53
+  PASS  src.endswith('"""\n')
+  PASS  not src.endswith('\n\n')
+  PASS  4 top-level nodes
+  PASS  body[0] is docstring Expr
+  PASS  body[1] __future__ annotations
+  PASS  body[2] __all__ list of 5
+  PASS  body[3] bare string Expr
+  PASS  import count == 1
+  PASS  INV-100-1 zero logic
+  PASS  INV-100-3 no submodule import
+  PASS  INV-100-8 doc non-empty
+  FAIL  INV-100-8 len(doc.splitlines())==31  -> AssertionError: 30
+  PASS  INV-100-8 10 keys ordered
+  PASS  regex FILE-ID
+  PASS  regex COMPONENT
+  PASS  regex OUTPUT __all__
+  PASS  facade core.<name> x5
+  PASS  facade regex align
+  PASS  facade regex surface
+  PASS  facade regex api 7 ops
+
+FAILURES: ['INV-100-8 len(doc.splitlines())==31']

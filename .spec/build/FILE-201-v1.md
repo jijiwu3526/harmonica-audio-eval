@@ -132,12 +132,20 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 `pitch.*` 的帧数 = 时长 ÷ `MATERIALIZE.pitch_hop_length`，
 故两侧 `n_frames` **默认不相等**，逐帧相减**无定义**。
 
+> ★ **2026-09-24 裁定：hop 的读取通道已改**
+> 本文件原要求实现者自带 `PITCH_HOP_LENGTH`（理由是判据 G 的 `ALLOWED` 不含
+> `profile`）。现契约层新增只读查询 `hop_of(port_id)`，实现者应写：
+> `from ..contract import hop_of` 后取 `hop_of("pitch.reference")`。
+> ★ **判据 G 的 `ALLOWED` 本就含 `contract`**，★ **因此无需放宽任何判据**。
+> 权威源仍是 `profile.PORT_INDEX`；`contract.PORT_HOP_LENGTHS` 是它的契约层
+> 只读转供，§8 判据会交叉核对两者一致（改一处而不同步会被抓到）。
+
 **为什么这个缺陷一直没暴露**：本数据集 01 的全部 7 个 wav 都由同一渲染器批量产出，
-长度**恰好全是 72.802 s**（1568 帧），帧数差为 0 —— "恰好等长"掩盖了它。
+长度**恰好全是 72.802 s**（1569 帧），帧数差为 0 —— "恰好等长"掩盖了它。
 换一首演奏时长不同的练习曲（**这正是真实使用场景**）立刻崩。
 
 **正确做法**：用两侧各自的 `notes.*` 的 `onset_sec` 建立对应，
-**按音配对**后再比较。这才是 `ALGORITHMS` 声明 pitch 需要
+**按音配对**后再比较。这才是插件规格声明 pitch 需要
 `notes.reference` + `notes.practice` 的**真正理由** ——
 原先的论证只讲到"为了能标注第几个音"（**可定位**），
 没讲到"不等长**根本无法比较**"（**可比较**）。
@@ -219,17 +227,29 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 
 - **★ 已知缺口（由下往上核对发现，如实记录不掩盖，实现者不得"顺手修"）**：
   `timing` 与 `dynamics` 的 payload 都含 `n_unpaired`（未能配对的音数），
-  **`pitch` 的 payload 没有**（见 `PAYLOAD_SCHEMAS['pitch']`，只有 5 个键）。
+  **`pitch` 的 payload 没有**。这与插件结果对象的 `UiScalar.key` / `UiSeries.key`
+  自描述契约有关；`n_unpaired` 不在 pitch 的输出对象中。
   而本函数的配对**同样会失败**（漏音 / 多音 / 音数不等），
   被排除的音**同样无处报告**。
   后果：读者无法分辨「整首都测了」与「只测上了少数几个音」，
   而 `off_pitch_ratio` 的**分母**恰恰就是 `n_notes_used` ——
   「全曲 115 个音里 58 个走音」与「12 个音里 6 个走音」会得到同一个数字。
 
-  根因：`PAYLOAD_SCHEMAS` 由人工维护、三份各自演化，缺少对称性约束。
-  修它需要在**冻结表**加键 = **接口变更**。
-  故：**本函数照常返回 `n_unpaired`（它是有用的中间量），
-  但 `run()` 装信封时不得把它写进 payload**（那会违反冻结的 schema）。
+  历史根因：当时的 `PAYLOAD_SCHEMAS` 由人工维护、三份各自演化，缺少对称性约束。
+  该表已随插件化删除；现在字段名由产出的 `UiScalar.key` / `UiSeries.key` 自描述。
+  故：**本函数照常返回 `n_paired` 与 `n_unpaired`（二者都是有用的中间量），
+  但 `run()` 装信封时必须把这两个键一并丢弃，不得写进 payload**
+  （写进去会违反冻结的 schema）。
+
+  ★★ **本版更正（`GAP-200-1` 的可执行收尾口径）：上一版此处只写
+  「不得把 `n_unpaired` 写进 payload」，**漏掉了 `n_paired`**。
+  但 §4.2 的输出 dict 同时返回这两个键，`run()` 若不显式丢弃，
+  `n_paired` 同样会漏进 payload，键数就从 5 变成 6（违反冻结表）。
+  本版冻结：**`run()` 装信封时丢弃 `n_paired` 与 `n_unpaired` 两个键**，
+  只取 `res["per_note_cents"]` 走 §4.3 汇总，再补 `sample_rate`；
+  payload 的键集合由 `UiScalar.key` / `UiSeries.key` 自描述，
+  一个不多、一个不少。** ★★
+
   **按 §37 Gate Challenge 上报**，见 §10。
 
 ---
@@ -237,7 +257,7 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 ### 4.3 `summarize_deviations(deviations_cents) -> dict`
 
 - **输入**：`deviations_cents: list[float] | NDArray` —— §4.2 产出的逐音偏差
-- **输出**：`dict`，**键名以 `algorithms.PAYLOAD_SCHEMAS["pitch"]` 为唯一权威**，
+- **输出**：`dict`，**键名由插件产出的 `UiScalar` / `UiSeries.key` 自描述**，
   **恰好 5 个键，一字不得增删**：
   ```python
   {
@@ -250,8 +270,19 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
   ```
   ★ 由于 `sample_rate` 是"结果的成因"而非统计量，**本函数签名里没有它**；
   故本函数返回**前 4 个键**，由 `run()` 补上 `sample_rate` 得到完整 5 键。
-  若实现者选择让本函数直接收 `sample_rate` 并返回 5 键，**也允许**
-  （两种都不违反契约），但**必须在文档里写清选了哪种**。
+  ★★ **本版更正（第三轮盲审 A 的 FINDING-13）：上一版此处写
+  「若实现者选择让本函数直接收 `sample_rate` 并返回 5 键，也允许」——
+  **在冻结签名下不可实现，已删除。** ★★
+
+  骨架冻结的签名是 `summarize_deviations(deviations_cents) -> object`，
+  **没有** `sample_rate` 形参；要收它只能改签名（= 接口变更），
+  或从别处取采样率（无来源）。**唯一口径就是本函数返回前 4 键，
+  由 `run()` 补上 `sample_rate` 得到完整 5 键。**
+
+  **措辞澄清**：上文「恰好 5 个键，一字不得增删」说的是
+  **插件自描述契约**（即 `run()` 最终产出的 payload），
+  **不是**本函数的返回值。本函数返回其中前 4 键 —— 两句不矛盾，
+  已在上一版读起来互斥，特此写明。
 
 - **算法口径**（写死）：
   ```python
@@ -294,10 +325,11 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
   ```
   algorithm_id       = ALGORITHM_ID        ("pitch")
   algorithm_version  = ALGORITHM_VERSION   ("1.0.0")
-  status             = "SUCCEEDED" | "FAILED"
+  status             = "OK" | "DEGRADED" | "INCOMPATIBLE" | "FAILED"
+  # DEGRADED 必须以 coverage 或 warnings 至少一项给出证据
   required_ports     = ("pitch.reference", "pitch.practice", "notes.reference", "notes.practice")
   consumed_ports     = 实际成功读取的端口元组
-  payload            = §4.3 的 5 键字典（失败时为 {}）
+  payload            = 自描述序列；逐音序列为 UiSeries，其余指标为 UiScalar
   error_code         = ErrorCode 的值 或 None
   error_detail       = 人类可读说明 或 None
   elapsed_sec        = perf_counter 差值（float）
@@ -306,10 +338,29 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 - **算法口径**（顺序写死）：
   1. `t0 = time.perf_counter()`
   2. `man = surface.manifest()` —— 校验四个必需端口都在（缺任一 → 失败信封）
-  3. `ref_pitch = surface.read("pitch.reference")`，其余三个同理
+  3. 读四个端口 —— **每个都必须取 `.data` 解包**（四处都要改，缺一不可）：
+     ```python
+     ref_pitch  = surface.read("pitch.reference").data
+     prac_pitch = surface.read("pitch.practice").data
+     ref_notes  = surface.read("notes.reference").data
+     prac_notes = surface.read("notes.practice").data
+     ```
+     ★★ **本版更正：上一版此处写
+     `ref_pitch = surface.read("pitch.reference")`，其余三个同理 ——
+     四处**都漏掉了 `.data`**，拿到的是 `BufferView` 而不是 ndarray。**
+     `surface.read()` 的冻结返回类型是 `contract.BufferView`
+     （见 `contract.py` 的 `AlgorithmDataContract.read`），
+     底层 ndarray 挂在它的 `.data` 字段上；直接把它当 ndarray
+     传给 §4.2 会在 `ref_notes[:, IDX_onset_sec]` 这类下标处失败。
+     `BufferView` 是**只读借用视图**：取 `.data` 得 ndarray，
+     下游仍**不得**原地修改（见本节末尾"不修改输入数组"）。
+     口径与 FILE-203 的 `read().data` 写法一致。** ★★
   4. `res = compare_pitch_curves(ref_pitch, prac_pitch, ref_notes, prac_notes, sample_rate)`
-  5. `payload = summarize_deviations(res["per_note_cents"])`
-  6. `payload["sample_rate"] = <两侧的采样率>` —— **补上第 5 个键**
+  5. 将 `summarize_deviations` 的标量字典转为 `UiScalar`（`key` / `label` / `value` / `unit`；
+     `median_abs_cents`=`cents`，`off_pitch_ratio`=`ratio`，`n_notes_used`=`count`），
+     将 `per_note_cents` 转为 `UiSeries`（`key` / `label` / `t=onset_sec` /
+     `values=per_note_cents` / `unit=cents` / `timeline_basis=REFERENCE`），组成 `payload`
+  6. 增加 `sample_rate` 的 `UiScalar`（`key` / `label` / `value` / `unit=hz`）
   7. 装信封返回，`elapsed_sec = time.perf_counter() - t0`
 
 - **★ 失败语义（本函数最容易写错的地方）**：
@@ -318,7 +369,7 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
   用 `try/except Exception` 包住 2–6 步，在 except 里装失败信封：
   - `error_code = ErrorCode.ALGORITHM_FAILED.value`
   - `error_detail = f"{type(e).__name__}: {e}"`
-  - `payload = {}`
+  - `payload = ()`
   - ★ **不留 `error_code=None`**：失败却无码，C1 无法分类。
 
 - **边界**：
@@ -354,7 +405,7 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 | 两侧音数不等 | **正常工作** | 返回 `n_unpaired > 0` |
 | `run()` 必需端口缺失 | **失败信封** | 返回 `status="FAILED"`，`ALGORITHM_FAILED` |
 | `run()` 内部任何异常 | **失败信封** | 返回 `status="FAILED"`，`ALGORITHM_FAILED` |
-| `run()` 两侧音全配不上 | **成功信封** | `status="SUCCEEDED"`，`n_notes_used=0` |
+| `run()` 两侧音全配不上 | **成功信封** | `status="OK"`，`n_notes_used=0`（★ 原写 `"SUCCEEDED"`，契约无此取值） |
 
 ★ **宪章 §5.6：禁止静默降级。** 本文件明令禁止：
 
@@ -409,7 +460,7 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 - **不 import 同层算法**（timing / dynamics）—— 共享口径靠契约，不靠互相调用。
 - **不修改输入数组** —— `surface.read()` 返回的可能是共享缓冲区视图，
   就地修改会污染后续算法。若需变换，先 `np.array(..., copy=True)`。
-- **不自行给 `PAYLOAD_SCHEMAS` 加 `n_unpaired` 键** —— 那是冻结表，属接口变更。
+- **不自行新增 `n_unpaired` 的 `UiScalar` / `UiSeries` 输出对象** —— 输出字段由插件自描述契约及当前规格口径决定。
   见 §4.2 的已知缺口与 §10。
 - 若你发现"不做某个东西就实现不了" → **不要做**，转 §10。
 
@@ -420,11 +471,29 @@ chroma 是**八度不变**的 —— 用它做音准会把「低了一个八度�
 ```bash
 cd /Users/Apple/Desktop/dsh-archive/harmonica-eval
 
-# ── 判据 A（INV-201-1）：注册表声明的必需端口
+# ── 判据 A（INV-201-1）：插件规格声明的必需端口
+# ★ 2026-09-24 裁定【方案甲】：PluginSpec 由 bootstrap 集中声明（FILE-206 §4.5）。
+# ★ 本判据原为「算法模块自导出 SPEC」（方案乙），已随裁定改为从 bootstrap 取。
 python3 -c "
-from harmonica_eval.algorithms import ALGORITHMS
-p = next(a for a in ALGORITHMS if a.algorithm_id == 'pitch')
-assert p.required_ports == ('pitch.reference','pitch.practice','notes.reference','notes.practice'), p.required_ports
+from harmonica_eval.contract import PluginSpec
+from harmonica_eval.algorithms.bootstrap import build_plugin_specs, ALGORITHM_INPUTS, REGISTRATION_ORDER
+# ★ 不断言恰好 3 个算法 —— 对「bootstrap 未来新增算法」免疫
+by_id = {s.algorithm_id: s for s in build_plugin_specs()}
+p = by_id['pitch']
+assert isinstance(p, PluginSpec)
+assert p.algorithm_id == 'pitch'
+assert p.algorithm_version, 'algorithm_version 不得为空'
+assert p.entry is not None, 'entry 不得为 None'
+required = tuple(r.port_id for r in p.required_inputs)
+assert required == ('pitch.reference','pitch.practice','notes.reference','notes.practice'), required
+# ★ 交叉校验：与权威声明逐字一致（防止两处漂移）
+assert set(required) == set(ALGORITHM_INPUTS['pitch']), (required, ALGORITHM_INPUTS['pitch'])
+# ★ 声明的每个端口都必须在真实端口清单里存在
+from harmonica_eval import profile
+for port_id in required:
+    assert port_id in profile.PORT_INDEX, port_id
+# ★ 装配顺序完整
+assert set(by_id) == set(REGISTRATION_ORDER) == set(ALGORITHM_INPUTS)
 print('PASS A: pitch 声明了 4 个必需端口，含两侧音符')
 "
 
@@ -475,18 +544,16 @@ assert r2['n_paired'] == 0, f'未 voiced 音未被丢弃: {r2}'
 print(f'PASS D: 短音与未 voiced 音均被丢弃（MIN_STABLE_NOTE_SEC={MIN_STABLE_NOTE_SEC}）')
 "
 
-# ── 判据 E（INV-201-5 / INV-201-11）：payload 恰好 5 键
+# ── 判据 E（INV-201-5 / INV-201-11）：payload 对象的自描述键
 python3 -c "
-from harmonica_eval.algorithms import PAYLOAD_SCHEMAS
 from harmonica_eval.algorithms.pitch import summarize_deviations
-got = set(summarize_deviations([0.0, 10.0, 60.0]).keys()) | {'sample_rate'}
-assert got == set(PAYLOAD_SCHEMAS['pitch']), (got, set(PAYLOAD_SCHEMAS['pitch']))
 s = summarize_deviations([0.0, 10.0, 60.0])
+assert set(s) == {'per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used'}, s
 assert s['n_notes_used'] == 3
 assert abs(s['off_pitch_ratio'] - 1/3) < 1e-12, s
 assert s['median_abs_cents'] == 10.0, s
 assert summarize_deviations([50.0])['off_pitch_ratio'] == 0.0
-print('PASS E: payload 5 键齐全，边界 50.0 判为准')
+print('PASS E: payload 对象键齐全，边界 50.0 判为准')
 "
 
 # ── 判据 F（INV-201-6）：run() 永不抛异常
@@ -506,6 +573,7 @@ python3 - <<'PY'
 import ast, pathlib
 src = pathlib.Path('harmonica_eval/algorithms/pitch.py').read_text(encoding='utf-8')
 tree = ast.parse(src)
+from harmonica_eval.algorithms.bootstrap import ALGORITHM_INPUTS
 mods = set()
 for n in ast.walk(tree):
     if isinstance(n, ast.Import):
@@ -515,18 +583,58 @@ for n in ast.walk(tree):
 ALLOWED = {'__future__', 'math', 'statistics', 'time', 'typing', 'numpy', 'contract'}
 extra = {m for m in mods if m and m not in ALLOWED}
 assert not extra, f'越界 import: {extra}'
-for banned in ('chroma', 'librosa', 'crepe', 'torch', 'scipy', 'soundfile',
-               'pyin', 'TimelineBasis.WARPED'):
-    assert banned not in src, f'出现禁止的符号: {banned}'
-assert 'AXIS' in src and 'TimelineBasis.REFERENCE' in src, 'AXIS 未声明为 REFERENCE'
-print(f'PASS G: import 面封闭 {sorted(m for m in mods if m)}，无 chroma / 无 WARPED')
+# ★★ 更正（⑳ 执行确认）：原写对**整份源码做子串检索** —— 恒假。 ★★
+#   实测 `assert 'chroma' not in src` → AssertionError，
+#   但命中的是**模块 docstring 里那句禁令本身**
+#   （「本算法必须用绝对音高，禁止 chroma 化」）—— 那是**要求**，不是违规。
+#   子串检索分不清「说了 chroma」和「用了 chroma」，必须改为 AST 口径：
+#   只看**真正被引用的名字与属性**，不看注释与 docstring。
+_tree = ast.parse(src)
+_used = set()
+for _n in ast.walk(_tree):
+    if isinstance(_n, ast.Name):
+        _used.add(_n.id)
+    elif isinstance(_n, ast.Attribute):
+        _used.add(_n.attr)
+_banned_names = {'chroma', 'crepe', 'torch', 'soundfile', 'pyin'}
+_hit = _used & _banned_names
+assert not _hit, f'出现禁止的符号: {sorted(_hit)}'
+# `librosa` / `scipy` 已在上面 ALLOWED 白名单里被挡（未列入即为越界 import）
+assert not any(isinstance(_n, ast.Attribute) and _n.attr == 'WARPED'
+               for _n in ast.walk(_tree)), '出现 TimelineBasis.WARPED'
+# ★ 2026-09-24：原判据 `assert 'AXIS' in src and 'TimelineBasis.REFERENCE' in src`
+# ★ 所依赖的 `AXIS` 模块常量已随 MOLD BREAK 删除（见 dynamics/pitch 的 MOLD BREAK 说明：
+# ★   正确机制是「按音配对」，不是「用某条时间轴当代理」）。
+# ★ 但该判据的【原意仍然重要】—— 音准必须用 REFERENCE 语义，两侧不可按帧号硬对齐。
+# ★ 故改为测意图的替代物：声明的输入端口不得含 WARPED 侧，
+# ★ 且实现必须出现按音配对的证据（notes.* 逐音索引）。
+_ports = set(ALGORITHM_INPUTS['pitch'])
+assert not any(_p.startswith('pcm.warped') for _p in _ports), f'不得消费 WARPED 端口: {sorted(_ports)}'
+assert {'notes.reference', 'notes.practice'} <= _ports, f'必须按 notes 逐音配对: {sorted(_ports)}'
+# ★★ 2026-09-24 新增：hop 单一真相源的【交叉核对】★★
+#   契约层的 PORT_HOP_LENGTHS 是 profile.PORT_INDEX 的只读转供；
+#   若两者漂移，本断言立即失败 —— 防止「改了一处忘了另一处」。
+import harmonica_eval.profile as _P
+from harmonica_eval.contract import hop_of as _hop_of
+for _pid, _declared in _P.PORT_INDEX.items():
+    assert int(_declared.hop_length) >= 0, f'{_pid} 的 hop 非负'
+for _pid in _P.PORT_INDEX:
+    if int(_P.PORT_INDEX[_pid].hop_length) > 0:
+        assert _hop_of(_pid) == int(_P.PORT_INDEX[_pid].hop_length), \
+            f'hop 真相源漂移: profile={_P.PORT_INDEX[_pid].hop_length} vs contract={_hop_of(_pid)}'
+# 本模块必须真的从 contract 取，而不是自带一个复制品
+assert 'hop_of' in src, 'pitch.py 必须使用 contract.hop_of，不得自带 PITCH_HOP_LENGTH 常量'
+import harmonica_eval.algorithms.pitch as _pitch_mod
+assert _pitch_mod.PITCH_HOP_LENGTH == _hop_of('pitch.reference'), \
+    f'pitch 的 hop 未跟随契约层: {_pitch_mod.PITCH_HOP_LENGTH}'
+print(f'PASS G: import 面封闭 {sorted(m for m in mods if m)}，无 chroma / 无 WARPED；按 notes 逐音配对；hop 单一真相源一致')
 PY
 
 # ── 判据 H（INV-201-8）：两侧不等长是常态，必须正常工作
 python3 -c "
 import numpy as np
 from harmonica_eval.algorithms.pitch import compare_pitch_curves
-ref  = np.tile(np.array([[440.0,1,0.9]]), (1568,1))   # 72.802 s @ hop=2048
+ref  = np.tile(np.array([[440.0,1,0.9]]), (1569,1))   # 72.802 s @ hop=2048
 prac = np.tile(np.array([[445.0,1,0.9]]), (969,1))    # 45 s
 r = compare_pitch_curves(
     ref, prac,
@@ -534,7 +642,7 @@ r = compare_pitch_curves(
     np.array([[i*2.0, 445.0, 0.1] for i in range(20)], dtype=np.float64),
     44100)
 assert r['n_paired'] + r['n_unpaired'] == 30, r
-print(f'PASS H: 两侧帧数不等（1568 vs 969）正常工作，配对 {r[\"n_paired\"]} 未配对 {r[\"n_unpaired\"]}')
+print(f'PASS H: 两侧帧数不等（1569 vs 970）正常工作，配对 {r[\"n_paired\"]} 未配对 {r[\"n_unpaired\"]}')
 "
 
 # ── 判据 I：全仓机械检查仍通过

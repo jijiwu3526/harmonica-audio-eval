@@ -1,0 +1,26 @@
+=== FILE-002 frozen signatures (skeleton, authoritative) ===
+  write_metrics_json(view: 'UiView', out_path: 'Path') -> 'None'
+  render_report_markdown(view: 'UiView') -> 'str'
+  run_headless(reference_uri: 'str', practice_uri: 'str', out_path: 'Path') -> 'UiView'
+  describe_inputs(reference_uri: 'str', practice_uri: 'str') -> 'str'
+  main(argv: 'Sequence[str] | None' = None) -> 'int'
+
+=== UiView fields (contract.py, authoritative) ===
+   ['session_id', 'state', 'series', 'scalars', 'progress', 'error_code', 'error_detail', 'note']
+   URI-bearing candidates in UiView: NONE
+
+=== UiScalar / UiSeries fields ===
+   UiScalar: ['key', 'label', 'value', 'unit', 'threshold']
+   UiSeries: ['key', 'label', 't', 'values', 'unit', 'timeline_basis', 'source_port']
+
+=== Does the string 'reference_uri' appear in UiView or any projection type? ===
+   UiView: no
+   UiScalar: no
+   UiSeries: no
+
+=== CONCLUSION ===
+  write_metrics_json(view, out_path) is REQUIRED (FILE-002:266) to emit
+  {'reference': <reference_uri>, 'practice': <practice_uri>}.
+  Reachable args: odict_keys(['view', 'out_path'])
+  UiView URI carriers: NONE
+  => channel exists: False

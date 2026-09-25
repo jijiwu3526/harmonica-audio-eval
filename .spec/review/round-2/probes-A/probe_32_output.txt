@@ -1,0 +1,31 @@
+=== SKELETON (frozen artifact) signatures ===
+   write_metrics_json(view: UiView, out_path: Path, reference_uri: str, practice_uri: str)
+   render_report_markdown(view: UiView, reference_uri: str, practice_uri: str)
+   run_headless(reference_uri: str, practice_uri: str, out_path: Path)
+   main(argv: Sequence[str] | None=None)
+   describe_inputs(reference_uri: str, practice_uri: str)
+   summarize_series(series: Sequence[UiSeries])
+
+=== FILE-002 BI headings ===
+   BI:199: ### 4.3 `write_metrics_json(view: UiView, out_path: Path, reference_uri: str, practice_uri: str) -> None`
+   BI:325: ### 4.4 `render_report_markdown(view: UiView, reference_uri: str, practice_uri: str) -> str`
+
+=== FILE-002 §4.9 公开符号闭合表 ===
+   BI:405: ### 4.9 公开符号闭合表
+   BI:406: 
+   BI:407: `__all__` 必须**恰好**为以下 13 项，顺序不限，不得增删：
+   BI:408: 
+   BI:409: `DEFAULT_OUT_DIR`、`DEFAULT_METRICS_FILENAME`、`REPORT_FILENAME`、`EXIT_OK`、`EXIT_FAILED`、`EXIT_USAGE`、`build_parser`、`run_headless`、`render_report_markdown`、`write_metrics_json`、`main`、`summarize_series`、`describe_inputs`。
+   BI:410: 
+   BI:411: 四个 `raise NotImplementedError("SHELL: FILE-002 待注入实现")` 占位（`build_parser` / `run_headless` / `render_report_markdown` / `write_metrics_json` / `main`，共 5 处）必须被真实实现替换。文件末尾的 `if __name__ == "__main__": raise SystemExit(main())` 必须原样保留。
+   BI:412: 
+   BI:413: ---
+   BI:414: 
+   BI:415: ## 5 · 失败语义
+   BI:416: 
+   BI:417: | 情形 | 行为 | 抛出/返回 |
+   BI:418: | --- | --- | --- |
+
+=== import the skeleton and inspect live ===
+   write_metrics_json (view: 'UiView', out_path: 'Path', reference_uri: 'str', practice_uri: 'str') -> 'None'
+   render_report_markdown (view: 'UiView', reference_uri: 'str', practice_uri: 'str') -> 'str'

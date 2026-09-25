@@ -1,0 +1,45 @@
+######## FILE-105 claim: Surface owns handle-invalidation ########
+   FILE-105:77: | `harmonica_eval/core/surface.py` | `Surface` 的装配与 Seal、`content_hash` 的字节级计算、只读视图（`writeable is False`）的落实、句柄失效的判定 | 唯一外泄物是 `acquire_surface` 返回的那个 `Surface` 实例，且只在 `state is SessionS
+   FILE-105:229: - **所有权**：句柄有效期至 `destroy_session`；借用方不得释放。本文件**不提供** release / close / invalidate 操作（第 8 个操作 = 契约变更）。`destroy_session` 之后旧句柄的任何读行为都是 `ContractViolation`，该判定由 `Surface` 自己持有（口径冻结在 surfa
+   FILE-105:327: | INV-105-8 | **`acquire_surface` 返回的句柄在 `destroy_session` 后失效** | `h = core.acquire_surface(sid)`；`core.destroy_session(sid)`；断言 `core.status(sid) is SessionState.CLOSED`；`pytest.raise
+   FILE-105:450: # 6 · 销毁后旧句柄失效
+   FILE-105:480: - [ ] 命令 6 输出 `OK stale handle rejected`：`destroy_session` 后 `status` 为 `CLOSED`，旧句柄 `manifest()` 抛 `ContractViolation`
+
+######## does FILE-104 define ANY invalidation / destroy / close mechanism? ########
+   FILE-104:63: 「DESIGN-RULING：Core 预生成，端口清单封闭」这条裁定失效。
+   FILE-104:332: ★★ **上一版原文（已作废）**：
+   FILE-104:865: | 用户取消构建（`CANCEL` 在 `BUILDING`） | **不是失败**：由 `api.py` 在端口物化检查点处理 | 本文件**不产生** `ErrorCode`；`api.py` 销毁未完成数据面 |
+   FILE-104:925: 数据面只活在进程内存里，随会话销毁而释放。
+   FILE-104:956: `snapshot()` / `close()` 等便利接口 —— `Surface` 的公开面**只有**
+
+######## FILE-104 §4.6 Surface: what operations does it define? ########
+   576: ### 4.6 `class Surface(AlgorithmDataContract)`
+   577: 
+   578: 构造约定（本文件内部使用，**不**是公开 API）：实现以
+   579: `Surface(manifest_obj, data_map)` 形式构造，其中 `manifest_obj: SurfaceManifest`、
+   580: `data_map: Mapping[str, npt.NDArray]`。两个属性在构造后**不得**再赋值
+   581: （用 `__slots__`、`frozen` dataclass 或属性只读均可，但必须满足：
+   582: `surface.manifest` 与 `surface._data` 的重新赋值抛 `AttributeError`）。
+   583: 
+   584: ---
+   585: 
+   586: #### 4.6.1 `Surface.manifest(self) -> SurfaceManifest`
+   587: 
+   588: - **输入**：`self`。
+   589: - **输出**：`contract.SurfaceManifest`（frozen dataclass），字段逐项：
+   590: 
+   591:   | 字段 | 取值（唯一口径） |
+   592:   | --- | --- |
+   593:   | `profile_version` | `profile.PROFILE_VERSION` |
+   594:   | `audio_format` | `contract.AudioFormat(sample_rate=sample_rate, channels=1, dtype="float32")`。`channels` 与 `dtype` 是**契约冻结字面量**（`AudioFormat.__post_init__` 会拒绝其他值）。 |
+   595:   | `reference_duration_sec` | `round(len(reference) / sample_rate, 6)`，单位秒。保留 6 位小数（例：120.0 s 输入 → `120.0`）。 |
+   596:   | `practice_duration_sec` | `round(len(practice) / sample_rate, 6)`，单位秒。 |
+   597:   | `ports` | `Mapping[str, PortDescriptor]`，键集合与 `profile.PORT_INDEX` 完全一致；value 由 §4.2 的 `build_descriptor` 产出。实现**必须**返回 `types.MappingProxyType` 包裹的只读映射（调用方写入抛 `TypeError`
+   598:   | `sealed` | 数据面 Seal 完成则为 `True`；任何端口未 Seal（`any(arr.flags.writeable for arr in data_map.values())` 为真）则为 `False`。**不得**硬编码 `True`。 |
+   599: 
+   600: - **算法口径**：**无计算**。本方法返回构造时已装配好的对象或其只读投影。
+   601:   在调用 `manifest()` 时**不得**访问 `data_map` 的任何元素内容
+   602:   （读 `flags.writeable` 与 `shape` 除外，它们不触发计算）。
+   603: - **边界**：
+   604:   - 数据面为空端口集 → 返回 `ports = {}` 的清单，`sealed = True`。
+   605:   - 数组含 `NaN` → 不影响。

@@ -1,0 +1,43 @@
+========================================================================
+[A] produced_by 的值形态（模块名 or 函数名？）
+    'core.align'  ports=['warp_path']
+    'core.features'  ports=['pitch.reference', 'pitch.practice', 'rms.reference', 'rms.practice', 'chroma.lowres.reference', 'chroma.lowres.practice', 'notes.reference', 'notes.practice']
+    'core.surface'  ports=['pcm.mapped.reference', 'pcm.mapped.practice', 'pcm.warped.practice']
+
+[B] importlib.import_module(produced_by) —— 按 FILE-104 §3 的字面口径
+    import_module('core.align') -> ModuleNotFoundError: No module named 'core'
+    import_module('core.features') -> ModuleNotFoundError: No module named 'core'
+    import_module('core.surface') -> ModuleNotFoundError: No module named 'core'
+
+[C] 是否存在 (port_id -> producer callable) 映射？
+    harmonica_eval.core.align: (无映射常量)
+    harmonica_eval.core.features: (无映射常量)
+    harmonica_eval.core.surface: ['Mapping']
+    profile.PortSpec 字段: ['port_id', 'units', 'dimensions', 'element_type', 'timeline_basis', 'produced_by', 'rationale', 'field_names', 'hop_length']
+    -> PortSpec 只有 produced_by（模块名），没有 producer 函数名/入口字段
+
+[D] 所有候选生产者函数的真实签名 vs FILE-104 §4.4 冻结的 4 参约定
+    no    harmonica_eval.core.align.align(reference: 'npt.NDArray', practice: 'npt.NDArray') -> 'npt.NDArray'
+    no    harmonica_eval.core.align.assert_monotonic(warp_path: 'npt.NDArray') -> 'None'
+    no    harmonica_eval.core.align.compute_alignment_features(samples: 'npt.NDArray') -> 'npt.NDArray'
+    no    harmonica_eval.core.align.compute_warp_path(ref_features: 'npt.NDArray', prac_features: 'npt.NDArray') -> 'npt.NDArray'
+    no    harmonica_eval.core.align.measure_coverage(warp_path: 'npt.NDArray', n_ref_frames: 'int') -> 'float'
+    no    harmonica_eval.core.features.materialize_chroma(samples: 'npt.NDArray') -> 'npt.NDArray'
+    no    harmonica_eval.core.features.materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+    no    harmonica_eval.core.features.materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+    no    harmonica_eval.core.features.materialize_rms(samples: 'npt.NDArray') -> 'npt.NDArray'
+    no    harmonica_eval.core.surface.assert_budget(ports: 'Mapping[str, npt.NDArray]') -> 'int'
+    no    harmonica_eval.core.surface.build_descriptor(port_id: 'str', data: 'npt.NDArray', sample_rate: 'int') -> 'PortDescriptor'
+    MATCH harmonica_eval.core.surface.build_surface(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Surface'
+    MATCH harmonica_eval.core.surface.generate_all_ports(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Mapping[str, npt.NDArray]'
+    no    harmonica_eval.core.surface.seal(data: 'npt.NDArray') -> 'npt.NDArray'
+    冻结约定: ('reference', 'practice', 'sample_rate', 'warp_path')
+    匹配数: 2 / 14
+
+[E] 12 个端口里，哪个模块/函数真的会产出 pcm.mapped.* / pcm.warped.practice？
+    pcm.mapped.reference: produced_by='core.surface'
+    pcm.mapped.practice: produced_by='core.surface'
+    pcm.warped.practice: produced_by='core.surface'
+    core.align.align 的返回: (reference: 'npt.NDArray', practice: 'npt.NDArray') -> 'npt.NDArray' -> 只有 warp_path（FILE-102 §align）
+    core.features 的 4 个函数只覆盖 pitch/rms/chroma/notes，无 pcm.*
+    -> pcm.mapped.* / pcm.warped.practice 在模块里没有对应生产函数

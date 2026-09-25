@@ -1,0 +1,22 @@
+=== which BIs claim 'already implemented'? ===
+  FILE-001-v1.md: ### 4.0 ★ 先读这段：本文件已实现，你要做的是核验
+
+=== actual NotImplementedError counts per skeleton file ===
+    0  harmonica_eval/__init__.py
+    7  harmonica_eval/__main__.py
+    1  harmonica_eval/algorithms/__init__.py
+    6  harmonica_eval/algorithms/dynamics.py
+    4  harmonica_eval/algorithms/pitch.py
+    5  harmonica_eval/algorithms/timing.py
+    1  harmonica_eval/cockpit/__init__.py
+   10  harmonica_eval/cockpit/app.py
+    0  harmonica_eval/contract.py
+    0  harmonica_eval/core/__init__.py
+    5  harmonica_eval/core/align.py
+    7  harmonica_eval/core/api.py
+    4  harmonica_eval/core/features.py
+    5  harmonica_eval/core/ingest.py
+    7  harmonica_eval/core/surface.py
+    0  harmonica_eval/host/__init__.py
+   13  harmonica_eval/host/app.py
+    0  harmonica_eval/profile.py

@@ -46,7 +46,7 @@
 | --- | --- | --- | --- |
 | S1 | import 边 | ❌ **残缺** | 18 个文件函数体全是 `raise NotImplementedError`，真实调用边**还没被写出来** |
 | S2 | 端口生产（`PORTS[*].produced_by`） | ✅ 完整 | 由 `profile.PORTS` 的数据决定，与函数体无关 |
-| S3 | 算法消费（`ALGORITHMS[*].required_ports`） | ✅ 完整 | 同上 |
+| S3 | 算法消费（插件 `PluginSpec.required_inputs`） | ✅ 完整 | 同上 |
 | S4 | 契约符号足迹（文件引用了 `contract.py` 的哪些符号） | ✅ 完整 | 由类型标注与常量定义承载，而空壳期**恰恰只有这些写全了** |
 
 **S1 残缺是本方法论最重要的发现。** 它意味着：
@@ -267,7 +267,7 @@ harmonica_eval.contract  ——  度 = 11，删掉它 11 个文件的依赖同�
 
 ### 5.3 缺陷 A：签名收不到音符边界
 
-- `ALGORITHMS` 声明 pitch 需要
+- 插件规格声明 pitch 需要
   `('pitch.reference', 'pitch.practice', 'notes.reference', 'notes.practice')`
 - `algorithms/__init__.py` 的 MOLD BREAK 注记明写：
   「pitch 用逐音索引把逐帧偏差聚合成『第 n 个音偏了多少音分』」
@@ -316,7 +316,8 @@ dynamics  n_notes_used ✓   n_unpaired ✓   共 5 键
 **排除数量却无处报告**。后果：读者无法分辨「整首都测了」与「只测上了少数几个音」，
 而 `off_pitch_ratio` 的分母正是 `n_notes_used`。
 
-**根因**：`PAYLOAD_SCHEMAS` 由人工维护、三份各自演化，缺少对称性约束。
+**历史根因**：当时的 `PAYLOAD_SCHEMAS` 由人工维护、三份各自演化，缺少对称性约束。
+该表已随插件化删除；现在 payload 由 `UiScalar.key` / `UiSeries.key` 自描述。
 
 **为什么不自行修**：修它要在**冻结表**加键 = 接口变更。
 按宪章 §37 Gate Challenge 上报，不自行添加。

@@ -1,0 +1,27 @@
+=== FILE-203 §8 self-check code (lines 245-262) ===
+  245: assert d == [3.0, 3.0]              # 练习-参考
+  246: print('compute_deltas OK')
+  247: "
+  248: ```
+  249: 
+  250: ```bash
+  251: python -c "
+  252: from harmonica_eval.algorithms.dynamics import summarize_deltas
+  253: s = summarize_deltas([3.0, -1.0, 2.0])
+  254: assert s['n_notes_used'] == 3
+  255: assert abs(s['median_db'] - 2.0) < 1e-9
+  256: assert s['spread_db'] >= 0.0
+  257: assert 'pass' not in s and 'conclusion' not in s
+  258: print('summarize_deltas OK')
+  259: "
+  260: ```
+  261: 
+  262: **验收判据**（可机械判定）：
+
+=== new signature in the same file (line 129) ===
+  129: ### `summarize_deltas(deltas_db, n_unpaired) -> dict`
+
+=== live call with the BI's own example arity ===
+   actual signature: (deltas_db: 'object', n_unpaired: 'int') -> 'object'
+   TypeError -> summarize_deltas() missing 1 required positional argument: 'n_unpaired'
+   => FILE-203:253 self-check code is now STALE (missing n_unpaired).

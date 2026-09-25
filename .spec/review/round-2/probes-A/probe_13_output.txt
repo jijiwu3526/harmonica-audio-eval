@@ -1,0 +1,70 @@
+=== FILE-400 skeleton: cockpit/__init__ exports ===
+   launch_cockpit (port: 'UiProjectionPort') -> 'int'
+   __all__ = ['launch_cockpit']
+
+=== FILE-401 skeleton: cockpit/app.py callables ===
+   run_local_ui(port: 'UiProjectionPort') -> 'int'
+   render_status(view: 'UiView') -> 'str'
+   render_scalars(scalars: 'Sequence[UiScalar]') -> 'str'
+   render_series_plot(series: 'UiSeries') -> 'object'
+   render_progress(view: 'UiView') -> 'str'
+   render_error(view: 'UiView') -> 'str'
+   build_plots(view: 'UiView') -> 'Sequence[object]'
+   build_command(kind: 'UiCommandKind', payload: 'dict | None' = None) -> 'UiCommand'
+   solicit_asset_uri(kind: 'UiCommandKind') -> 'str | None'
+   submit_command(port: 'UiProjectionPort', command: 'UiCommand') -> 'None'
+   __all__ = ['LOCAL_BIND_HOST', 'EXIT_OK', 'EXIT_START_FAILED', 'COMMAND_LABELS', 'run_local_ui', 'render_status', 'render_scalars', 'render_series_plot', 'render_progress', 'render_error', 'build_plots', 'build_command', 'solicit_asset_uri', 'submit_command']
+
+=== does app expose run_local_ui? (FILE-400 §4.2 launch_cockpit must delegate) ===
+   run_local_ui present: True
+   LOCAL_BIND_HOST present: True
+
+=== FILE-400 §4.2 text ===
+  71: ### 4.2 `launch_cockpit(port: UiProjectionPort) -> int`
+  72: 
+  73: - **输入**：`port` —— 由包外装配方注入的 `UiProjectionPort` 实例。
+  74:   - `port is None` → 显式失败，见 §5。
+  75:   - 其余取值：只做**结构性检查**——`port` 必须具有可调用的属性 `snapshot` 与 `submit`；二者任一缺失或不可调用 → 显式失败，见 §5。
+  76:   - **禁止**对 `port` 做具体类检查（不得 `isinstance(port, ...)` 指向 C1 的任何具体类型），因为那要求 import C1。
+  77:   - **禁止**在函数内构造、包装、缓存、复制 `port`。
+  78: - **输出**：`int` 退出码。取值域**恰好**为下表的三个值，且**只允许**以常量名引用，不得在源码中写字面量数字：
+  79: 
+  80: | 结果 | 返回表达式 | 冻结值 | 触发条件 |
+  81: | --- | --- | --- | --- |
+  82: | 正常关闭 | `app.EXIT_OK` | `0` | 用户关闭窗口、Ctrl-C（SIGINT）、界面正常退出 |
+  83: | 启动失败 | `app.EXIT_START_FAILED` | `2` | 端口被占用、绑定失败、非本机绑定被拒 |
+  84: 
+  85: - **算法口径**（写到「另一个实现者能复现同一数字」的程度）：
+  86:   1. 校验 `port`（§5 规则）。校验失败即返回前抛异常，不启动任何服务。
+  87:   2. 延迟 import：`from . import app`。取 `app.LOCAL_BIND_HOST`、`app.build_plots` 与退出码常量 `app.EXIT_OK` / `app.EXIT_START_FAILED`。
+  88:   3. 绑定的地址**恒为** `app.LOCAL_BIND_HOST`，冻结值 `"127.0.0.1"`。**端口由 `app.run_local_ui` 内部选定**
+  89:      （实测：`run_local_ui` 在 `8721–8784` 之间探测可绑定端口；
+  90:      `_HTTP_PORT_MAX_PROBES = 64`）。绑定失败**不得**重试到别的地址、
+  91:      **不得**退回 `"0.0.0.0"`。
+  92: 
+  93:      ★ **第五版更正（P2 管线审查 F5）**：上一版要求读 `app.LOCAL_BIND_PORT`
+  94:      （冻结值 `8770`）与 `app.POLL_INTERVAL_MS`（冻结值 `250`），
+  95:      **这两个常量都不存在**。实测 `cockpit/app.py` 的模块级常量只有
+  96:      `LOCAL_BIND_HOST` / `EXIT_OK` / `EXIT_START_FAILED` / `COMMAND_LABELS`；
+  97:      而 `FILE-401`（同一个 `app.py` 的实现规格）规定端口在
+  98:      `8721–8784` 间**动态探测**、轮询周期是 `_HTTP_POLL_INTERVAL_SEC = 0.5`（**私有**，秒）。
+  99:      三份文件（FILE-400 / FILE-401 / 空壳）此前给出**三个互不相同的答案**。
+  100: 
+  101:      **本版冻结**：`FILE-401` 是 `app.py` 的权威规格，本文件
+  102:      **不得**引用 `app` 的任何私有名（含 `_HTTP_POLL_INTERVAL_SEC`），
+  103:      **不得**自行规定端口号或轮询周期 —— 那是 `run_local_ui` 的内部实现细节。
+  104:      本文件的 `launch_cockpit` 只负责：校验 `port` → 延迟 import `app`
+  105:      → 调 `app.run_local_ui(port)` → 原样返回其退出码。
+  106:   4. **刷新周期与端口选择由 `app.run_local_ui` 负责**，本文件不复制这些常量。
+  107:   5. **并发上限**：任一时刻未完成的 `port.snapshot()` 调用数 ≤ `1`。慢快照不得导致调用堆叠。
+  108:   6. **写路径**：界面产生的每个操作经 `port.submit(cmd)` 发出，`cmd` 的 `kind` **必须**是 `harmonica_eval.contract.UiCommandKind` 的成员；该枚举成员数**冻结为 6**。不得新增、改名、绕过或子类化该枚举。
+  109:   7. 本函数**阻塞**：从启动界面到界面关闭期间不返回。进程模型（线程 / 子进程）由包外装配方决定，本函数不创建进程、不创建线程池、不管理线程生命周期。
+  110:   8. 正常关闭路径必须关闭监听套接字后再返回。
+  111:   9. **单位与容差**：本文件不含任何浮点运算，故无浮点容差常量；任何浮点比较不得出现在本文件。本文件**不含任何**带单位的常量（端口与周期都归 `app.run_local_ui`）。
+  112: - **边界**：`port is None` → §5；`port` 缺属性 → §5；`app` 侧常量缺失或取值不等于本 §4.2 表 → §10 停止上报；`snapshot()` 返回空投影 → 按原样交给 `build_plots`，**不得**替换为默认视图；`snapshot()` 抛异常 → §5；`submit()` 抛异常 → §5；同一进程内第二次调用 `launch_cockpit` → 允许，且两次调用之间不得共享任何状态（本文件无模块级可变状态）。
+  113: - **不变量（返回后必须为真）**：监听套接字已关闭；模块级名字集合与调用前完全一致；`port` 未被本文件替换或包装。
+  114: 
+  115: ---
+  116: 
+  117: ## 5 · 失败语义
+  118: 

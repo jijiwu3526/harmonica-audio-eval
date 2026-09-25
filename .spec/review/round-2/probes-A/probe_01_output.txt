@@ -1,0 +1,199 @@
+
+===== harmonica_eval/__init__.py  <->  FILE-001-v1.md =====
+  skeleton defs (0): []
+  names quoted-with-parens not in skeleton: []
+
+===== harmonica_eval/__main__.py  <->  FILE-002-v1.md =====
+  skeleton defs (7): ['build_parser', 'describe_inputs', 'main', 'render_report_markdown', 'run_headless', 'summarize_series', 'write_metrics_json']
+  [OK ] build_parser: skeleton('') vs BI('')
+  [OK ] describe_inputs: skeleton('reference_uri:str,practice_uri:str') vs BI('reference_uri:str,practice_uri:str')
+  [MISMATCH] main: skeleton('argv:Sequence[str]|None=None') vs BI('...')
+  [OK ] main: skeleton('argv:Sequence[str]|None=None') vs BI('argv:Sequence[str]|None=None')
+  [MISMATCH] render_report_markdown: skeleton('view:UiView') vs BI('view')
+  [OK ] render_report_markdown: skeleton('view:UiView') vs BI('view:UiView')
+  [OK ] run_headless: skeleton('reference_uri:str,practice_uri:str,out_path:Path') vs BI('reference_uri:str,practice_uri:str,out_path:Path')
+  [OK ] summarize_series: skeleton('series:Sequence[UiSeries]') vs BI('series:Sequence[UiSeries]')
+  [MISMATCH] write_metrics_json: skeleton('view:UiView,out_path:Path') vs BI('view,out_path')
+  [OK ] write_metrics_json: skeleton('view:UiView,out_path:Path') vs BI('view:UiView,out_path:Path')
+  names quoted-with-parens not in skeleton: ['HostContract', 'Path', 'align', 'build_default_app']
+
+===== harmonica_eval/contract.py  <->  FILE-003-v1.md =====
+  skeleton defs (13): ['__post_init__', '__str__', 'acquire_surface', 'build_surface', 'create_session', 'destroy_session', 'manifest', 'read', 'set_practice', 'set_reference', 'snapshot', 'status', 'submit']
+  [NO-QUOTED-SIG] __post_init__self
+  [NO-QUOTED-SIG] __str__self
+  [MISMATCH] acquire_surface: skeleton('self,session_id:str') vs BI('')
+  [MISMATCH] acquire_surface: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] build_surface: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] create_session: skeleton('self,profile_version:str') vs BI('profile_version:str')
+  [MISMATCH] destroy_session: skeleton('self,session_id:str') vs BI('')
+  [MISMATCH] destroy_session: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] manifest: skeleton('self') vs BI('')
+  [MISMATCH] read: skeleton('self,port_id:str,time_range:tuple[float,float]|None=None') vs BI('')
+  [MISMATCH] read: skeleton('self,port_id:str,time_range:tuple[float,float]|None=None') vs BI('port_id:str,time_range:tuple[float,float]|None=None')
+  [MISMATCH] read: skeleton('self,port_id:str,time_range:tuple[float,float]|None=None') vs BI('time_range')
+  [MISMATCH] set_practice: skeleton('self,session_id:str,uri:str') vs BI('session_id:str,uri:str')
+  [MISMATCH] set_reference: skeleton('self,session_id:str,uri:str') vs BI('session_id,uri')
+  [MISMATCH] set_reference: skeleton('self,session_id:str,uri:str') vs BI('session_id:str,uri:str')
+  [MISMATCH] snapshot: skeleton('self') vs BI('')
+  [MISMATCH] status: skeleton('self,session_id:str') vs BI('')
+  [MISMATCH] status: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] submit: skeleton('self,command:UiCommand') vs BI('command:UiCommand')
+  names quoted-with-parens not in skeleton: ['AlgorithmError', 'AlgorithmResultEnvelope', 'AudioFormat', 'ContractViolation', 'CoreBuildError', 'HarmonicaError', 'UiSeries', 'UiView', 'assert_profile_integrity', 'field', 'is_rhythm_port', 'ops', 'units_of']
+
+===== harmonica_eval/profile.py  <->  FILE-004-v1.md =====
+  skeleton defs (1): ['assert_profile_integrity']
+  [OK ] assert_profile_integrity: skeleton('') vs BI('')
+  names quoted-with-parens not in skeleton: ['AudioSpec', 'PortSpec', 'add_port', 'build_ports', 'ceil', 'configure', 'f', 'register_port']
+
+===== harmonica_eval/core/__init__.py  <->  FILE-100-v1.md =====
+  skeleton defs (0): []
+  names quoted-with-parens not in skeleton: ['Constant']
+
+===== harmonica_eval/core/ingest.py  <->  FILE-101-v1.md =====
+  skeleton defs (5): ['assert_not_silent', 'decode_to_mono', 'ingest', 'resample_to_profile', 'validate_duration']
+  [MISMATCH] assert_not_silent: skeleton('samples:npt.NDArray') vs BI('samples')
+  [MISMATCH] decode_to_mono: skeleton('uri:str') vs BI('uri')
+  [MISMATCH] ingest: skeleton('uri:str') vs BI('')
+  [MISMATCH] ingest: skeleton('uri:str') vs BI('uri')
+  [MISMATCH] resample_to_profile: skeleton('samples:npt.NDArray,native_sr:int') vs BI('samples,native_sr')
+  [MISMATCH] validate_duration: skeleton('n_samples:int,sample_rate:int') vs BI('n_samples,sample_rate')
+  names quoted-with-parens not in skeleton: ['CoreBuildError', 'build_surface', 'mean']
+
+===== harmonica_eval/core/align.py  <->  FILE-102-v1.md =====
+  skeleton defs (5): ['align', 'assert_monotonic', 'compute_alignment_features', 'compute_warp_path', 'measure_coverage']
+  [MISMATCH] align: skeleton('reference:npt.NDArray,practice:npt.NDArray') vs BI('')
+  [OK ] align: skeleton('reference:npt.NDArray,practice:npt.NDArray') vs BI('reference:npt.NDArray,practice:npt.NDArray')
+  [OK ] assert_monotonic: skeleton('warp_path:npt.NDArray') vs BI('warp_path:npt.NDArray')
+  [MISMATCH] assert_monotonic: skeleton('warp_path:npt.NDArray') vs BI('wp')
+  [OK ] compute_alignment_features: skeleton('samples:npt.NDArray') vs BI('samples:npt.NDArray')
+  [OK ] compute_warp_path: skeleton('ref_features:npt.NDArray,prac_features:npt.NDArray') vs BI('ref_features:npt.NDArray,prac_features:npt.NDArray')
+  [OK ] measure_coverage: skeleton('warp_path:npt.NDArray,n_ref_frames:int') vs BI('warp_path:npt.NDArray,n_ref_frames:int')
+  names quoted-with-parens not in skeleton: ['ContractViolation', 'CoreBuildError']
+
+===== harmonica_eval/core/features.py  <->  FILE-103-v1.md =====
+  skeleton defs (4): ['materialize_chroma', 'materialize_notes', 'materialize_pitch', 'materialize_rms']
+  [OK ] materialize_chroma: skeleton('samples:npt.NDArray') vs BI('samples:npt.NDArray')
+  [OK ] materialize_notes: skeleton('pitch:npt.NDArray,rms:npt.NDArray,sample_rate:int') vs BI('pitch:npt.NDArray,rms:npt.NDArray,sample_rate:int')
+  [MISMATCH] materialize_pitch: skeleton('samples:npt.NDArray,sample_rate:int') vs BI('samples,sr')
+  [OK ] materialize_pitch: skeleton('samples:npt.NDArray,sample_rate:int') vs BI('samples:npt.NDArray,sample_rate:int')
+  [OK ] materialize_rms: skeleton('samples:npt.NDArray') vs BI('samples:npt.NDArray')
+  names quoted-with-parens not in skeleton: ['CoreBuildError']
+
+===== harmonica_eval/core/surface.py  <->  FILE-104-v1.md =====
+  skeleton defs (7): ['assert_budget', 'build_descriptor', 'build_surface', 'generate_all_ports', 'manifest', 'read', 'seal']
+  [MISMATCH] assert_budget: skeleton('ports:Mapping[str,npt.NDArray]') vs BI('ports')
+  [OK ] assert_budget: skeleton('ports:Mapping[str,npt.NDArray]') vs BI('ports:Mapping[str,npt.NDArray]')
+  [MISMATCH] build_descriptor: skeleton('port_id:str,data:npt.NDArray,sample_rate:int') vs BI('port_id,ports[port_id],sample_rate')
+  [OK ] build_descriptor: skeleton('port_id:str,data:npt.NDArray,sample_rate:int') vs BI('port_id:str,data:npt.NDArray,sample_rate:int')
+  [MISMATCH] build_surface: skeleton('reference:npt.NDArray,practice:npt.NDArray,sample_rate:int,warp_path:npt.NDArray') vs BI('')
+  [MISMATCH] build_surface: skeleton('reference:npt.NDArray,practice:npt.NDArray,sample_rate:int,warp_path:npt.NDArray') vs BI('reference,practice,sample_rate,warp_path')
+  [MISMATCH] generate_all_ports: skeleton('reference:npt.NDArray,practice:npt.NDArray,sample_rate:int,warp_path:npt.NDArray') vs BI('reference,practice,sample_rate,warp_path')
+  [MISMATCH] manifest: skeleton('self') vs BI('')
+  [MISMATCH] read: skeleton('self,port_id:str,time_range:tuple[float,float]|None=None') vs BI('')
+  [MISMATCH] seal: skeleton('data:npt.NDArray') vs BI('')
+  [MISMATCH] seal: skeleton('data:npt.NDArray') vs BI('...')
+  [OK ] seal: skeleton('data:npt.NDArray') vs BI('data:npt.NDArray')
+  names quoted-with-parens not in skeleton: ['BufferView', 'ContractViolation', 'CoreBuildError', 'Surface', 'acquire_surface', 'align', 'assert_profile_integrity', 'close', 'floor', 'keys', 'mean', 'port_prefix', 'resize', 'setflags', 'snapshot', 'sort', 'to_dict']
+
+===== harmonica_eval/core/api.py  <->  FILE-105-v1.md =====
+  skeleton defs (7): ['acquire_surface', 'build_surface', 'create_session', 'destroy_session', 'set_practice', 'set_reference', 'status']
+  [MISMATCH] acquire_surface: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] build_surface: skeleton('self,session_id:str') vs BI('')
+  [MISMATCH] build_surface: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] create_session: skeleton('self,profile_version:str') vs BI('profile_version')
+  [MISMATCH] create_session: skeleton('self,profile_version:str') vs BI('profile_version:str')
+  [MISMATCH] destroy_session: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] set_practice: skeleton('self,session_id:str,uri:str') vs BI('session_id:str,uri:str')
+  [MISMATCH] set_reference: skeleton('self,session_id:str,uri:str') vs BI('session_id:str,uri:str')
+  [MISMATCH] status: skeleton('self,session_id:str') vs BI('')
+  [MISMATCH] status: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] status: skeleton('self,session_id:str') vs BI('sid')
+  names quoted-with-parens not in skeleton: ['HostCore', '_require', 'cancel', 'close', 'ingest', 'manifest', 'progress', 'read', 'release', 'reset']
+
+===== harmonica_eval/algorithms/__init__.py  <->  FILE-200-v1.md =====
+  skeleton defs (1): ['assert_registry_integrity']
+  [OK ] assert_registry_integrity: skeleton('') vs BI('')
+  names quoted-with-parens not in skeleton: ['entry', 'run']
+
+===== harmonica_eval/algorithms/pitch.py  <->  FILE-201-v1.md =====
+  skeleton defs (4): ['compare_pitch_curves', 'hz_to_cents', 'run', 'summarize_deviations']
+  [MISMATCH] compare_pitch_curves: skeleton('ref_pitch:object,prac_pitch:object,ref_notes:object,prac_notes:object,sample_rate:int') vs BI('ref_pitch,prac_pitch,ref_notes,prac_notes,sample_rate')
+  [MISMATCH] hz_to_cents: skeleton('f0_hz:float,ref_hz:float') vs BI('f0_hz,ref_hz')
+  [MISMATCH] run: skeleton('surface:AlgorithmDataContract') vs BI('')
+  [MISMATCH] run: skeleton('surface:AlgorithmDataContract') vs BI('surface')
+  [MISMATCH] summarize_deviations: skeleton('deviations_cents:object') vs BI('deviations_cents')
+  names quoted-with-parens not in skeleton: ['manifest', 'read']
+
+===== harmonica_eval/algorithms/timing.py  <->  FILE-202-v1.md =====
+  skeleton defs (5): ['compute_deviations', 'detect_onsets', 'match_onsets', 'run', 'summarize_deviations']
+  [MISMATCH] compute_deviations: skeleton('matched:object') vs BI('matched')
+  [MISMATCH] detect_onsets: skeleton('samples:object,sample_rate:int') vs BI('samples,sample_rate')
+  [MISMATCH] match_onsets: skeleton('ref_onsets:object,prac_onsets:object,tolerance_sec:float=ONSET_MATCH_TOLERANCE_SEC') vs BI('ref_onsets,prac_onsets,tolerance_sec=ONSET_MATCH_TOLERANCE_SEC')
+  [MISMATCH] run: skeleton('surface:AlgorithmDataContract') vs BI('surface')
+  [MISMATCH] summarize_deviations: skeleton('deviations_ms:object') vs BI('deviations_ms')
+  names quoted-with-parens not in skeleton: ['median']
+
+===== harmonica_eval/algorithms/dynamics.py  <->  FILE-203-v1.md =====
+  skeleton defs (6): ['align_by_note', 'compute_deltas', 'note_spans', 'run', 'summarize_deltas', 'to_db']
+  [MISMATCH] align_by_note: skeleton('ref_rms_db:object,prac_rms_db:object,ref_spans:object,prac_spans:object') vs BI('ref_rms_db,prac_rms_db,ref_spans,prac_spans')
+  [MISMATCH] compute_deltas: skeleton('aligned:object') vs BI('aligned')
+  [MISMATCH] note_spans: skeleton('notes:object') vs BI('notes.practice')
+  [MISMATCH] note_spans: skeleton('notes:object') vs BI('notes.reference')
+  [MISMATCH] note_spans: skeleton('notes:object') vs BI('notes:list[dict]')
+  [OK ] run: skeleton('surface:AlgorithmDataContract') vs BI('surface:AlgorithmDataContract')
+  [MISMATCH] summarize_deltas: skeleton('deltas_db:object') vs BI('deltas_db')
+  [MISMATCH] to_db: skeleton('rms:object') vs BI('rms:float')
+  names quoted-with-parens not in skeleton: ['AlgorithmResultEnvelope', 'frame', 'manifest', 'read']
+
+===== harmonica_eval/host/__init__.py  <->  FILE-300-v1.md =====
+  skeleton defs (0): []
+  names quoted-with-parens not in skeleton: []
+
+===== harmonica_eval/host/app.py  <->  FILE-301-v1.md =====
+  skeleton defs (13): ['__init__', 'build_default_app', 'build_surface', 'build_view', 'check_compatibility', 'create_session', 'destroy_session', 'normalize_error', 'run_algorithms', 'set_practice', 'set_reference', 'snapshot', 'submit']
+  [OK ] __init__: skeleton('self,core:object') vs BI('self,core:object')
+  [OK ] build_default_app: skeleton('') vs BI('')
+  [MISMATCH] build_surface: skeleton('self') vs BI('')
+  [MISMATCH] build_view: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] check_compatibility: skeleton('self,algorithm_id:str') vs BI('algorithm_id:str')
+  [MISMATCH] create_session: skeleton('self,profile_version:str') vs BI('profile_version:str')
+  [MISMATCH] destroy_session: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] normalize_error: skeleton('self,exc:Exception') vs BI('exc:Exception')
+  [MISMATCH] run_algorithms: skeleton('self,session_id:str') vs BI('')
+  [OK ] run_algorithms: skeleton('self,session_id:str') vs BI('self,session_id:str')
+  [MISMATCH] run_algorithms: skeleton('self,session_id:str') vs BI('session_id:str')
+  [MISMATCH] set_practice: skeleton('self,path:str') vs BI('path:str')
+  [MISMATCH] set_reference: skeleton('self,path:str') vs BI('path:str')
+  [MISMATCH] snapshot: skeleton('self') vs BI('')
+  [MISMATCH] submit: skeleton('self,command:UiCommand') vs BI('command:UiCommand')
+  names quoted-with-parens not in skeleton: ['entry']
+
+===== harmonica_eval/cockpit/__init__.py  <->  FILE-400-v1.md =====
+  skeleton defs (1): ['launch_cockpit']
+  [MISMATCH] launch_cockpit: skeleton('port:UiProjectionPort') vs BI('None')
+  [MISMATCH] launch_cockpit: skeleton('port:UiProjectionPort') vs BI('port')
+  [OK ] launch_cockpit: skeleton('port:UiProjectionPort') vs BI('port:UiProjectionPort')
+  names quoted-with-parens not in skeleton: ['snapshot', 'submit']
+
+===== harmonica_eval/cockpit/app.py  <->  FILE-401-v1.md =====
+  skeleton defs (10): ['build_command', 'build_plots', 'render_error', 'render_progress', 'render_scalars', 'render_series_plot', 'render_status', 'run_local_ui', 'solicit_asset_uri', 'submit_command']
+  [OK ] build_command: skeleton('kind:UiCommandKind,payload:dict|None=None') vs BI('kind:UiCommandKind,payload:dict|None=None')
+  [MISMATCH] build_plots: skeleton('view:UiView') vs BI('view')
+  [OK ] build_plots: skeleton('view:UiView') vs BI('view:UiView')
+  [MISMATCH] render_error: skeleton('view:UiView') vs BI('view')
+  [OK ] render_error: skeleton('view:UiView') vs BI('view:UiView')
+  [MISMATCH] render_progress: skeleton('view:UiView') vs BI('view')
+  [OK ] render_progress: skeleton('view:UiView') vs BI('view:UiView')
+  [OK ] render_scalars: skeleton('scalars:Sequence[UiScalar]') vs BI('scalars:Sequence[UiScalar]')
+  [MISMATCH] render_scalars: skeleton('scalars:Sequence[UiScalar]') vs BI('view.scalars')
+  [OK ] render_series_plot: skeleton('series:UiSeries') vs BI('series:UiSeries')
+  [MISMATCH] render_series_plot: skeleton('series:UiSeries') vs BI('view.series[i]')
+  [MISMATCH] render_status: skeleton('view:UiView') vs BI('view')
+  [OK ] render_status: skeleton('view:UiView') vs BI('view:UiView')
+  [MISMATCH] run_local_ui: skeleton('port:UiProjectionPort') vs BI('port')
+  [OK ] run_local_ui: skeleton('port:UiProjectionPort') vs BI('port:UiProjectionPort')
+  [MISMATCH] solicit_asset_uri: skeleton('kind:UiCommandKind') vs BI('kind')
+  [OK ] solicit_asset_uri: skeleton('kind:UiCommandKind') vs BI('kind:UiCommandKind')
+  [MISMATCH] submit_command: skeleton('port:UiProjectionPort,command:UiCommand') vs BI('port,cmd')
+  [OK ] submit_command: skeleton('port:UiProjectionPort,command:UiCommand') vs BI('port:UiProjectionPort,command:UiCommand')
+  names quoted-with-parens not in skeleton: ['UiCommand', 'UiCommandKind', '_bind', '_make_handler', '_poll_loop', '_render_page', 'acquire', 'join', 'launch_cockpit', 'serve_forever', 'server_close', 'shutdown', 'snapshot', 'strip', 'submit']

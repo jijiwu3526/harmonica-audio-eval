@@ -1,0 +1,14 @@
+######## contract.AlgorithmDataContract.read return type (AUTHORITY) ########
+   contract.py:407: def manifest(self) -> SurfaceManifest:
+   contract.py:411: def read(
+   -> read() annotated: (self, port_id: 'str', time_range: 'tuple[float, float] | None' = None) -> 'BufferView'
+
+######## which BIs tell the implementer to unwrap .data? ########
+   FILE-201-v1.md: 0 mention(s) of '.data'
+   FILE-202-v1.md: 0 mention(s) of '.data'
+   FILE-203-v1.md: 3 mention(s) of '.data'
+      83: **ndarray**（取 `.data` 得 ndarray，列号用
+      91: - **输入**：`notes` —— `(n_note, 3)` 的 `float32` ndarray（`notes.*` 端口的 `read().data`）；
+      161: `read()` 返回 `BufferView`，取 `.data` 得 ndarray；
+
+######## FILE-202 run() flow ########

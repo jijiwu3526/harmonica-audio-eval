@@ -1,0 +1,32 @@
+=== FILE-202 timing: frozen skeleton signatures ===
+  detect_onsets(samples: 'object', sample_rate: 'int') -> 'object'
+  match_onsets(ref_onsets: 'object', prac_onsets: 'object', tolerance_sec: 'float' = 0.1) -> 'object'
+  compute_deviations(matched: 'object') -> 'object'
+  summarize_deviations(deviations_ms: 'object') -> 'object'
+  run(surface: 'AlgorithmDataContract') -> 'AlgorithmResultEnvelope'
+
+  PAYLOAD_SCHEMAS['timing'] = ('per_note_onset_ms', 'median_onset_ms', 'spread_ms', 'early_ratio', 'late_ratio', 'on_time_ratio', 'n_notes_used', 'n_unpaired')
+  'n_unpaired' required in payload -> True
+
+  FILE-202 §4.4 says n_unpaired '来自 match_onsets'.
+  But §4.5 run() flow is:
+      payload = summarize_deviations(compute_deviations(matched))
+  and §4.3 fixes compute_deviations(matched) -> list[float].
+  => summarize_deviations receives ONLY list[float]; match_onsets result is gone.
+  => n_unpaired has NO reachable channel into summarize_deviations.
+
+=== FILE-203 dynamics: same question ===
+  to_db(rms: 'object') -> 'object'
+  note_spans(notes: 'object') -> 'object'
+  align_by_note(ref_rms_db: 'object', prac_rms_db: 'object', ref_spans: 'object', prac_spans: 'object') -> 'object'
+  compute_deltas(aligned: 'object') -> 'object'
+  summarize_deltas(deltas_db: 'object') -> 'object'
+  run(surface: 'AlgorithmDataContract') -> 'AlgorithmResultEnvelope'
+
+  PAYLOAD_SCHEMAS['dynamics'] = ('per_note_delta_db', 'median_db', 'spread_db', 'n_notes_used', 'n_unpaired')
+  'n_unpaired' required -> True
+
+  FILE-203 §summarize_deltas: 'n_unpaired = 在 run 层由 align_by_note 计算并回传, 此处接收'
+  But signature summarize_deltas(deltas_db) takes only deltas_db.
+  align_by_note -> list[tuple[float,float]]; compute_deltas -> list[float].
+  => '此处接收' is impossible: no parameter carries it.

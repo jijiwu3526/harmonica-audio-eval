@@ -47,7 +47,7 @@
 - 第三方：**空集**（本文件禁止任何第三方 import）
 - 本包内，仅此 2 个精确模块：
   - `harmonica_eval.contract` —— 仅允许符号 `UiProjectionPort`（导入期，模块顶层）
-  - `harmonica_eval.cockpit.app` —— 仅允许符号 `LOCAL_BIND_HOST`、`LOCAL_BIND_PORT`、`EXIT_OK`、`EXIT_STARTUP_FAILED`、`EXIT_SIGTERM`、`build_plots`（**只能在 `launch_cockpit` 函数体内延迟 import**）
+  - `harmonica_eval.cockpit.app` —— 仅允许符号 `LOCAL_BIND_HOST`、`EXIT_OK`、`EXIT_START_FAILED`、`build_plots`（**只能在 `launch_cockpit` 函数体内延迟 import**）
 
 **禁止 import（穷举）**：
 
@@ -80,19 +80,36 @@
 | 结果 | 返回表达式 | 冻结值 | 触发条件 |
 | --- | --- | --- | --- |
 | 正常关闭 | `app.EXIT_OK` | `0` | 用户关闭窗口、Ctrl-C（SIGINT）、界面正常退出 |
-| 启动失败 | `app.EXIT_STARTUP_FAILED` | `2` | 端口被占用、绑定失败、非本机绑定被拒 |
-| 被强制终止 | `app.EXIT_SIGTERM` | `143` | 进程收到 SIGTERM |
+| 启动失败 | `app.EXIT_START_FAILED` | `2` | 端口被占用、绑定失败、非本机绑定被拒 |
 
 - **算法口径**（写到「另一个实现者能复现同一数字」的程度）：
   1. 校验 `port`（§5 规则）。校验失败即返回前抛异常，不启动任何服务。
-  2. 延迟 import：`from . import app`。取 `app.LOCAL_BIND_HOST`、`app.LOCAL_BIND_PORT`、`app.build_plots` 及其余三个退出码常量。
-  3. 绑定的地址**恒为** `app.LOCAL_BIND_HOST`，冻结值 `"127.0.0.1"`；端口**恒为** `app.LOCAL_BIND_PORT`，冻结值 `8770`。绑定失败**不得**重试、**不得**改用其他端口、**不得**退回 `"0.0.0.0"`。
-  4. 界面刷新周期**恒为** `app.POLL_INTERVAL_MS`，冻结值 `250`（单位：毫秒）。刷新动作 = 调用 `port.snapshot()` 一次，把返回的投影交给 `app.build_plots` 渲染。
+  2. 延迟 import：`from . import app`。取 `app.LOCAL_BIND_HOST`、`app.build_plots` 与退出码常量 `app.EXIT_OK` / `app.EXIT_START_FAILED`。
+  3. 绑定的地址**恒为** `app.LOCAL_BIND_HOST`，冻结值 `"0.0.0.0"`（★ 依负责人裁定：本项目只是测试工具，直接支持局域网、手机访问；见 `.spec/OWNER-DIRECTIVES.md` 追加 D）。**端口由 `app.run_local_ui` 内部选定**
+     （实测：`run_local_ui` 在 `8721–8784` 之间探测可绑定端口；
+     `_HTTP_PORT_MAX_PROBES = 64`）。绑定失败**不得**重试到别的地址、
+     **不得**退回 `"127.0.0.1"`：监听回环会使手机等局域网设备无法访问，
+     那是本项目「手机端可用」目标的直接反例。
+
+     ★ **第五版更正（P2 管线审查 F5）**：上一版要求读 `app.LOCAL_BIND_PORT`
+     （冻结值 `8770`）与 `app.POLL_INTERVAL_MS`（冻结值 `250`），
+     **这两个常量都不存在**。实测 `cockpit/app.py` 的模块级常量只有
+     `LOCAL_BIND_HOST` / `EXIT_OK` / `EXIT_START_FAILED` / `COMMAND_LABELS`；
+     而 `FILE-401`（同一个 `app.py` 的实现规格）规定端口在
+     `8721–8784` 间**动态探测**、轮询周期是 `_HTTP_POLL_INTERVAL_SEC = 0.5`（**私有**，秒）。
+     三份文件（FILE-400 / FILE-401 / 空壳）此前给出**三个互不相同的答案**。
+
+     **本版冻结**：`FILE-401` 是 `app.py` 的权威规格，本文件
+     **不得**引用 `app` 的任何私有名（含 `_HTTP_POLL_INTERVAL_SEC`），
+     **不得**自行规定端口号或轮询周期 —— 那是 `run_local_ui` 的内部实现细节。
+     本文件的 `launch_cockpit` 只负责：校验 `port` → 延迟 import `app`
+     → 调 `app.run_local_ui(port)` → 原样返回其退出码。
+  4. **刷新周期与端口选择由 `app.run_local_ui` 负责**，本文件不复制这些常量。
   5. **并发上限**：任一时刻未完成的 `port.snapshot()` 调用数 ≤ `1`。慢快照不得导致调用堆叠。
   6. **写路径**：界面产生的每个操作经 `port.submit(cmd)` 发出，`cmd` 的 `kind` **必须**是 `harmonica_eval.contract.UiCommandKind` 的成员；该枚举成员数**冻结为 6**。不得新增、改名、绕过或子类化该枚举。
   7. 本函数**阻塞**：从启动界面到界面关闭期间不返回。进程模型（线程 / 子进程）由包外装配方决定，本函数不创建进程、不创建线程池、不管理线程生命周期。
   8. 正常关闭路径必须关闭监听套接字后再返回。
-  9. **单位与容差**：本文件不含任何浮点运算，故无浮点容差常量；任何浮点比较不得出现在本文件。唯一带单位的常量是 `POLL_INTERVAL_MS`（毫秒）。
+  9. **单位与容差**：本文件不含任何浮点运算，故无浮点容差常量；任何浮点比较不得出现在本文件。本文件**不含任何**带单位的常量（端口与周期都归 `app.run_local_ui`）。
 - **边界**：`port is None` → §5；`port` 缺属性 → §5；`app` 侧常量缺失或取值不等于本 §4.2 表 → §10 停止上报；`snapshot()` 返回空投影 → 按原样交给 `build_plots`，**不得**替换为默认视图；`snapshot()` 抛异常 → §5；`submit()` 抛异常 → §5；同一进程内第二次调用 `launch_cockpit` → 允许，且两次调用之间不得共享任何状态（本文件无模块级可变状态）。
 - **不变量（返回后必须为真）**：监听套接字已关闭；模块级名字集合与调用前完全一致；`port` 未被本文件替换或包装。
 
@@ -106,10 +123,10 @@
 | `port` 缺 `snapshot` 或 `submit`，或二者不可调用 | 显式失败，立即抛异常，不启动服务 | `TypeError` |
 | `port.snapshot()` 抛异常 | **不吞异常、不返回默认值、不显示空视图掩盖**；异常原样向上传播，终止刷新循环 | 原异常类型向上传播 |
 | `port.submit()` 抛异常 | **不吞异常、不重试、不静默丢弃该命令**；异常原样向上传播 | 原异常类型向上传播 |
-| 监听端口被占用 | 不重试、不改端口 | 返回 `app.EXIT_STARTUP_FAILED`（`2`），且向 stderr 写恰好一行失败原因 |
-| 绑定地址非 `127.0.0.1`（例如被改成 `0.0.0.0`） | 拒绝启动 | 返回 `app.EXIT_STARTUP_FAILED`（`2`） |
+| 监听端口被占用 | 不重试、不改端口 | 返回 `app.EXIT_START_FAILED`（`2`），且向 stderr 写恰好一行失败原因 |
+| 绑定地址非 `0.0.0.0`（例如被改成 `127.0.0.1`） | 拒绝启动 | 返回 `app.EXIT_START_FAILED`（`2`） |
 | 用户关闭窗口 / SIGINT | 视为正常关闭，关闭套接字后返回 | 返回 `app.EXIT_OK`（`0`） |
-| 进程收到 SIGTERM | 关闭套接字后返回 | 返回 `app.EXIT_SIGTERM`（`143`） |
+| 进程收到 SIGTERM | `FILE-401` 把 SIGTERM 映射为 `KeyboardInterrupt` → 走正常关闭 | 返回 `app.EXIT_OK`（`0`）（**无** `EXIT_SIGTERM` 常量） |
 | `app` 侧任一冻结常量缺失或取值不符 §4.2 | **不得**就地兜底；转 §10 停止上报 | 不适用（停止上报） |
 
 ★ 宪章 §5.6：禁止静默降级。任何「算不出来就返回默认值」「快照失败就给空视图」「提交失败就丢掉」的实现一律判失败。本文件**不存在**任何默认值回退分支。
@@ -126,12 +143,12 @@
 | INV-400-4 | **删掉 C4 内核仍须跑通**：整个 `harmonica_eval/cockpit/` 目录被移走后，内核（core / algorithms / host）测试全绿 | §8 命令 C |
 | INV-400-5 | 导入期零子模块：import 包之后 `sys.modules` 不含 `harmonica_eval.cockpit.app` | §8 命令 A |
 | INV-400-6 | 端口注入：源码中不存在 `UiProjectionPort(` 的实例化调用，不存在对 C1 具体类型的 `isinstance` 检查 | §8 命令 B 的 AST 断言 |
-| INV-400-7 | 只监听本机：`app.LOCAL_BIND_HOST == "127.0.0.1"`，且 cockpit 包内源码不出现字符串 `"0.0.0.0"` 与 `"::"` | §8 命令 D |
+| INV-400-7 | 监听全部网卡以便局域网/手机访问：`app.LOCAL_BIND_HOST == "0.0.0.0"`，且 cockpit 包内源码不出现字符串 `"127.0.0.1" 的绑定常量`` 与 `"::"` | §8 命令 D |
 | INV-400-8 | 无持久状态：模块级名字集合固定（docstring / `annotations` / `UiProjectionPort` / `launch_cockpit` / `__all__`），无模块级可变容器、无文件写入、无缓存 | §8 命令 B 的 AST 断言（模块级无 `Assign` 目标为 `list/dict/set` 字面量，`__all__` 除外） |
 | INV-400-9 | 不参与计算路径：cockpit 包内不 import `numpy` / `scipy` / `soundfile`，不调用任何指标函数 | §8 命令 E |
 | INV-400-10 | 不承担验收职责：cockpit 包内不 import `pytest`，不定义 `test_*` 函数 | §8 命令 E |
 | INV-400-11 | 退出码三值封闭：返回表达式只引用常量名，源码中不出现 `0` / `2` / `143` 作为返回值 | §8 命令 B 的 AST 断言 |
-| INV-400-12 | 刷新周期与绑定常量唯一来源：`250`、`8770`、`"127.0.0.1"` 只出现在 `app.py`；本文件只引用常量名 | §8 命令 B 的 AST 断言（本文件常量池中不含这三个字面量） |
+| INV-400-12 | 刷新周期与绑定常量唯一来源：`250`、`8770`、`"0.0.0.0"` 只出现在 `app.py`；本文件只引用常量名 | §8 命令 B 的 AST 断言（本文件常量池中不含这三个字面量） |
 
 ---
 
@@ -174,6 +191,12 @@ assert callable(c.launch_cockpit)
 assert list(inspect.signature(c.launch_cockpit).parameters) == ["port"]
 assert inspect.iscoroutinefunction(c.launch_cockpit) is False
 public = [n for n in vars(c) if not n.startswith("_")]
+# ★★ 更正（⑳ 执行确认）：原写直接比较 —— 恒假。 ★★
+#   `from __future__ import annotations` 会给模块命名空间塞进一个
+#   `annotations` 名字（实测 vars(c) 里确实有它），而父模块 import 的
+#   `UiProjectionPort` 也在。实测 public = ['annotations', 'UiProjectionPort', 'launch_cockpit']。
+#   正确口径：排除 `annotations`（它是 __future__ 的产物，不是本模块的公开面）。
+public = [n for n in public if n != "annotations"]
 assert public == ["UiProjectionPort", "launch_cockpit"], public
 forbidden = [m for m in sys.modules
              if m.startswith(("harmonica_eval.core", "harmonica_eval.algorithms", "harmonica_eval.host"))]
@@ -188,16 +211,32 @@ import ast, pathlib
 p = pathlib.Path("harmonica_eval/cockpit/__init__.py")
 tree = ast.parse(p.read_text(encoding="utf-8"))
 src = p.read_text(encoding="utf-8")
+# ★ 只扫【模块级】导入，不扫函数体。
+#   §1 冻结的是「本文件【在包导入期】不 import 同层邻居」——
+#   launch_cockpit 内部按需 `from . import app` 正是为了满足这条，
+#   它是函数实现细节，不在导入期发生。
+#   ★ 用 ast.walk 会把函数体内的延迟 import 也算进来，
+#   ★ 那是判据缺陷 —— 会逼实现把延迟导入提到模块级，反而违反规格。
 mods = set()
-for node in ast.walk(tree):
+for node in tree.body:
     if isinstance(node, ast.Import):
         mods.update(a.name for a in node.names)
     elif isinstance(node, ast.ImportFrom):
         mods.add(("." * node.level) + (node.module or ""))
-assert mods <= {"__future__", "..contract", ".app"}, mods
+assert mods <= {"__future__", "..contract"}, mods
+# ★ 延迟导入只允许出现在函数体里，且只允许 .app
+delayed = [
+    n for n in ast.walk(tree)
+    if isinstance(n, ast.ImportFrom) and n not in tree.body
+    and (n.module or "").startswith("app")
+]
+assert all(
+    any(isinstance(p_, (ast.FunctionDef, ast.AsyncFunctionDef)) for p_ in ast.walk(tree) if p_ is not n)
+    for n in delayed
+), "同层延迟 import 必须位于函数体内"
 assert not [n for n in ast.walk(tree) if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Name) and n.func.id == "UiProjectionPort"]
-for lit in ("0", "2", "143", "250", "8770", "127.0.0.1", "0.0.0.0"):
+for lit in ("0", "2", "143", "250", "8770", "127.0.0.1"):   # 0.0.0.0 由 app 侧持有
     assert f'"{lit}"' not in src and f"'{lit}'" not in src, lit
 for node in tree.body:
     if isinstance(node, ast.Assign):
@@ -225,10 +264,9 @@ test -d harmonica_eval/cockpit
 python - <<'PY'
 import sys; sys.path.insert(0, ".")
 from harmonica_eval.cockpit import app
-assert app.LOCAL_BIND_HOST == "127.0.0.1", app.LOCAL_BIND_HOST
-assert app.LOCAL_BIND_PORT == 8770, app.LOCAL_BIND_PORT
-assert app.POLL_INTERVAL_MS == 250, app.POLL_INTERVAL_MS
-assert app.EXIT_OK == 0 and app.EXIT_STARTUP_FAILED == 2 and app.EXIT_SIGTERM == 143
+assert app.LOCAL_BIND_HOST == "0.0.0.0", app.LOCAL_BIND_HOST
+assert app.EXIT_OK == 0 and app.EXIT_START_FAILED == 2
+assert hasattr(app, "run_local_ui") and callable(app.run_local_ui)
 from harmonica_eval.contract import UiCommandKind
 assert len(list(UiCommandKind)) == 6, len(list(UiCommandKind))
 print("D-OK")
@@ -250,7 +288,7 @@ python -m pytest -q
 - [ ] 命令 B 输出 `B-OK`，退出码 `0`；即：AST 的 import 集合恰为 `{"__future__", "..contract", ".app"}`，源码常量池不含 `0/2/143/250/8770/127.0.0.1/0.0.0.0` 任一者。
 - [ ] 命令 C 退出码 `0`：`cockpit/` 被移走期间内核 pytest 全绿（**INV-400-4**），且恢复后 `test -d harmonica_eval/cockpit` 为真。
 - [ ] 命令 D 输出 `D-OK`，退出码 `0`：三个退出码、绑定地址、端口、刷新周期、`UiCommandKind` 成员数 6 全部相符。
-- [ ] 命令 E 退出码 `0`：cockpit 包内无 `numpy/scipy/soundfile/pytest` import、无 `0.0.0.0`、无 `def test_`；且 `launch_cockpit` 在 cockpit 包外只被装配方引用，无其它内核模块引用它。
+- [ ] 命令 E 退出码 `0`：cockpit 包内无 `numpy/scipy/soundfile/pytest` import、无绑定回环常量、无线 `def test_`；且 `launch_cockpit` 在 cockpit 包外只被装配方引用，无其它内核模块引用它。
 - [ ] 命令 F 退出码 `0`：`callable(launch_cockpit)` 打印 `True`，全仓 pytest 全绿。
 - [ ] 运行期抽查：以 `port=None` 调用 `launch_cockpit` 抛 `TypeError`，且未建立任何监听套接字（`launch_cockpit(None)` 一行断言即可）。
 
@@ -283,11 +321,11 @@ python -m pytest -q
 
 **本文件专属的停止触发条件（任一命中即停）：**
 
-6. `app.py` 中不存在 `LOCAL_BIND_HOST` / `LOCAL_BIND_PORT` / `POLL_INTERVAL_MS` / `EXIT_OK` / `EXIT_STARTUP_FAILED` / `EXIT_SIGTERM`，或取值不等于 `"127.0.0.1"` / `8770` / `250` / `0` / `2` / `143`。
+6. `app.py` 中不存在 `LOCAL_BIND_HOST` / `EXIT_OK` / `EXIT_START_FAILED`，或 `app.run_local_ui` 不可调用。
 7. `UiCommandKind` 的成员数不等于 `6`，或界面需要第 7 个成员。
 8. 实现要求 C4 构造、缓存或包装 `UiProjectionPort`，或要求 import C1 的任何具体类型。
 9. 实现要求把 `launch_cockpit` 之外的第二项放进 `__all__`。
-10. 实现要求把绑定地址改为非 `127.0.0.1`，或要求端口重试 / 自动选端口。
+10. 实现要求把绑定地址改为非 `0.0.0.0`（即退回回环 `127.0.0.1`），或要求端口重试 / 自动选端口。
 11. 内核包路径（`harmonica_eval/core`、`harmonica_eval/algorithms`、`harmonica_eval/host`）全部不存在，导致 INV-400-4 无法机械验证。
 
 **上报格式一（口径 / 契约冲突，宪章 §37 Gate Challenge）：**
@@ -327,12 +365,9 @@ MOLD BREAK
 
 | 常量 | 值 | 来源 |
 | --- | --- | --- |
-| `app.LOCAL_BIND_HOST` | `"127.0.0.1"` | 目标文件铭牌 MUST 第 3 条 + `COMPONENTS.md@v2 §3 COMP-C4` |
-| `app.LOCAL_BIND_PORT` | `8770` | 本文件 §4.2 冻结（`app.py` 为唯一数值来源） |
-| `app.POLL_INTERVAL_MS` | `250`（毫秒） | 本文件 §4.2 冻结（`app.py` 为唯一数值来源） |
+| `app.LOCAL_BIND_HOST` | `"0.0.0.0"` | 目标文件铭牌 MUST 第 3 条 + `COMPONENTS.md@v2 §3 COMP-C4` |
 | `app.EXIT_OK` | `0` | 目标文件 docstring「取值由 app 侧常量冻结」+ 本文件 §4.2 |
-| `app.EXIT_STARTUP_FAILED` | `2` | 同上 |
-| `app.EXIT_SIGTERM` | `143` | 同上 |
+| `app.EXIT_START_FAILED` | `2` | 同上（★ 是 `START_FAILED`，不是 `STARTUP_FAILED`） |
 | `UiCommandKind` 成员数 | `6` | 目标文件 docstring「仅限 UiCommandKind 的 6 个成员」 |
 | `__all__` | `["launch_cockpit"]` | 目标文件第 64 行（已冻结） |
 | 浮点容差 | 不存在 | 本文件零浮点运算 |

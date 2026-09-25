@@ -1,0 +1,22 @@
+== 1. produced_by 是模块还是可调用对象？ ==
+  core.align     是模块；模块级函数=['compute_alignment_features', 'compute_warp_path', 'assert_monotonic', 'measure_coverage', 'align']
+  core.features  是模块；模块级函数=['materialize_pitch', 'materialize_rms', 'materialize_chroma', 'materialize_notes']
+  core.surface   是模块；模块级函数=['build_descriptor', 'seal', 'generate_all_ports', 'assert_budget', 'build_surface']
+  => produced_by 指向【模块】，一个模块含多个函数；
+     且没有任何字段/表给出 port_id -> 具体函数名 的映射。
+
+== 2. 哪些模块级函数满足 FILE-104 §4.4 的『4 个位置参数』约定？ ==
+  core.surface.generate_all_ports('reference', 'practice', 'sample_rate', 'warp_path')  <-- 满足 4 参
+  core.surface.build_surface('reference', 'practice', 'sample_rate', 'warp_path')  <-- 满足 4 参
+  => 满足 4 参的只有 surface.generate_all_ports / surface.build_surface，
+     它们本身就是【调度器/装配器】，不是『单个端口的生成者』。
+
+== 3. 每个 produced_by 的端口数 vs 该模块函数数 ==
+  core.align     负责 1 个端口
+  core.surface   负责 3 个端口
+  core.features  负责 8 个端口
+
+== 4. 生成者若按 produced_by 被调用一次，无法知道该产 reference 还是 practice ==
+  例如 pitch.reference 与 pitch.practice 的 produced_by 都是 core.features，
+  但 materialize_pitch(samples, sample_rate) 只接受 PCM，没有任何 port_id 参数；
+  它无法区分『参考侧』与『练习侧』。

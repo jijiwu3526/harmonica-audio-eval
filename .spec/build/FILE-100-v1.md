@@ -108,7 +108,29 @@
   - 元素个数为 `5` 但顺序不同：**不合法**，失败。
 - **单位**：无。**时间基准**：无。
 - **不变量**：`harmonica_eval.core.__all__ == ["ingest", "align", "features", "surface", "api"]`（`list` 比较，非集合比较）。
-- **契约一致性口径**：定义 `declared = set(__all__)`；定义 `produced = {p.produced_by.split(".")[1] for p in profile.PORTS 中所有端口 if p.produced_by.startswith("core.")}`。必须 `declared == produced`。`produced_by` 的取法：该字段是 `str` 时取本身；是 `str` 的可迭代容器时逐个取。端口总数、端口 ID 一律以 `profile.PORTS` 为准，本文件不复写。
+- **契约一致性口径**：定义 `declared = set(__all__)`；定义 `produced = {p.produced_by.split(".")[1] for p in profile.PORTS 中所有端口 if p.produced_by.startswith("core.")}`。
+
+  ★★ **本版更正（第三轮盲审 A 的 FINDING-1）：判定式是 `produced <= declared`（子集），
+  不是 `declared == produced`（相等）。** ★★
+
+  **原判定式恒为假，实现者无论怎么写都过不了自己的验收脚本。** 实测：
+
+  ```
+  declared = ['align', 'api', 'features', 'ingest', 'surface']   # 5 个
+  produced = ['align', 'features', 'surface']                    # 3 个
+  declared == produced  →  False      ← 恒假
+  produced <= declared  →  True       ← 正确判据
+  ```
+
+  **为什么本就不该相等**：`__all__` 是**包的公开面**（5 个模块），
+  而 `produced_by` 只列出**产端口的模块**（3 个）。差的两个是：
+  - `ingest` —— 阶段 1，产 PCM 但**不登记为端口**（它是上游，不是数据面成员）；
+  - `api` —— C2 门面，**只编排、不产数据**。
+
+  「有公开面」与「产端口」是两件事。相等判定把这两件事混为一谈，
+  于是要求 `ingest`/`api` 必须产端口 —— 那与 `profile.PORTS` 的冻结内容冲突。
+  子集判定表达的是真正的约束：**凡是产端口的模块，都必须在公开面里**
+  （否则它的产出无法被消费）。`produced_by` 的取法：该字段是 `str` 时取本身；是 `str` 的可迭代容器时逐个取。端口总数、端口 ID 一律以 `profile.PORTS` 为准，本文件不复写。
 
 ### 4.4 模块 docstring（第 1–31 行）
 
@@ -129,7 +151,26 @@
   - `INPUT:` 段落的内容为「（无）」
   - `OUTPUT:` 段落的内容为 `__all__`
 - **边界**：docstring 为空字符串：**不合法**，失败。缺任一键：**不合法**，失败。键顺序与上表不符：**不合法**，失败。
-- **不变量**：`harmonica_eval.core.__doc__` 非空且 `len(harmonica_eval.core.__doc__.splitlines()) == 31`。
+- **不变量**：`harmonica_eval.core.__doc__` 非空且 `len(harmonica_eval.core.__doc__.splitlines()) == 30`。
+
+  ★★ **本版更正（第三轮盲审 A 的 low finding + ⑳ 执行确认）：原写 `== 31`，实测 30。** ★★
+
+  两个数说的是**两件事**，原先被混为一谈：
+
+  | 口径 | 值 |
+  | --- | --- |
+  | 三引号字面量占用的**文件行**（第 1 行 `\'\'\'` 到第 31 行 `\'\'\'`） | **31** |
+  | `__doc__.splitlines()`（字符串**值**的行数） | **30** |
+
+  差的 1 行来自开头：字面量是 `\'\'\'
+<内容>
+\'\'\'`，
+  字符串值以换行开头，`splitlines()` 于是产出
+  `['', <29 行内容>]` = **1 + 29 = 30**。
+
+  §4.4 标题里的「第 1–31 行」说的是**文件行**，是对的；
+  §8 判据 A 断言的是 `splitlines()`，所以必须是 **30**。
+  两者不矛盾，只是口径不同 —— 已在本表把口径写明。
 
 ### 4.5 门面说明串（第 42–53 行）
 
@@ -182,7 +223,7 @@
 | INV-100-1 | 只声明公开面，不含逻辑 | §8 判据 A：AST 全域扫描，`FunctionDef/AsyncFunctionDef/ClassDef/If/Try/For/While/With/Lambda/Global/Nonlocal` 出现次数均为 0 |
 | INV-100-2 | 全文件恰好 1 条 import 语句，且为 `from __future__ import annotations` | §8 判据 A：import 节点计数 `== 1`，且 `module == "__future__"`、`names == ["annotations"]`、`level == 0` |
 | INV-100-3 | 本文件不导入任何 `harmonica_eval.core.*` 子模块，也不得做 re-export | §8 判据 A（AST 层：无 `.ingest/.align/.features/.surface/.api` 引用）+ 判据 C（运行期：`sys.modules` 无以 `harmonica_eval.core.` 开头的键） |
-| INV-100-4 | 公开面与 `profile.PORTS` 的 `produced_by` 所指模块一致 | §8 判据 B：`declared == produced`，两集合各打印 |
+| INV-100-4 | 凡产端口的模块都在公开面内（**子集**，非相等） | §8 判据 B：`produced <= declared`，两集合各打印 |
 | INV-100-5 | `__all__` 是 `list` 字面量，恰好 5 个 `str`，顺序为 `ingest, align, features, surface, api` | §8 判据 A：逐元素 `==` 比较 |
 | INV-100-6 | 导入本包不加载 `numpy` 及 `torch/scipy/librosa/soundfile/pandas/numba/tensorflow` | §8 判据 C：逐个 `not in sys.modules` |
 | INV-100-7 | 导入本包不加载 `harmonica_eval.host` / `.algorithms` / `.cockpit` | §8 判据 C：逐个 `not in sys.modules` |
@@ -228,7 +269,11 @@ src = pathlib.Path("harmonica_eval/core/__init__.py").read_text(encoding="utf-8"
 
 # INV-100-9
 assert len(src.splitlines()) == 53, len(src.splitlines())
-assert src.endswith('"""\n') or src.endswith('"""'), "facade string must close the file"
+# ★ 更正（本版自查）：原写 `src.endswith('"""\n') or src.endswith('"""')`
+#   —— 两个分支**完全相同**，等价于只写一次；且真实文件以 `"""\n` 结尾，
+#   所以后半支是死代码。恒真/冗余的检查等于没有检查（方法论 §6.3）。
+assert src.endswith('"""\n'), "facade string must close the file"
+assert not src.endswith('\n\n'), "文件末尾不得有多余空行"
 
 tree = ast.parse(src)
 # INV-100-9：4 个顶层节点，类型与顺序冻结
@@ -272,7 +317,10 @@ for bad in ("ingest", "align", "features", "surface", "api"):
 # INV-100-8：docstring 10 键
 doc = tree.body[0].value.value
 assert doc, "module docstring is empty"
-assert len(doc.splitlines()) == 31, len(doc.splitlines())
+# ★ 更正（A 的 low finding + ⑳ 执行确认）：字面量占文件第 1–31 行（31 行），
+#   但 __doc__.splitlines() 是 30 —— 字符串值以换行开头，
+#   splitlines 产出 ['', <29 行内容>]。原写 31，实测 30。
+assert len(doc.splitlines()) == 30, len(doc.splitlines())
 pos = [doc.index(k) for k in KEYS]
 assert pos == sorted(pos) and len(set(pos)) == 10, pos
 assert re.search(r"^FILE-ID:\s+FILE-100\s*$", doc, re.M)
@@ -331,9 +379,12 @@ for port in _iter_ports(profile.PORTS):
 
 print("declared =", sorted(declared))
 print("produced =", sorted(produced))
-assert declared == produced, (sorted(declared), sorted(produced))
+# ★ 更正（FINDING-1）：原写 `assert declared == produced` —— 恒假。
+#   ingest / api 有公开面但不产端口，相等判定要求它们产端口，
+#   与 profile.PORTS 的冻结内容冲突。正确约束是**子集**。
+assert produced <= declared, (sorted(declared), sorted(produced))
 assert core.__all__ == ["ingest", "align", "features", "surface", "api"], core.__all__
-print("PASS 判据B declared == produced ==", sorted(declared))
+print("PASS 判据B produced <= declared ==", sorted(declared))
 PY
 
 # 3) 判据 C：导入期无越界加载（干净解释器）
@@ -362,7 +413,7 @@ git diff --stat
 - [ ] `[n for n in ast.walk(tree) if isinstance(n,(ast.Import,ast.ImportFrom))]` 的长度 `== 1`。
 - [ ] `harmonica_eval.core.__all__ == ["ingest", "align", "features", "surface", "api"]`（`list` 精确相等）。
 - [ ] `{type(n).__name__ for n in ast.walk(tree)} & {"FunctionDef","AsyncFunctionDef","ClassDef","If","Try","For","While","With","Lambda","Global","Nonlocal"} == set()`。
-- [ ] 判据 B 脚本退出码为 `0`，`declared == produced` 且两集合均已打印。
+- [ ] 判据 B 脚本退出码为 `0`，`produced <= declared` 且两集合均已打印。
 - [ ] 判据 C 脚本退出码为 `0`，`[m for m in sys.modules if m.startswith("harmonica_eval.core.")] == []`。
 - [ ] 判据 C 中 11 个禁止模块名全部 `not in sys.modules`。
 - [ ] `git status --porcelain` 只输出一行，且该行路径为 `harmonica_eval/core/__init__.py`。
@@ -429,8 +480,23 @@ GATE CHALLENGE
 | CONTRACT-HOST-v1 操作数 | `7` | 行 49 |
 | 组件 ID | `COMP-C2 Audio Core` | 行 3 |
 | 文件 ID | `FILE-100` | 行 2 |
-| docstring 行数 | `31` | 行 1–31 |
+| docstring 行数 | `30` | 源码行 1–31（含定界符）；值 30 行 |
 | docstring 冻结键数 | `10` | 行 2 / 3 / 4 / 6 / 9 / 14 / 18 / 23 / 26 / 29 |
 | 门面串行数 | `12` | 行 42–53 |
 | 本文件（Build Instruction）路径 | `.spec/build/FILE-100-v1.md` | 行 30 |
 | 阈值 / 容差 / 单位换算 | 不适用（本文件零算术、零比较、零单位） | 目标文件全文 |
+
+★★ **本版更正（速查表口径）：上表「docstring 行数」原写 `31`，实测 30。** ★★
+
+原行是 `| docstring 行数 | \`31\` | 行 1–31 |` —— 把「三引号字面量占用的**文件行**」
+当成了 `__doc__.splitlines()` 的**值行数**。实测（`§8 判据 A` 断言的口径）：
+
+```
+值行数 = 30          # len(harmonica_eval.core.__doc__.splitlines())
+文件行数 = 53        # 目标文件全文；docstring 字面量占第 1–31 行
+```
+
+两个口径都保留：**源码行 1–31（含首尾两个 `'''` 定界符）；`__doc__` 值 30 行**。
+差的 1 行来自字符串值以换行开头（`splitlines()` 产出 `['', <29 行内容>]`）。
+§4.4 不变量与 §8 判据 A 早已按 **30** 冻结（见 §4.4 正文的 ★★ 更正），
+本表此前未同步，本次补齐 —— 数值表述与 §4.4 一致，不再有第二个数。

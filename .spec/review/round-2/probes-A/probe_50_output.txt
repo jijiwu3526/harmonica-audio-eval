@@ -1,0 +1,40 @@
+######## A. stage 1 claims it yields 'PCM 与其 AudioFormat'; ingest returns only NDArray ########
+   FILE-105:150-151: —— 一次 `s.reference_uri`、一次 `s.practice_uri`；产出 = 两路规范化后的 / mono/`float32` PCM 与其 `AudioFormat`。
+   ingest signature: (uri: 'str') -> 'npt.NDArray'
+   ingest return annotation: npt.NDArray
+   -> no AudioFormat in the return value.
+
+   FILE-105:177 says sample_rate comes from ingest normalization: - 采样率不由本文件假设：`ingest` 返回的 PCM 已按 `profile.AUDIO.sample_rate`
+   -> but nothing in the 4 stages binds an int sample_rate, while stage 4
+      build_surface(reference, practice, sample_rate, warp_path) REQUIRES it.
+      profile import is banned (FILE-105:59). => provenance gap.
+
+######## B. FILE-105:53 allows only `Surface`; stage 4 needs the surface ENTRY ########
+   FILE-105:53: - `harmonica_eval.core.surface`：且仅 `Surface`
+   FILE-105:196 (stage 4): - 阶段 4 `SURFACE`：调用 `harmonica_eval.core.surface` 的入口装配并按 surface.py 冻结的口径 Seal，使 `SurfaceManifest.sealed is True`；每个端口的
+   core.surface public names: ['AlgorithmDataContract', 'AudioFormat', 'BufferView', 'Mapping', 'PortDescriptor', 'Surface', 'SurfaceManifest', 'annotations', 'assert_budget', 'build_descriptor', 'build_surface', 'generate_all_ports', 'npt', 'seal']
+   -> build_surface is the entry; 'Surface' alone is the class. Ambiguous but resolvable.
+
+######## C. FILE-105 public symbol list (does it include build_surface?) ########
+   248: ### 4.9 公开符号集合（机械可断言）
+   249: 
+   250: | 符号 | 种类 | 签名 |
+   251: | --- | --- | --- |
+   252: | `HostCore` | class（`HostContract` 的实现） | `HostCore()` |
+   253: | `HostCore.create_session` | method | `(self, profile_version: str) -> str` |
+   254: | `HostCore.set_reference` | method | `(self, session_id: str, uri: str) -> None` |
+   255: | `HostCore.set_practice` | method | `(self, session_id: str, uri: str) -> None` |
+   256: | `HostCore.build_surface` | method | `(self, session_id: str) -> None` |
+   257: | `HostCore.status` | method | `(self, session_id: str) -> SessionState` |
+   258: | `HostCore.acquire_surface` | method | `(self, session_id: str) -> Surface` |
+   259: | `HostCore.destroy_session` | method | `(self, session_id: str) -> None` |
+   260: | `INTERNAL_STAGES` | module constant | `Mapping[SessionState, tuple[str, ...]]`，键**只有** `SessionState.BUILDING`，值**恒为** `("INGESTING", "ALIGNING", "MATERIALIZING", "SEAL
+   261: 
+   262: **公开成员恰为上述 8 行**：`HostCore` 上除 `__init__` 与下划线开头的名字外，方法名集合必须恰好等于上表 7 个方法名。`INTERNAL_STAGES` 只被本模块的审查/断言使用，**不得**成为任何返回值的取值来源。
+   263: 
+   264: ### 4.10 数值口径与常量引用（宪章 §22：不留「自行选择」）
+   265: 
+   266: 本文件**不含任何阈值、容差、单位换算、数值计算**——全部数值口径位于被编排的 4 个阶段模块，本文件只负责按名引用与透传。以下常量名与数字**冻结**，实现者不得另立新值：
+   267: 
+   268: | 口径项 | 冻结值 / 常量名 | 在本文件的落点 |
+   269: | --- | --- | --- |

@@ -1,0 +1,68 @@
+=== contract.TimelineBasis members (closed) ===
+   ['REFERENCE', 'WARPED']
+   'UNKNOWN' member exists: False
+
+=== FILE-401 mentions of UNKNOWN / unknown basis ===
+  131: | `_AXIS_NOTE_UNKNOWN_FMT` | `"UNKNOWN（{basis!r}，无法判定轴含义）"` | 其余取值的轴标注模板 |
+  250: - 其它任何值 → `_AXIS_NOTE_UNKNOWN_FMT.format(basis=basis)`，即 `UNKNOWN（'<原值>'，无法判定轴含义）`（用 `repr` 保留引号）
+  274: - `timeline_basis` 为未知字符串 → `axis_note` 走 `_AXIS_NOTE_UNKNOWN_FMT`，**不抛异常、不静默按 REFERENCE 处理**。
+  491: | `render_series_plot` 收到未知的 `timeline_basis` 取值 | 显示为 `UNKNOWN（'<原值>'，无法判定轴含义）` | 不抛异常、**不**静默按 `REFERENCE` 处理（静默按 REFERENCE 处理就是伪造轴含义） |
+  657: assert 'UNKNOWN（' in unk and '源时间网格' not in unk and '归一化网格' not in unk   # 未知 basis：显式标注，不静默按 REFERENCE
+  825: - [ ] 命令 (2) 断言 `app.render_series_plot` 遇到未知 `timeline_basis`（`'SOMETHING_ELSE'`）时返回含 `UNKNOWN（` 的文本、且**不含** `源时间网格` / `归一化网格`（既不抛异常也不按 REFERENCE 处理）；断言 `render_status` 对含换行的 `note` 折成单行；断言 `render_s
+  853: - [ ] **禁止静默降级的证据**：命令 (2) 中断言 `app.render_series_plot` 遇到未知 `timeline_basis` 时返回含 `UNKNOWN（` 的文本而**不抛异常也不按 REFERENCE 处理**；断言 `app.render_series_plot` 遇到 `len(t) != len(values)` 时抛 `AssertionError` 而*
+
+=== FILE-401 §4.7 render_series_plot basis handling ===
+  232: ### 4.7 `render_series_plot(series: UiSeries) -> object`
+  233: 
+  234: - **输入**：`series: UiSeries`（`contract.UiSeries`）。字段与取值域：
+  235: - `key: str`（稳定标识）
+  236: - `label: str`（中文短名）
+  237: - `t: Sequence[float]` —— 时间轴，单位**秒**，长度与 `values` 相同
+  238: - `values: Sequence[float]` —— 曲线值，单位见 `unit`
+  239: - `unit: str` —— 纵轴单位，取值来自 `UiScalar.unit` 的词表 `'cents' / 'ms' / 'db' / 'ratio' / ''`
+  240: - `timeline_basis` —— `TimelineBasis` 成员；`TimelineBasis` 是 `str` 混入枚举，故与字面量 `"REFERENCE"` / `"WARPED"` 直接比较成立
+  241: - `source_port: str | None` —— 仅作追溯字段原样展示
+  242: - **输出**：`object`，**本规格冻结为 `str`**：格式标签 `"svg"`，一个格式良好的 XML 片段，根元素
+  243: `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="240" viewBox="0 0 720 240">`。
+  244: 返回类型标注保持目标文件的 `object`（G15 修正），实现返回 `str`，调用方不依赖具体类型。
+  245: SVG 内容由**四类元素**组成：四个标注 `<text>`（`source_port` 非 `None` 时为五个）、一个注释 `<!-- omitted: k -->`、零到多个 `<polyline>`，以及根元素本身。**不产出**任何其它元素（无 `<rect>`、无 `<line>`、无 `<circle>`、无 `<g>`、无 `<
+  246: - **算法口径（逐步骤，可复现同一字符串）**：
+  247: 1. **轴标注（不可省）**：`basis = series.timeline_basis`。文本节点 `axis_note` 取：
+  248: - `basis == "REFERENCE"` → `_AXIS_NOTE_REFERENCE` 的逐字文案
+  249: - `basis == "WARPED"` → `_AXIS_NOTE_WARPED` 的逐字文案
+  250: - 其它任何值 → `_AXIS_NOTE_UNKNOWN_FMT.format(basis=basis)`，即 `UNKNOWN（'<原值>'，无法判定轴含义）`（用 `repr` 保留引号）
+  251: `axis_note` 必须以 `<text x="0" y="254">` 出现在 SVG 中。**这条不可省**：轴不标出来，读者会把 warped 轴上的图当成真实时间而误读节奏。
+  252: 2. **横轴标注**：文本节点 `"时间（秒）"`，以 `<text x="0" y="236">` 出现。
+  253: 3. **纵轴单位标注**：文本节点取 `series.unit` 的**原文**，以 `<text x="0" y="20">` 出现；`unit` 为空串时写文本节点 `（无单位）`（四个字加全角括号）。
+  254: 4. **标题标注**：文本节点 `f"{series.label} [{series.key}]"`，以 `<text x="0" y="272">` 出现；`source_port is not None` 时另加文本节点 `f"source_port={series.source_port}"`（原样，不解释语义）。
+  255: 5. **注释标注**：`<!-- omitted: {k} -->` 写在所有 `<text>` **之后**、`</svg>` 之前。`k` = 非有限点的个数（把连续有限点切成若干段时，非有限值即切点；全为有限值时 `k = 0`）。
+  256: 6. **数据长度校验**：`assert len(series.t) == len(series.values)`，不满足 → `AssertionError`。令 `n = len(series.t)`。
+  257: 7. **横坐标**：`n == 0` 时不输出折线；`n == 1` 时横坐标 `x_0 = 0.0`；`n >= 2` 时 `x_i = 720.0 * i / (n - 1)`，`i = 0 … n-1`。
+  258: 8. **非有限值处理**：`v_i` 非有限（`v_i != v_i` 为 NaN，或 `v_i` 为 `±inf`）时该点**从折线中剔除**，相邻有限点之间**不连线**；剔除数量即第 5 步的 `k`。
+  259: 9. **纵坐标归一化**：令 `F = {v_i : v_i 有限}`，`lo = min(F)`，`hi = max(F)`（集合为空时跳过本步与第 10 步）。
+  260: - `hi == lo` → 所有有限点纵坐标 `y_i = 120.0`（画布垂直中线）
+  261: - 否则 `y_i = 232.0 - 224.0 * (v_i - lo) / (hi - lo)`，即 `lo` → `232.0`（底部），`hi` → `8.0`（顶部）
+  262: - 纵轴**不**做绝对值映射、**不**做对数映射、**不**做单位换算
+  263: 10. **折线输出**：把连续有限点切成若干段，每段长度 ≥ 2 时输出一个 `<polyline fill="none" stroke="#333" stroke-width="1" points="x,y x,y …"/>`（坐标按 `f"{v:.3f}"` 格式化，点之间一个空格），同一段内的点按原顺序。长度恰为 1 的段不输出折线，也不输
+  264: 11. **不重采样、不插值、不平滑、不抽稀**：`t` 与 `values` 按给定顺序逐点使用，输出的点数等于有限点数。
+  265: 12. **不解释算法来源**：`source_port` 只作为文本原样展示；不写出「来自 XXX 算法」这类推断；不把 `key` 拆成算法名与端口名。
+  266: 13. **不排序、不去重**：同一 `t` 出现两次时按给定顺序画两次，不合并、不去重。
+  267: - **边界**：
+  268: - `n == 0`（空 `t` / `values`）→ 返回**合法 SVG**，含全部 `<text>` 标注与 `<!-- omitted: 0 -->`，**无** `<polyline>`；不抛异常。
+  269: - `n == 1` → 返回合法 SVG；横坐标 `0.0`；因单点段不连线，可无 `<polyline>`；不抛异常。
+  270: - `values` 全为 NaN → `F` 为空 → `k = n`、无 `<polyline>`；不抛异常。
+  271: - 单个 NaN 夹在两个有限点之间 → 该 NaN 剔除，左右两点**不连线**（两个单点段，故无可视折线）。
+  272: - `hi == lo`（如 `values` 全为 `440.0`）→ 全部有限点 `y = 120.0`，照常输出折线。
+  273: - `unit == ""` → 纵轴文本为 `（无单位）`。
+  274: - `timeline_basis` 为未知字符串 → `axis_note` 走 `_AXIS_NOTE_UNKNOWN_FMT`，**不抛异常、不静默按 REFERENCE 处理**。
+  275: - **不变量**：
+  276: - 输出**必含**与 `series.timeline_basis` 对应的轴标注文案；REFERENCE 与 WARPED 的文案互不为子串（`"源时间网格"` 与 `"归一化网格"` 互不包含，`"REFERENCE"` 与 `"WARPED"` 互不包含），故可用子串断言唯一判定。
+  277: - `source_port is None` 时输出**不含** `"source_port="`；`source_port` 非 `None` 时输出**必含** `f"source_port={series.source_port}"`。
+  278: - 输出**必含** `<!-- omitted: {k} -->`，`k` 等于非有限点个数。
+  279: - 输出是格式良好的 XML（可被 `xml.etree.ElementTree.fromstring` 解析）。
+  280: - 同一输入两次调用返回**逐字相同**的字符串（无时间戳、无随机 id、无字典迭代顺序依赖）。
+  281: - 四个 `<text>` 节点（`source_port` 非 `None` 时五个）与其内容由本规格冻结；坐标与字号属表现层，除 §4.7 指定的 `x` / `y` 与折线坐标公式外不由本规格约束。
+  282: - 本函数不访问 `port`、不发命令、不写盘。
+  283: 
+  284: ### 4.8 `render_status(view: UiView) -> str`
+  285: 

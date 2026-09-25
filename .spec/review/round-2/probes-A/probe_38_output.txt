@@ -1,0 +1,33 @@
+=== hop_length by port (profile authority) ===
+   warp_path                hop_length=0
+   pcm.mapped.reference     hop_length=0
+   pcm.mapped.practice      hop_length=0
+   pcm.warped.practice      hop_length=0
+   pitch.reference          hop_length=2048
+   pitch.practice           hop_length=2048
+   rms.reference            hop_length=256
+   rms.practice             hop_length=256
+   chroma.lowres.reference  hop_length=2048
+   chroma.lowres.practice   hop_length=2048
+   notes.reference          hop_length=0
+   notes.practice           hop_length=0
+
+   notes.reference.hop_length = 0
+   rms.reference.hop_length   = 256
+
+=== consequence ===
+   int(round(1.5 * 44100 / 0)) -> ZeroDivisionError: float division by zero
+   int(round(1.5 * 44100 / 256)) = 258
+
+=== FILE-203: any statement of WHERE rms_hop_length comes from? ===
+   77: ### `note_spans(notes, rms_hop_length, sample_rate) -> list[tuple[int, int]]`
+   93: - **帧率不由本文件假设**：由调用方传入 `rms_hop_length` 与 `sample_rate`，
+   94: 帧号换算恒为 `int(round(t * sample_rate / rms_hop_length))`。
+   165: 2. `note_spans(notes.reference, rms_hop_length, sr)` 得 `ref_spans`
+   166: ★ 传入帧率参数：帧号换算需要 `rms_hop_length` 与 `sample_rate`，
+   168: 3. `note_spans(notes.practice, rms_hop_length, sr)` 得 `prac_spans`
+
+   => 'rms_hop_length' is used as an in-scope variable at :165/:168,
+      but the file never binds it. The only descriptor the file tells the
+      implementer to hold (:160-161) is the NOTES descriptor, whose
+      hop_length is 0 -> the frozen formula divides by zero.

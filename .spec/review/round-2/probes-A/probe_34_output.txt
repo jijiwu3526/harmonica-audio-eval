@@ -1,0 +1,22 @@
+[CONFIRMED] F1-uri: write_metrics_json(view: 'UiView', out_path: 'Path', reference_uri: 'str', practice_uri: 'str') -> 'None'
+[CONFIRMED] F2-doclines: len(doc.splitlines())=30 (BI FILE-100 requires 31)
+[CONFIRMED] F3-coreinit: declared=['align', 'api', 'features', 'ingest', 'surface'] produced=['align', 'features', 'surface'] equal=False
+[CONFIRMED] F4-envelope-error: 'error=' accepted=False; real fields=['algorithm_id', 'algorithm_version', 'status', 'required_ports', 'consumed_ports', 'payload', 'error_code', 'error_detail', 'elapsed_sec']
+[CHECK-FILE-201] F5-pitch-keys: PAYLOAD_SCHEMAS['pitch']=('per_note_cents', 'median_abs_cents', 'off_pitch_ratio', 'n_notes_used', 'sample_rate'); FILE-201 §4.2 returns per_note_cents/n_paired/n_unpaired
+[RESOLVED-IN-SKELETON] F6-nunpaired: timing.summarize_deviations(deviations_ms: 'object', n_unpaired: 'int') -> 'object'; dynamics.summarize_deltas(deltas_db: 'object', n_unpaired: 'int') -> 'object'
+[CONFIRMED] F7-notes-repr: FILE-203:77 says note_spans(notes: list[dict]); FILE-203:126 says notes.* is (n_note,3) ndarray
+[CONFIRMED] F8-frame-rate: core.ingest.frame exists=False; FILE-203:80 claims '由 core.ingest 提供的帧率换算（每秒 100 帧）'
+[CONFIRMED] F9-namecount: FILE-104 claims 6 profile names, lists 7: ['PORTS', 'PORT_INDEX', 'BUDGET', 'AUDIO', 'ALIGN', 'MATERIALIZE', 'PROFILE_VERSION']
+[CONFIRMED] F10-types: FILE-104 §3 whitelist has no 'types'; §4.7 step 12 mandates `import types`
+
+=== SUMMARY ===
+  CONFIRMED              F1-uri
+  CONFIRMED              F2-doclines
+  CONFIRMED              F3-coreinit
+  CONFIRMED              F4-envelope-error
+  CHECK-FILE-201         F5-pitch-keys
+  RESOLVED-IN-SKELETON   F6-nunpaired
+  CONFIRMED              F7-notes-repr
+  CONFIRMED              F8-frame-rate
+  CONFIRMED              F9-namecount
+  CONFIRMED              F10-types

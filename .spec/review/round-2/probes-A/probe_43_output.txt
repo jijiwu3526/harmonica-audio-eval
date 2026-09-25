@@ -1,0 +1,25 @@
+######## FILE-201: does run() say to take .data from BufferView? ########
+   NONE -- FILE-201 never mentions BufferView or .data
+
+   §4.2 input table declares ref_pitch as NDArray:
+   FILE-201:151: | `ref_pitch` | `NDArray` | `(n_frames_ref, 3)` | `FIELD_LAYOUTS['pitch']` = `('f0_hz', 'voiced', 'confidence')` |
+   FILE-201:186: ★ 最后一个音的右边界取 `n_frames_ref`（无下一个音时就到曲线末尾）。
+
+   run() step 3 (line 312): 3. `ref_pitch = surface.read("pitch.reference")`，其余三个同理
+   -> assigns surface.read(...) (a BufferView) directly into ref_pitch,
+      while §4.2 requires an NDArray. FILE-203 states the '.data' step explicitly
+      (FILE-203:160 '取 .data 得 ndarray'); FILE-201 does not.
+
+######## who defines the UiScalar list C1 must emit? ########
+   FILE-002-v1.md: 7 mentions of UiScalar
+      17: | 下游 | `harmonica_eval.contract`（只读导入；取 `UiView` / `UiScalar` / `UiSeries`）。落盘产物 `data/out/metrics.json` 与 `data/out/report.md` 的读者：人类、diff 工具、CI 归档 |
+      63: | 本包内 | `.contract`（`UiView` / `UiScalar` / `UiSeries`） | 投影契约（**只读数据结构**） |
+      207: —— **没有任何字段携带 URI**（实测：`UiScalar` 无、`UiSeries` 无）。
+      251: 见 `FILE-200` 的规则「`UiScalar.key` 的取值必须取自本表的键名」）：
+      274: **必须先有人把它们放进投影**（`UiScalar` 或 `UiSeries`）—— 那是 C1 的改动，
+      288: 3. `inputs` 固定为 `{"reference": reference_uri, "practice": practice_uri}`，键序固定。★ 两个值取自**本函数的入参**（见本节开头的签名更正），**不得**从 `view` 里翻找、不得新增 `UiScalar` 键去承载路径（
+   FILE-301-v1.md: 2 mentions of UiScalar
+      4: > 生成依据：`contract.py`（HostContract / UiProjectionPort / UiView / UiScalar /
+      236: 4. `UiScalar` 只陈述数值与单位，**不下教学结论**（SPEC §1）
+   FILE-200-v1.md: 1 mentions of UiScalar
+      149: - `UiScalar.key` / `UiSeries.key` 的取值必须取自本表的键名，从而 `metrics.json` 与界面不出现两套名字。

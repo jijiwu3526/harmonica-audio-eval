@@ -1,0 +1,34 @@
+=== §4.3 correction (line 303-309) ===
+  303:      **本版冻结的口径**：`n_points` = `len(s.t)`（`t` 是 `UiSeries` 的
+  304:      **公开具体字段**，`Sequence[float]`，不是惰性对象）。
+  305:      - 断言 `len(s.t) == len(s.values)`（这是 C4 侧也做的校验，见 FILE-401 §4.x），
+  306:        不等 → 停止并上报（§10），**不得**截断到较短者。
+  307:      - `n_points` 是**本文件算出来的派生子**，不是从投影读来的字段。
+  308:      - §5 的原禁令相应收窄为：**不得**用 `len(s.values)` 之外的途径"估算"点数
+  309:        （例如按时间跨度除以某个 hop 猜）；`len(s.t)` 是**唯一**正确来源。
+  310:   7. 序列化：`json.dump(obj, fh, ensure_ascii=_JSON_ENSURE_ASCII, indent=_JSON_INDENT, separators=_JSON_SEPARATORS, sort_keys=_JSON_SORT_KEYS, allow_nan=_JSON_ALLOW_NAN)`；随后显式写入一个 `"\n"`。
+
+=== §4.5 summarize_series (line 334-345) -- NOT corrected ===
+  334: - 练习：<practice_uri>
+  335: [- 错误码：<error_code>]
+  336: [- 错误详情：<error_detail>]
+  337: 
+  338: ## 标量指标
+  339: 
+  340: - <label> = <value> <unit>（阈值 <threshold> <unit>）
+  341: 
+  342: ## 曲线
+  343: 
+  344: - <label>：单位 <unit>，时间基准 <basis>（<basis 注解>），采样点 <n>，t 轴单位：秒
+  345: ```
+  346: 
+
+=== §10 escalation item 4 (line 639) still cites the corrected premise ===
+  639: 4. §4 的行为规格**不足以确定唯一实现**（例如：`UiSeries` 不暴露点数元信息，而 §5 已禁止用 `len(values)` 替代）。
+
+=== CONTRADICTION ===
+  §4.3 :303-309 freezes: n_points = len(s.t); forbids 'estimate by other means'.
+  §4.5 :366 still says: '<n> = 该 UiSeries 的点数元信息（整型，str(n)）'
+  §4.5 :367 still says: '只读元信息'
+  UiSeries has NO 'n_points' field -> '点数元信息' does not exist.
+  => A literal reader of §4.5 is again told to read a nonexistent field.

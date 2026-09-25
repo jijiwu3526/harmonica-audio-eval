@@ -1,0 +1,28 @@
+=== FILE-105 §3 declares api.py may import from core.surface: ONLY 'Surface' ===
+=== FILE-105 §3 declares api.py may import core.features/align/ingest as stage entries ===
+
+core.features public callables:
+   materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+   materialize_rms(samples: 'npt.NDArray') -> 'npt.NDArray'
+   materialize_chroma(samples: 'npt.NDArray') -> 'npt.NDArray'
+   materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+   -> ANY aggregate 'produce all 12 ports' entry? NONE
+
+core.surface public callables:
+   build_descriptor(port_id: 'str', data: 'npt.NDArray', sample_rate: 'int') -> 'PortDescriptor'
+   seal(data: 'npt.NDArray') -> 'npt.NDArray'
+   generate_all_ports(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Mapping[str, npt.NDArray]'
+   assert_budget(ports: 'Mapping[str, npt.NDArray]') -> 'int'
+   build_surface(reference: 'npt.NDArray', practice: 'npt.NDArray', sample_rate: 'int', warp_path: 'npt.NDArray') -> 'Surface'
+   Surface.__init__: (self, *args, **kwargs)
+
+=== FILE-105 §4.5 stage 3 says features entry produces ALL ports ===
+    but skeleton has 4 per-feature functions and NO aggregate entry.
+=== FILE-105 §4.5 stage 4 says surface entry assembles ===
+    build_surface() internally calls generate_all_ports() (FILE-104 §4.7 step 5),
+    which ITSELF produces all 12 ports including the 8 feature ports.
+
+=> DOUBLE GENERATION: stage3 (features) and stage4 (surface.build_surface)
+   both claim to produce the same 8 feature ports.
+=> api.py imports only 'Surface' from core.surface; it cannot call generate_all_ports,
+   assert_budget, build_descriptor, or build_surface per FILE-105 §3 whitelist.

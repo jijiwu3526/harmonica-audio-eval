@@ -1,0 +1,51 @@
+========================================================================
+① 每个端口 —— produced_by 指名的模块里，有没有唯一一个 4 参生成者？
+========================================================================
+warp_path                  produced_by=core.align     4 参生成者=无
+pcm.mapped.reference       produced_by=core.surface   4 参生成者=['generate_all_ports', 'build_surface']
+pcm.mapped.practice        produced_by=core.surface   4 参生成者=['generate_all_ports', 'build_surface']
+pcm.warped.practice        produced_by=core.surface   4 参生成者=['generate_all_ports', 'build_surface']
+pitch.reference            produced_by=core.features  4 参生成者=无
+pitch.practice             produced_by=core.features  4 参生成者=无
+rms.reference              produced_by=core.features  4 参生成者=无
+rms.practice               produced_by=core.features  4 参生成者=无
+chroma.lowres.reference    produced_by=core.features  4 参生成者=无
+chroma.lowres.practice     produced_by=core.features  4 参生成者=无
+notes.reference            produced_by=core.features  4 参生成者=无
+notes.practice             produced_by=core.features  4 参生成者=无
+
+========================================================================
+② profile 是否给出「端口 → 具体函数」的映射？
+========================================================================
+PortSpec 字段 = ['port_id', 'units', 'dimensions', 'element_type', 'timeline_basis', 'produced_by', 'rationale', 'field_names', 'hop_length']
+ProfSpec 是否含函数名/入口字段 = False
+FILE-104 出现 'import_module' 次数 = 1
+FILE-104 是否给出端口→函数名表 = False
+
+========================================================================
+③ 自指风险：pcm.* 的 produced_by='core.surface' 是谁？
+========================================================================
+core.surface 的 4 参可调用者 = ['generate_all_ports', 'build_surface']
+→ generate_all_ports 自己就在该列表里。它被规定为『汇总者』：
+   FILE-104 §4.4 步骤 3：「实现不得在本文件内另写特征提取代码；只做一次查表调用」
+   FILE-104 §4.4 步骤 4：「生成者可调用对象接收位置参数 4 个」
+   若 pcm.* 的生成者 = core.surface 的 4 参函数，则 generate_all_ports 调用自身 → 无限递归。
+
+========================================================================
+④ 4 参约定能否驱动 features.py 的 4 个函数？
+========================================================================
+  features.materialize_pitch(samples: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+  features.materialize_rms(samples: 'npt.NDArray') -> 'npt.NDArray'
+  features.materialize_chroma(samples: 'npt.NDArray') -> 'npt.NDArray'
+  features.materialize_notes(pitch: 'npt.NDArray', rms: 'npt.NDArray', sample_rate: 'int') -> 'npt.NDArray'
+  约定要求 (reference, practice, sample_rate, warp_path)：无一匹配。
+  且 notes.* 需要先有 pitch/rms 中间量、并区分 reference/practice 两侧，
+  但 4 参约定既无 port_id 也无侧别参数 → 无法区分生产目标是哪一侧。
+
+========================================================================
+⑤ 谁生产 pcm.mapped.reference 与 pcm.mapped.practice 的区别？
+========================================================================
+profile: pcm.mapped.reference + pcm.mapped.practice 均为 produced_by='core.surface'
+FILE-104 §4.7 步骤 7：「对 ports.values() 中每个 ndarray 调用 seal(...)」
+→ 两个端口的生成者签名完全相同，返回值无法按 port_id 区分。
+→ 唯一能让二者不同的信息（哪一侧）不在 4 参参数里。

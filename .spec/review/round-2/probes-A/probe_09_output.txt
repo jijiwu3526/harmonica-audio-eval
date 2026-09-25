@@ -1,0 +1,30 @@
+=== FILE-202 §4.4 ratio definitions (verbatim lines 128-152) ===
+  128: ### 4.4 `summarize_deviations(deviations_ms) -> dict`
+  129: 
+  130: **必须恰好产出 8 个键**，与 `algorithms.PAYLOAD_SCHEMAS["timing"]`
+  131: **逐字一致**（键名以那张表为唯一权威）：
+  132: 
+  133: | 键 | 口径 |
+  134: | --- | --- |
+  135: | `per_note_onset_ms` | 逐音偏差，长度 **必须等于** `n_notes_used` |
+  136: | `median_onset_ms` | `median(d)`（带符号） |
+  137: | `spread_ms` | `median(abs(d - median(d)))` —— **MAD about median**，不是 `median(abs(d))` |
+  138: | `early_ratio` | `count(d < -ONSET_DEADBAND_MS) / n` |
+  139: | `late_ratio` | `count(d > +ONSET_DEADBAND_MS) / n` |
+  140: | `on_time_ratio` | `count(abs(d) <= DEADBAND) / n` |
+  141: | `n_notes_used` | `len(d)` |
+  142: | `n_unpaired` | 来自 `match_onsets` |
+  143: 
+  144: - **★ 三者关系**：`early_ratio + late_ratio + on_time_ratio == 1.0`。
+  145:   必须三个都报 —— 只报前两个的话，用户看到它们加起来不到 1 会以为是 bug，
+  146:   而实际上那是"测量精度不足以判定"的部分。
+  147:   `on_time_ratio` 的含义是**无法判定**早或晚，**不等于**"演奏准确"。
+  148: - **边界**：`n == 0` → 返回 OK + 全零 payload（`per_note=[]`, `n_notes_used=0`）。
+  149:   理由：`n` 本身是 payload 键，"报告样本量为 0"优于"抛异常"。
+  150: 
+  151: ---
+  152: 
+  153: ### 4.5 `run(surface) -> AlgorithmResultEnvelope`
+
+=== FILE-002 scalars expectations: does anything consume early/late/on_time? ===
+  235: | `global.timing_mae_ms` | `scalars["median_onset_ms"]` | `timing` payload |
