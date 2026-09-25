@@ -35,8 +35,9 @@ data/user/*
 _scratch/
 # ★ .lavish/ 是 AI 生成的架构 HTML 展示件；docs/架构图.md 才是入库的事实源
 .lavish/
-# ★ _mold_hashes*.txt 是某一轮模具哈希快照（曾被 .spec/review/round-1 引用），
-#   而那些 review 记录本身不入库 —— 快照随之不入库，保持一致
+# ★ _mold_hashes*.txt 是某一轮模具哈希的【历史快照】，不是持续维护的基线：
+#   实测 38 条里 32 条已与当前文件失配（规格在注入过程中被反复修订）。
+#   入库一份已失配的快照会误导后来者以为那是有效基线，故不入库。
 _mold_hashes*.txt
 
 # macOS
