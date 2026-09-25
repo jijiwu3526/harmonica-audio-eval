@@ -8,6 +8,16 @@ venv/
 .ipynb_checkpoints/
 
 # 数据产物（音频与结果不入库）
+# ★ 2026-09-25 修正：本节原先写的是 data/outputs/ · data/reference/ · data/user/，
+#   而代码实际落盘到 data/out/ · data/ref/ · data/in/（__main__.py --out 默认值即
+#   data/out/metrics.json）。三处规则全部指向不存在的目录，等于一条都没生效。
+#   ★ 现按【代码实际写的路径】为准，旧路径一并保留以防将来真建。
+data/out/*
+!data/out/.gitkeep
+data/ref/*
+!data/ref/.gitkeep
+data/in/*
+!data/in/.gitkeep
 data/outputs/*
 !data/outputs/.gitkeep
 data/reference/*
@@ -18,6 +28,16 @@ data/user/*
 *.mp3
 *.m4a
 *.flac
+
+# 评审/展示过程产物（不入库）
+# ★ _scratch/ 是审查者 B 留下的参考实现副本；_scratch/_STALE_WARNING.md 明写
+#   「不是主包镜像，也不应该被同步成主包」—— 分叉副本，入库会污染主包
+_scratch/
+# ★ .lavish/ 是 AI 生成的架构 HTML 展示件；docs/架构图.md 才是入库的事实源
+.lavish/
+# ★ _mold_hashes*.txt 是某一轮模具哈希快照（曾被 .spec/review/round-1 引用），
+#   而那些 review 记录本身不入库 —— 快照随之不入库，保持一致
+_mold_hashes*.txt
 
 # macOS
 .DS_Store
