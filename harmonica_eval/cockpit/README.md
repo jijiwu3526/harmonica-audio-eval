@@ -79,11 +79,22 @@ C4 缺席时，正式无头入口仍是 `harmonica_eval/__main__.py`：接收参
   （`ContractViolation` / `CoreBuildError` / `AlgorithmError`）回 **400 + 原因原文**，
   只有真正的未预料异常才回 500。原先一律 `500 internal error` 五个字，
   会让「状态不对」被误读成「服务端坏了」。（`harmonica_eval/cockpit/app.py:840-880`）
+- **测试时可用 `DSH_NO_BROWSER` 抑制弹窗**（★ 2026-09-25 修，治「反复跑测试导致浏览器标签越塞越多」）：
+  ```bash
+  DSH_NO_BROWSER=1 python3 -m harmonica_eval.serve_ui --reference 原曲.wav --practice 练习曲.wav
+  ```
+  ★ **默认行为不变**：不设该变量时**仍自动打开浏览器**
+  （`FILE-401-v1.md:185` §4.4 第 8 步明文要求「随后 `webbrowser.open(该 URL)`」）。
+  ★ **为什么用环境变量而不是 `--no-open-browser` 开关**：
+  `FILE-499-v1.md:160` §7 明文「不提供 `--port` / `--host` / `--no-browser` 等任何额外开关」
+  （AGENTS.md 铁律 4 零噪声），其 §8 判据把 `--no-browser` 列进 banned 集合。
+  ★ 名字绕开 banned 虽能过判据，★ 但违反 §7 意图 —— **判据是精确匹配，意图不是**。
+  ★ URL 仍照常打印到 stderr，**抑制的只是开浏览器**。（`harmonica_eval/cockpit/app.py:147-160`）
 - **时间轴展示依赖正确轴标注**：REFERENCE 与 WARPED 的物理含义不同；若实现漏标轴，界面会把归一化位置误读为抢拍/拖拍，这是当前必须现场验证的风险。（`harmonica_eval/cockpit/app.py:130-143`；`harmonica_eval/contract.py:1000-1012`）
 - **构建进度是粗粒度/可能为 None**：C4 不得自行从状态推断百分比；平滑进度需要 C1/契约层另行裁定，C4 不得补造。（`harmonica_eval/cockpit/app.py:159-171`；`harmonica_eval/contract.py:1022-1066`）
 - **端口已闭合**（★ 2026-09-25 更新，★ 原写「未闭合」已过期）：`HostApp.snapshot/submit` 已实现并被 `serve_ui` 注入，12 端口端到端可见。（`harmonica_eval/host/app.py:618-648`）
 - **“可整体删除”仍需真实测试证据**：BI 给出非破坏性删除等价检验，而不是在本 README 中伪造通过结果。（`.spec/build/FILE-400-v1.md:166-172`、`:231-246`）
-- **【未裁定 · 规格内部冲突】C4 “不得加入 HTTP”与 FILE-401 冻结的本机 HTTP 方案冲突。** `COMPONENTS.md:271-279` 明确警告不要为界面添加 HTTP 服务；`.spec/build/FILE-401-v1.md:107-138` 则冻结零第三方依赖的 `http.server.ThreadingHTTPServer` + 系统浏览器方案，并规定只绑 `127.0.0.1`（绑定细则见 `.spec/build/FILE-401-v1.md:142-179`）。两处都是规格材料且未给出冲突裁定；**本文不裁定哪一方为准，也不把 HTTP 方案写成已获最终批准。** 当前 `cockpit/app.py` 仍只有空壳入口，不能据此宣称 HTTP 界面已经存在。（`harmonica_eval/cockpit/app.py:77-92`）
+- **【规格内部冲突 · 仍未裁定】C4 “不得加入 HTTP”与 FILE-401 冻结的本机 HTTP 方案冲突。** `COMPONENTS.md:271-279` 明确警告不要为界面添加 HTTP 服务；`.spec/build/FILE-401-v1.md:107-138` 则冻结零第三方依赖的 `http.server.ThreadingHTTPServer` + 系统浏览器方案，并规定只绑 `127.0.0.1`（绑定细则见 `.spec/build/FILE-401-v1.md:142-179`）。两处都是规格材料且未给出冲突裁定；**本文不裁定哪一方为准**。★ **实测状态**：`app.py` 已实现 27 个函数并按 FILE-401 方案起 `ThreadingHTTPServer`（端到端实测 HTTP 200、12 端口可见、六个按钮全通），即**实现侧已选 FILE-401 方案**，但规格冲突本身仍未裁定——若日后裁定以 `COMPONENTS.md` 为准，需回退这部分实现。（`harmonica_eval/cockpit/app.py:77-92`、`:300-340`）
 - **陈旧的下游提示不能作为端口或注册清单**：`.spec/prompts/COMP-C3/downstream.md` 仍写旧注册/端口/时间轴口径；当前 C3 入口应看 FILE-200/205 与源码，历史提示仅作追溯。（`.spec/prompts/COMP-C3/downstream.md:42-92`；`.spec/build/FILE-200-v1.md:112-127`、`:163-172`；`.spec/build/FILE-205-v1.md:82-194`）
-- **🔴 GC-204-01：C1 session API 尚未统一。** 这不由 C4 实现解决，但当前 HostApp 快照所依赖的会话句柄/状态投影仍受显式 `session_id` 与隐式当前会话的未决冲突影响。（`harmonica_eval/contract.py:759-838`；`harmonica_eval/host/app.py:89-110`、`:127-168`；`.spec/GATE-CHALLENGES-C3.md:12-86`、`:449-464`）**未裁定，阻塞 Cast Freeze。**
-- **✅ GC-204-08 已关闭（原「🔴 未裁定，阻塞插件迁移」）**：这项裁定不改变 C4 的边界——C4 仍只消费 C1 发布的投影与命令，不 import 具体算法、也不持有注册表。裁定内容是「物理装配根为 `harmonica_eval/algorithms/bootstrap.py`，Host 只接收它产出的已装配 `Registry`」（`.spec/GATE-CHALLENGES-C3.md:544`、`:543`；`harmonica_eval/host/app.py:113-124`）。★ **装配链尚未接通**（`bootstrap.py` 目前无模块 import），但那属于 C1/C3 的注入工作，不影响 C4 只消费投影的边界。
+- **🔴 GC-204-01：C1 session API 尚未统一。** 这不由 C4 实现解决，但当前 HostApp 快照所依赖的会话句柄/状态投影仍受显式 `session_id` 与隐式当前会话的未决冲突影响。★ **实测补充**：`UiProjectionPort` 只有 `snapshot` / `submit` 两个操作且 `submit` 无 `session_id` —— 这与「一个前台看一个会话」一致（`session_id` 在 `UiView` 快照里），**但 HostApp 本身持有完整 HostContract（含显式 `session_id` 的 `set_reference(uri)` 等）**，两者是宽窄不同的两个接口。多会话能力属于 HostApp，界面侧只见到窄口。**未裁定是否满足「统一」，阻塞 Cast Freeze。**（`harmonica_eval/contract.py:759-838`；`harmonica_eval/host/app.py:89-110`、`:127-168`；`.spec/GATE-CHALLENGES-C3.md:12-86`、`:449-464`）
+- **✅ GC-204-08 已关闭（原「🔴 未裁定，阻塞插件迁移」）**：这项裁定不改变 C4 的边界——C4 仍只消费 C1 发布的投影与命令，不 import 具体算法、也不持有注册表。裁定内容是「物理装配根为 `harmonica_eval/algorithms/bootstrap.py`，Host 只接收它产出的已装配 `Registry`」（`.spec/GATE-CHALLENGES-C3.md:544`、`:543`；`harmonica_eval/host/app.py:113-124`）。★ **装配链已接通**（★ 2026-09-25 实测，原写「尚未接通、bootstrap 无模块 import」已过期）：`build_default_registry()` 返回 `['pitch', 'timing', 'dynamics']` 三个已注册插件，五个缺陷样本端到端全 `rc=0`。
