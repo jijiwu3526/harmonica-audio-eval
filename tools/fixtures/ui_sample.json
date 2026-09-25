@@ -1,0 +1,284 @@
+{
+  "session_id": "ui-sample-001",
+  "state": "DATA_READY",
+  "series": [
+    {
+      "key": "timing.per_note_onset_sec",
+      "label": "逐音起音偏差",
+      "t": [
+        0.0,
+        1.0,
+        2.0
+      ],
+      "values": [
+        0.05,
+        0.0,
+        0.2
+      ],
+      "unit": "seconds",
+      "timeline_basis": "REFERENCE",
+      "source_port": "notes.reference"
+    }
+  ],
+  "scalars": [
+    {
+      "key": "st_CREATED",
+      "label": "状态 CREATED",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "st_INPUT_READY",
+      "label": "状态 INPUT_READY",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "st_BUILDING",
+      "label": "状态 BUILDING",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "st_DATA_READY",
+      "label": "状态 DATA_READY",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "st_FAILED",
+      "label": "状态 FAILED",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "st_CLOSED",
+      "label": "状态 CLOSED",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "s_amplitude",
+      "label": "样本 amplitude",
+      "value": 1.0,
+      "unit": "amplitude",
+      "threshold": null
+    },
+    {
+      "key": "s_cents",
+      "label": "样本 cents",
+      "value": 1.0,
+      "unit": "cents",
+      "threshold": null
+    },
+    {
+      "key": "s_chroma",
+      "label": "样本 chroma",
+      "value": 1.0,
+      "unit": "chroma",
+      "threshold": null
+    },
+    {
+      "key": "s_count",
+      "label": "样本 count",
+      "value": 1.0,
+      "unit": "count",
+      "threshold": null
+    },
+    {
+      "key": "s_db",
+      "label": "样本 db",
+      "value": 1.0,
+      "unit": "db",
+      "threshold": null
+    },
+    {
+      "key": "s_hz",
+      "label": "样本 hz",
+      "value": 1.0,
+      "unit": "hz",
+      "threshold": null
+    },
+    {
+      "key": "s_index",
+      "label": "样本 index",
+      "value": 1.0,
+      "unit": "index",
+      "threshold": null
+    },
+    {
+      "key": "s_ratio",
+      "label": "样本 ratio",
+      "value": 1.0,
+      "unit": "ratio",
+      "threshold": null
+    },
+    {
+      "key": "s_rms",
+      "label": "样本 rms",
+      "value": 1.0,
+      "unit": "rms",
+      "threshold": null
+    },
+    {
+      "key": "s_seconds",
+      "label": "样本 seconds",
+      "value": 1.0,
+      "unit": "seconds",
+      "threshold": null
+    }
+  ],
+  "progress": 1.0,
+  "port_summary": [
+    {
+      "port_id": "warp_path",
+      "units": "index",
+      "dimensions": [
+        "warp_point",
+        "axis"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "pcm.mapped.reference",
+      "units": "amplitude",
+      "dimensions": [
+        "sample"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "pcm.mapped.practice",
+      "units": "amplitude",
+      "dimensions": [
+        "sample"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "pcm.warped.practice",
+      "units": "amplitude",
+      "dimensions": [
+        "sample"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "WARPED"
+    },
+    {
+      "port_id": "pitch.reference",
+      "units": "hz",
+      "dimensions": [
+        "frame",
+        "field"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "pitch.practice",
+      "units": "hz",
+      "dimensions": [
+        "frame",
+        "field"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "rms.reference",
+      "units": "rms",
+      "dimensions": [
+        "frame"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "rms.practice",
+      "units": "rms",
+      "dimensions": [
+        "frame"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "chroma.lowres.reference",
+      "units": "chroma",
+      "dimensions": [
+        "frame",
+        "bin"
+      ],
+      "shape": [
+        21,
+        12
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "chroma.lowres.practice",
+      "units": "chroma",
+      "dimensions": [
+        "frame",
+        "bin"
+      ],
+      "shape": [
+        21,
+        12
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "notes.reference",
+      "units": "index",
+      "dimensions": [
+        "note",
+        "field"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    },
+    {
+      "port_id": "notes.practice",
+      "units": "index",
+      "dimensions": [
+        "note",
+        "field"
+      ],
+      "shape": [
+        21
+      ],
+      "timeline_basis": "REFERENCE"
+    }
+  ],
+  "error_code": null,
+  "error_detail": null,
+  "note": "契约样本；非真实测量结果"
+}

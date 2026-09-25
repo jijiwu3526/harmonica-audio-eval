@@ -1,0 +1,596 @@
+{
+  "_meta": {
+    "note": "★ 这是回归参照，不是断言。★ 注入还在推进，数字必然会变；基线的价值是让人能判断「变了多少算回归」，不是「必须永远等于」。任何「与基线不符即失败」的用法都是误用。",
+    "sample_rate": 44100,
+    "dataset": "harmonica_mvp_dataset/08_我亲爱的",
+    "rounding": "基线存未舍入原值；报告里用 _round_for_report 展示"
+  },
+  "samples": {
+    "reference": {
+      "pitch": {
+        "status": "FAILED",
+        "algorithm_id": "pitch",
+        "consumed_ports": []
+      },
+      "timing": {
+        "status": "FAILED",
+        "algorithm_id": "timing",
+        "consumed_ports": []
+      },
+      "dynamics": {
+        "status": "FAILED",
+        "algorithm_id": "dynamics",
+        "consumed_ports": []
+      }
+    },
+    "01_音准走调": {
+      "pitch": {
+        "status": "FAILED",
+        "algorithm_id": "pitch",
+        "consumed_ports": []
+      },
+      "timing": {
+        "status": "FAILED",
+        "algorithm_id": "timing",
+        "consumed_ports": []
+      },
+      "dynamics": {
+        "status": "FAILED",
+        "algorithm_id": "dynamics",
+        "consumed_ports": []
+      }
+    },
+    "02_节奏抢拖": {
+      "pitch": {
+        "status": "FAILED",
+        "algorithm_id": "pitch",
+        "consumed_ports": []
+      },
+      "timing": {
+        "status": "FAILED",
+        "algorithm_id": "timing",
+        "consumed_ports": []
+      },
+      "dynamics": {
+        "status": "FAILED",
+        "algorithm_id": "dynamics",
+        "consumed_ports": []
+      }
+    },
+    "03_气息不匀": {
+      "pitch": {
+        "status": "FAILED",
+        "algorithm_id": "pitch",
+        "consumed_ports": []
+      },
+      "timing": {
+        "status": "FAILED",
+        "algorithm_id": "timing",
+        "consumed_ports": []
+      },
+      "dynamics": {
+        "status": "FAILED",
+        "algorithm_id": "dynamics",
+        "consumed_ports": []
+      }
+    },
+    "04_错音": {
+      "pitch": {
+        "status": "FAILED",
+        "algorithm_id": "pitch",
+        "consumed_ports": []
+      },
+      "timing": {
+        "status": "FAILED",
+        "algorithm_id": "timing",
+        "consumed_ports": []
+      },
+      "dynamics": {
+        "status": "FAILED",
+        "algorithm_id": "dynamics",
+        "consumed_ports": []
+      }
+    },
+    "05_漏音断句": {
+      "pitch": {
+        "status": "FAILED",
+        "algorithm_id": "pitch",
+        "consumed_ports": []
+      },
+      "timing": {
+        "status": "FAILED",
+        "algorithm_id": "timing",
+        "consumed_ports": []
+      },
+      "dynamics": {
+        "status": "FAILED",
+        "algorithm_id": "dynamics",
+        "consumed_ports": []
+      }
+    }
+  },
+  "c2_intermediates": {
+    "reference": {
+      "ingest": {
+        "n_samples": 3475114,
+        "dtype": "float32",
+        "shape": [
+          3475114
+        ],
+        "sample_rate": 44100,
+        "duration_sec": 78.8007709750567,
+        "rms": 0.12991767532056667
+      },
+      "align": {
+        "warp_shape": [
+          1947,
+          2
+        ],
+        "warp_dtype": "int32",
+        "monotonic_ref": true,
+        "monotonic_prac": true,
+        "non_identity_ratio": 0.2537,
+        "endpoint": [
+          1695,
+          1695
+        ]
+      },
+      "ports": {
+        "chroma.lowres.reference": {
+          "shape": [
+            1697,
+            12
+          ],
+          "dtype": "float32",
+          "element_count": 20364,
+          "n_frames": 1697
+        },
+        "notes.reference": {
+          "shape": [
+            59,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 177,
+          "n_frames": 59
+        },
+        "pitch.reference": {
+          "shape": [
+            1696,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 5088,
+          "n_frames": 1696
+        },
+        "rms.reference": {
+          "shape": [
+            13571
+          ],
+          "dtype": "float32",
+          "element_count": 13571,
+          "n_frames": 13571
+        }
+      }
+    },
+    "01_音准走调": {
+      "ingest": {
+        "n_samples": 3475114,
+        "dtype": "float32",
+        "shape": [
+          3475114
+        ],
+        "sample_rate": 44100,
+        "duration_sec": 78.8007709750567,
+        "rms": 0.1292786433775836
+      },
+      "align": {
+        "warp_shape": [
+          2092,
+          2
+        ],
+        "warp_dtype": "int32",
+        "monotonic_ref": true,
+        "monotonic_prac": true,
+        "non_identity_ratio": 0.521,
+        "endpoint": [
+          1695,
+          1695
+        ]
+      },
+      "ports": {
+        "chroma.lowres.reference": {
+          "shape": [
+            1697,
+            12
+          ],
+          "dtype": "float32",
+          "element_count": 20364,
+          "n_frames": 1697
+        },
+        "notes.reference": {
+          "shape": [
+            59,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 177,
+          "n_frames": 59
+        },
+        "pitch.reference": {
+          "shape": [
+            1696,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 5088,
+          "n_frames": 1696
+        },
+        "rms.reference": {
+          "shape": [
+            13571
+          ],
+          "dtype": "float32",
+          "element_count": 13571,
+          "n_frames": 13571
+        }
+      }
+    },
+    "02_节奏抢拖": {
+      "ingest": {
+        "n_samples": 3475114,
+        "dtype": "float32",
+        "shape": [
+          3475114
+        ],
+        "sample_rate": 44100,
+        "duration_sec": 78.8007709750567,
+        "rms": 0.1487715455570982
+      },
+      "align": {
+        "warp_shape": [
+          1775,
+          2
+        ],
+        "warp_dtype": "int32",
+        "monotonic_ref": true,
+        "monotonic_prac": true,
+        "non_identity_ratio": 0.7606,
+        "endpoint": [
+          1695,
+          1695
+        ]
+      },
+      "ports": {
+        "chroma.lowres.reference": {
+          "shape": [
+            1697,
+            12
+          ],
+          "dtype": "float32",
+          "element_count": 20364,
+          "n_frames": 1697
+        },
+        "notes.reference": {
+          "shape": [
+            59,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 177,
+          "n_frames": 59
+        },
+        "pitch.reference": {
+          "shape": [
+            1696,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 5088,
+          "n_frames": 1696
+        },
+        "rms.reference": {
+          "shape": [
+            13571
+          ],
+          "dtype": "float32",
+          "element_count": 13571,
+          "n_frames": 13571
+        }
+      }
+    },
+    "03_气息不匀": {
+      "ingest": {
+        "n_samples": 3475114,
+        "dtype": "float32",
+        "shape": [
+          3475114
+        ],
+        "sample_rate": 44100,
+        "duration_sec": 78.8007709750567,
+        "rms": 0.09866363228823521
+      },
+      "align": {
+        "warp_shape": [
+          1947,
+          2
+        ],
+        "warp_dtype": "int32",
+        "monotonic_ref": true,
+        "monotonic_prac": true,
+        "non_identity_ratio": 0.2537,
+        "endpoint": [
+          1695,
+          1695
+        ]
+      },
+      "ports": {
+        "chroma.lowres.reference": {
+          "shape": [
+            1697,
+            12
+          ],
+          "dtype": "float32",
+          "element_count": 20364,
+          "n_frames": 1697
+        },
+        "notes.reference": {
+          "shape": [
+            59,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 177,
+          "n_frames": 59
+        },
+        "pitch.reference": {
+          "shape": [
+            1696,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 5088,
+          "n_frames": 1696
+        },
+        "rms.reference": {
+          "shape": [
+            13571
+          ],
+          "dtype": "float32",
+          "element_count": 13571,
+          "n_frames": 13571
+        }
+      }
+    },
+    "04_错音": {
+      "ingest": {
+        "n_samples": 3475114,
+        "dtype": "float32",
+        "shape": [
+          3475114
+        ],
+        "sample_rate": 44100,
+        "duration_sec": 78.8007709750567,
+        "rms": 0.12814051258453202
+      },
+      "align": {
+        "warp_shape": [
+          1988,
+          2
+        ],
+        "warp_dtype": "int32",
+        "monotonic_ref": true,
+        "monotonic_prac": true,
+        "non_identity_ratio": 0.3089,
+        "endpoint": [
+          1695,
+          1695
+        ]
+      },
+      "ports": {
+        "chroma.lowres.reference": {
+          "shape": [
+            1697,
+            12
+          ],
+          "dtype": "float32",
+          "element_count": 20364,
+          "n_frames": 1697
+        },
+        "notes.reference": {
+          "shape": [
+            59,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 177,
+          "n_frames": 59
+        },
+        "pitch.reference": {
+          "shape": [
+            1696,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 5088,
+          "n_frames": 1696
+        },
+        "rms.reference": {
+          "shape": [
+            13571
+          ],
+          "dtype": "float32",
+          "element_count": 13571,
+          "n_frames": 13571
+        }
+      }
+    },
+    "05_漏音断句": {
+      "ingest": {
+        "n_samples": 3475114,
+        "dtype": "float32",
+        "shape": [
+          3475114
+        ],
+        "sample_rate": 44100,
+        "duration_sec": 78.8007709750567,
+        "rms": 0.11642814465795423
+      },
+      "align": {
+        "warp_shape": [
+          1996,
+          2
+        ],
+        "warp_dtype": "int32",
+        "monotonic_ref": true,
+        "monotonic_prac": true,
+        "non_identity_ratio": 0.2966,
+        "endpoint": [
+          1695,
+          1695
+        ]
+      },
+      "ports": {
+        "chroma.lowres.reference": {
+          "shape": [
+            1697,
+            12
+          ],
+          "dtype": "float32",
+          "element_count": 20364,
+          "n_frames": 1697
+        },
+        "notes.reference": {
+          "shape": [
+            59,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 177,
+          "n_frames": 59
+        },
+        "pitch.reference": {
+          "shape": [
+            1696,
+            3
+          ],
+          "dtype": "float32",
+          "element_count": 5088,
+          "n_frames": 1696
+        },
+        "rms.reference": {
+          "shape": [
+            13571
+          ],
+          "dtype": "float32",
+          "element_count": 13571,
+          "n_frames": 13571
+        }
+      }
+    }
+  },
+  "cross_checks": {
+    "warp_identity_ratio::reference": {
+      "expected": 0.255,
+      "actual": 0.2537,
+      "match": true
+    },
+    "warp_identity_ratio::01_音准走调": {
+      "expected": 0.522,
+      "actual": 0.521,
+      "match": true
+    },
+    "warp_identity_ratio::02_节奏抢拖": {
+      "expected": 0.761,
+      "actual": 0.7606,
+      "match": true
+    },
+    "warp_identity_ratio::03_气息不匀": {
+      "expected": 0.255,
+      "actual": 0.2537,
+      "match": true
+    },
+    "warp_identity_ratio::04_错音": {
+      "expected": 0.31,
+      "actual": 0.3089,
+      "match": true
+    },
+    "rms_relative::03_气息不匀_is_lowest": {
+      "expected": "03_气息不匀",
+      "actual": "03_气息不匀",
+      "all_rms": {
+        "reference": 0.12992,
+        "01_音准走调": 0.12928,
+        "02_节奏抢拖": 0.14877,
+        "03_气息不匀": 0.09866,
+        "04_错音": 0.12814,
+        "05_漏音断句": 0.11643
+      },
+      "match": true
+    },
+    "defect_to_metric_pattern": {
+      "01_音准走调": {
+        "pitch_median_abs_cents": null,
+        "pitch_max_abs_cents": null,
+        "timing_median_onset_sec": null,
+        "timing_late_ratio": null,
+        "timing_early_ratio": null,
+        "dynamics_median_db": null,
+        "dynamics_n_unpaired": null,
+        "pitch_n_unpaired": null
+      },
+      "02_节奏抢拖": {
+        "pitch_median_abs_cents": null,
+        "pitch_max_abs_cents": null,
+        "timing_median_onset_sec": null,
+        "timing_late_ratio": null,
+        "timing_early_ratio": null,
+        "dynamics_median_db": null,
+        "dynamics_n_unpaired": null,
+        "pitch_n_unpaired": null
+      },
+      "03_气息不匀": {
+        "pitch_median_abs_cents": null,
+        "pitch_max_abs_cents": null,
+        "timing_median_onset_sec": null,
+        "timing_late_ratio": null,
+        "timing_early_ratio": null,
+        "dynamics_median_db": null,
+        "dynamics_n_unpaired": null,
+        "pitch_n_unpaired": null
+      },
+      "04_错音": {
+        "pitch_median_abs_cents": null,
+        "pitch_max_abs_cents": null,
+        "timing_median_onset_sec": null,
+        "timing_late_ratio": null,
+        "timing_early_ratio": null,
+        "dynamics_median_db": null,
+        "dynamics_n_unpaired": null,
+        "pitch_n_unpaired": null
+      },
+      "05_漏音断句": {
+        "pitch_median_abs_cents": null,
+        "pitch_max_abs_cents": null,
+        "timing_median_onset_sec": null,
+        "timing_late_ratio": null,
+        "timing_early_ratio": null,
+        "dynamics_median_db": null,
+        "dynamics_n_unpaired": null,
+        "pitch_n_unpaired": null
+      }
+    }
+  },
+  "determinism": {
+    "01_音准走调": {
+      "warp_identical": true,
+      "algorithms_identical": true,
+      "identical": true
+    },
+    "05_漏音断句": {
+      "warp_identical": true,
+      "algorithms_identical": true,
+      "identical": true
+    }
+  }
+}

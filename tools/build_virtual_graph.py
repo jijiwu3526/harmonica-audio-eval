@@ -14,8 +14,8 @@
 
 代码里**存在**的（推导）：
     - 有哪些文件、各自属于哪个组件（读铭牌的 COMPONENT 字段）
-    - 端口清单、生产者、消费者（读 profile.PORTS / ALGORITHMS）
-    - 算法及其依赖端口（读 algorithms.ALGORITHMS）
+    - 端口清单与生产者（读 profile.PORTS）
+    - 算法依赖关系（需要装配后的插件声明；当前数据面不足时显式失败）
     - 每个文件的公开符号（ast 解析）
 
 代码里**不存在**的（手写 overlay）：
@@ -45,6 +45,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Sequence
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "harmonica_eval"
@@ -54,22 +55,42 @@ OVERLAY = REPO / ".spec" / "graph" / "overlay.json"
 sys.path.insert(0, str(REPO))
 
 
+class GraphDataUnavailableError(RuntimeError):
+    """生成依赖图所需的插件装配数据尚不可读。"""
+
+
 # ═════════════════════════════════════════════════════════════════════
 # 一 · 从代码推导
 # ═════════════════════════════════════════════════════════════════════
 
 def _nameplate(src: str) -> dict[str, str]:
-    """从文件顶部的现场铭牌（§18）里抠出字段。"""
-    m = re.match(r"'''(.*?)'''", src, re.S)
+    """从文件顶部的现场铭牌（§18）里抠出字段。
+
+    ★ 铭牌头可能用 ''' 或 \"\"\"；字段名与冒号之间也可能有空格
+      （serve_ui.py 写 COMPONENT␣␣: 而 host/app.py 写 COMPONENT:）。
+      ★ 所以两种引号都试，且键名前允许空格。
+    """
+    m = re.match(r"'''(.*?)'''", src, re.S) or re.match(r'"""(.*?)"""', src, re.S)
     if not m:
         return {}
     body = m.group(1)
     out: dict[str, str] = {}
     for key in ("FILE-ID", "COMPONENT", "SPEC", "ROLE", "BUILD-INSTRUCTION"):
-        mm = re.search(rf"^{key}:\s*(.+?)(?=\n[A-Z][A-Z /-]*:|\Z)",
-                       body, re.M | re.S)
+        # ★ 字段值到【下一个真字段名】为止（§18 十字段），不是到任意大写行为止。
+        #   旧式 (?=\n[A-Z][A-Z /-]*:|\Z) 会把续行吞进同名字段——「★ 裁定：…」
+        #   这类说明行不含新字段名，于是一路吃到文末，产出 800+ 字的假「路径」。
+        mm = re.search(
+            rf"^[ \t]*{key}[ \t]*:[ \t]*(.+?)(?=\n[ \t]*(?:FILE-ID|COMPONENT|SPEC|ROLE|"
+            rf"INTENT|MUST|MUST NOT|INPUT|OUTPUT|BUILD-INSTRUCTION)[ \t]*:|\Z)",
+            body, re.M | re.S,
+        )
         if mm:
-            out[key] = " ".join(mm.group(1).split())
+            # ★ 取【首个非空行】作为字段值。
+            #   §18 允许两种写法：「KEY: 值」同行，或「KEY:」后换行缩进写值；
+            #   也允许值之后跟说明行。整段拼接会让 validate() 拿 800 字
+            #   文字当路径（ENAMETOOLONG），而只取首行会漏掉换行写法（空值）。
+            lines = [ln.strip() for ln in mm.group(1).splitlines() if ln.strip()]
+            out[key] = lines[0] if lines else ""
     return out
 
 
@@ -153,8 +174,57 @@ def build_decomposition() -> dict:
     }
 
 
-def build_dependency() -> dict:
-    """Dependency DAG：文件级 import + 端口级生产/消费。"""
+def load_registry_specs() -> tuple[object, ...]:
+    """取得已装配 Registry 的 PluginSpec 清单。
+
+    ★ 本工具【不】import 具体算法实现，只经 bootstrap 这个唯一装配根取得
+      声明式清单（FILE-206 装配根唯一性）。
+
+    ★ 取不到才抛 GraphDataUnavailableError，判据是【真实的】：
+      bootstrap 抛异常 / 清单为空 / 元素缺字段。
+      ★ 绝不按「文件看起来是空壳」判断——那是阶段态判据，注入完成即失效，
+        会让本工具在项目推进后永远拒绝工作。
+    """
+    try:
+        from harmonica_eval.algorithms.bootstrap import build_default_registry
+    except Exception as exc:
+        raise GraphDataUnavailableError(
+            f"无法导入装配根 harmonica_eval.algorithms.bootstrap：{exc}"
+        ) from exc
+    try:
+        specs = tuple(build_default_registry().list())
+    except Exception as exc:
+        raise GraphDataUnavailableError(
+            f"build_default_registry() 失败，无法取得已装配清单：{exc}"
+        ) from exc
+    if not specs:
+        raise GraphDataUnavailableError(
+            "已装配 Registry 为空（build_default_registry().list() 返回空序列）"
+        )
+    for spec in specs:
+        if not hasattr(spec, "algorithm_id") or not hasattr(spec, "required_inputs"):
+            raise GraphDataUnavailableError(
+                f"已装配清单元素缺 algorithm_id/required_inputs：{spec!r}"
+            )
+    return specs
+
+
+def build_dependency(plugin_specs: Sequence[object] | None = None) -> dict:
+    """Dependency DAG：文件级 import + 端口级生产/消费。
+
+    ★ C3 插件化后，算法清单不再由框架静态保存。本工具需要装配后 Registry
+      中每个 ``PluginSpec`` 的 ``required_inputs``；缺省时由
+      ``load_registry_specs()`` 自行取得（不 import 具体算法实现）。
+
+    ★ 「数据面不足」只按【真实取不到】判定，见 load_registry_specs 的说明。
+      ★ 绝不按「文件看起来是空壳」判断——那会让本工具在注入完成后
+        永远拒绝工作。
+
+    ``plugin_specs`` 是给测试与库调用方保留的显式输入。
+    """
+    if plugin_specs is None:
+        plugin_specs = load_registry_specs()
+
     edges: list[dict] = []
     for p in sorted(PKG.rglob("*.py")):
         if "__pycache__" in str(p):
@@ -167,12 +237,30 @@ def build_dependency() -> dict:
             })
 
     import harmonica_eval.profile as prof
-    import harmonica_eval.algorithms as algos
 
     consumers: dict[str, list[str]] = {}
-    for a in algos.ALGORITHMS:
-        for port in a.required_ports:
-            consumers.setdefault(port, []).append(a.algorithm_id)
+    algorithm_rows: list[dict] = []
+    for spec in plugin_specs:
+        try:
+            algorithm_id = spec.algorithm_id
+            version = spec.algorithm_version
+            requirements = spec.required_inputs
+            required_ports = tuple(
+                requirement.port_id for requirement in requirements
+            )
+        except Exception as exc:
+            raise GraphDataUnavailableError(
+                "已提供的插件声明不完整或不可读，无法生成依赖图；"
+                "每个条目必须是含 algorithm_id/algorithm_version/required_inputs 的 PluginSpec，"
+                "且 required_inputs 必须逐项提供 port_id。"
+            ) from exc
+        for port_id in required_ports:
+            consumers.setdefault(port_id, []).append(algorithm_id)
+        algorithm_rows.append({
+            "algorithm_id": algorithm_id,
+            "version": version,
+            "required_ports": list(required_ports),
+        })
 
     ports = []
     for s in prof.PORTS:
@@ -186,19 +274,10 @@ def build_dependency() -> dict:
             "is_evidence_only": not consumers.get(s.port_id),
         })
 
-    algorithms = [
-        {
-            "algorithm_id": a.algorithm_id,
-            "version": a.version,
-            "required_ports": list(a.required_ports),
-        }
-        for a in algos.ALGORITHMS
-    ]
-
     return {
         "import_edges": edges,
         "ports": ports,
-        "algorithms": algorithms,
+        "algorithms": algorithm_rows,
         "profile_version": prof.PROFILE_VERSION,
     }
 
@@ -264,17 +343,25 @@ def validate(graph: dict) -> list[str]:
 def main() -> int:
     check_only = "--check" in sys.argv
 
-    graph = {
-        "schema": "virtual-system-graph/v1",
-        "generated_by": "tools/build_virtual_graph.py",
-        "note": (
-            "★ 本文件由脚本生成，不要手改 —— 手改会在下次生成时丢失。"
-            "能从代码推导的都推导；只有代码里不存在的才写在 overlay.json。"
-        ),
-        "decomposition": build_decomposition(),
-        "dependency": build_dependency(),
-        "traceability": load_overlay(),
-    }
+    try:
+        graph = {
+            "schema": "virtual-system-graph/v1",
+            "generated_by": "tools/build_virtual_graph.py",
+            "note": (
+                "★ 本文件由脚本生成，不要手改 —— 手改会在下次生成时丢失。"
+                "能从代码推导的都推导；只有代码里不存在的才写在 overlay.json。"
+            ),
+            "decomposition": build_decomposition(),
+            "dependency": build_dependency(),
+            "traceability": load_overlay(),
+        }
+    except GraphDataUnavailableError as exc:
+        print("❌ Virtual System Graph 未生成：数据面不足。", file=sys.stderr)
+        print(f"原因：{exc}", file=sys.stderr)
+        print("恢复条件：让 harmonica_eval.algorithms.bootstrap 的 "
+              "build_default_registry() 能返回非空 PluginSpec 清单。"
+              "本次未写入任何图文件。", file=sys.stderr)
+        return 1
 
     problems = validate(graph)
 

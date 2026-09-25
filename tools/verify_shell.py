@@ -14,9 +14,17 @@ from __future__ import annotations
 
 import ast
 import importlib
+import inspect
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
+
+# ★ 已授权注入文件从唯一真相源派生（不再在本文件维护副本）。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from authorized_impl import REPO_REL as _AUTHORIZED_REPO_REL  # noqa: E402
+from authorized_impl import NOTES_BY_REPO_REL as _AUTHORIZED_NOTES  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "harmonica_eval"
@@ -44,6 +52,8 @@ EXPECTED = [
     "harmonica_eval/core/surface.py",
     "harmonica_eval/core/api.py",
     "harmonica_eval/algorithms/__init__.py",
+    "harmonica_eval/algorithms/registry.py",
+    "harmonica_eval/algorithms/runtime.py",
     "harmonica_eval/algorithms/pitch.py",
     "harmonica_eval/algorithms/timing.py",
     "harmonica_eval/algorithms/dynamics.py",
@@ -51,10 +61,49 @@ EXPECTED = [
     "harmonica_eval/host/app.py",
     "harmonica_eval/cockpit/__init__.py",
     "harmonica_eval/cockpit/app.py",
+    # ★ 2026-09-24 授权新增（负责人授权「派一个子智能体去做那个前端」）：
+    #   preview.py —— C4 契约结构预览视图。BI = FILE-401-P-v1.md
+    "harmonica_eval/cockpit/preview.py",
+    # ★ 2026-09-24 授权新增（负责人裁定「局域网直接支持」+ 前端接线任务收口）：
+    #   serve_ui.py —— 进程装配点，FILE-ID FILE-499。
+    #   BI = FILE-400-v1.md:17「上游 = 包外装配方（进程装配点）… 调用 launch_cockpit(port)」
+    # ★ 它不属于 C1/C2/C3/C4 任一层，故单列而不并入任一层的 rglob 目录。
+    "harmonica_eval/serve_ui.py",
+    # ★ 2026-09-24 授权新增（负责人授权「派子智能体注入」第 1 刀）：
+    #   bootstrap.py —— 唯一物理装配根，构造 PluginSpec 并 register 即职责本体。
+    #   BI = FILE-206-v1.md
+    "harmonica_eval/algorithms/bootstrap.py",
+    # ★ 2026-09-24 授权新增（负责人授权「接上前端启动入口」）：
+    #   serve_ui.py —— 进程装配点。唯一同时 import host 与 cockpit 的配方；
+    #   它是 FILE-002-v1.md:45「零 import」约束的**唯一例外出口**，且它不是 __main__。
+    #   BI = FILE-400-v1.md:17「上游 = 包外装配方」+ FILE-002-v1.md:45/:47。
+    "harmonica_eval/serve_ui.py",
 ]
 
+# ★ 交叉校验：EXPECTED 是手工枚举的「应当存在的坑位」清单，
+#   而 `harmonica_eval/` 下真实存在的 .py 集合只能由文件系统得出。
+#   ★ 两者不等时立即报错 —— 新增文件若忘记登记进 EXPECTED，
+#   ★ 它将完全不被本脚本检查（不查铭牌、不查依赖方向、不查签名），
+#   ★ 那比「判据失败」更危险：失败会报警，看不见则不会。
+# ★ 这条校验只在「实际文件集 ⊆ EXPECTED」时成立；
+#   反向（EXPECTED 里有但文件不存在）由 ① 文件坑位 单独报缺失。
+EXPECTED_SET = frozenset(EXPECTED)
+
 SHELL_MARK = re.compile(r'NotImplementedError\("SHELL: FILE-\d+')
+# ★ 铭牌正则：**全仓唯一形态**是「冒号紧跟 FILE-ID，值用空格对齐」——
+#   即 `FILE-ID:      FILE-101`（ingest / host / cockpit / core / algorithms 共 22 处）。
+# ★ 本正则【刻意严格】。曾一度放宽成 `FILE-ID\s*:\s*` 来「接受两种排版」，
+#   那会让铭牌格式漂移无人可查；现改为「统一格式 + 收窄正则 + 独立格式判据」。
 NAMEPLATE = re.compile(r"FILE-ID:\s*FILE-\d+")
+
+# ★ 格式一致性判据：铭牌必须逐字采用 `FILE-ID:` 形态。
+#   这是一条【永续判据】——不依赖任何特定文件，任何阶段都成立。
+#   匹配「冒号前有空格」的异类写法（`FILE-ID      : FILE-xxx`）。
+NAMEPLATE_MISALIGNED = re.compile(r"FILE-ID\s+:\s*FILE-\d+")
+
+# ★ 与 NAMEPLATE 同一形态，但**带捕获组**——用于取出编号本身。
+#   不复用 NAMEPLATE 是因为它没有捕获组（调用 .group(1) 会 IndexError）。
+NAMEPLATE_VALUE = re.compile(r"FILE-ID:\s*(FILE-\d+)")
 
 # 允许含实现的文件（地基，非空壳）
 GROUND = {
@@ -62,6 +111,14 @@ GROUND = {
     "harmonica_eval/profile.py",
     "harmonica_eval/__init__.py",
 }
+
+# ★ 已授权注入的实现文件（负责人明确授权后逐个加入）
+# ★ ★ 本表不再在此维护 —— 它派生自 tools/authorized_impl.py（唯一真相源）。
+# ★ 精确路径成员判断（下方 `if rel in GROUND`）——**不得放宽成目录或前缀匹配**，
+# ★ 否则同目录下未授权的文件会被顺带放过。
+# ★ 每个条目的「哪次授权、依据哪份 BI」在真相源里逐条记录，详见 §七。
+GROUND_IMPL_NOTES = dict(_AUTHORIZED_NOTES)
+GROUND |= set(_AUTHORIZED_REPO_REL)
 
 
 class Report:
@@ -95,6 +152,23 @@ def check_existence(r: Report) -> None:
     for m in missing:
         r.err(f"文件缺失: {m}")
 
+    # ★ 交叉校验：实际存在的 .py 必须全部登记进 EXPECTED。
+    #   未登记的文件不会被本脚本任何一节检查 —— 必须当作错误报出。
+    actual = {
+        str(p.relative_to(REPO))
+        for p in PKG.rglob("*.py")
+        if "__pycache__" not in p.parts
+    }
+    unregistered = sorted(actual - EXPECTED_SET)
+    if unregistered:
+        r.err(
+            "以下 .py 未登记进 EXPECTED，verify_shell 完全不检查它们"
+            "（不查铭牌 / 依赖方向 / 签名一致性）：\n    "
+            + "\n    ".join(unregistered)
+        )
+    else:
+        print(f"  ✅ 实际 {len(actual)} 个 .py 全部登记在 EXPECTED 内")
+
 
 def check_imports(r: Report) -> None:
     print()
@@ -125,6 +199,7 @@ def check_nameplate(r: Report) -> None:
     print("③ 现场铭牌（宪章 §18）")
     print("─" * 72)
     stamped = 0
+    misaligned = 0
     for rel in EXPECTED:
         p = REPO / rel
         if not p.exists():
@@ -135,8 +210,44 @@ def check_nameplate(r: Report) -> None:
         else:
             r.err(f"缺现场铭牌 FILE-ID: {rel}")
             print(f"  ❌ {rel}")
+        # ★ 格式一致性：铭牌必须用 `FILE-ID:` 形态（全仓唯一）。
+        #   「冒号前有空格」的异类写法会让铭牌排版漂移无人可查。
+        #   曾一度靠放宽 NAMEPLATE 来接受它 —— 那等于取消这条守卫，故拆成独立判据。
+        if NAMEPLATE_MISALIGNED.search(src):
+            misaligned += 1
+            r.err(f"铭牌格式不一致（应为 `FILE-ID:      FILE-xxx`）: {rel}")
+            print(f"  ❌ 格式不一致 {rel}")
     r.stats["有铭牌"] = stamped
+    r.stats["铭牌格式一致"] = stamped - misaligned
     print(f"  {stamped}/{len(EXPECTED)} 个文件有 FILE-ID 铭牌")
+    print(f"  {stamped - misaligned}/{len(EXPECTED)} 个文件铭牌格式一致")
+
+    # ★ 可追溯性不变量：铭牌上的每个 FILE-ID 都必须有一份对应的 Build Instruction。
+    #
+    #   为什么必须有：铭牌的价值在于「一眼知道该填哪个文件、依据哪份 BI」。
+    #   一个没有 BI 的编号让这条链断掉——实现者看得见 FILE-499，却找不到
+    #   FILE-499-v1.md，于是只能自己发明上层设计（这正是 §22 列为硬失败的那一条）。
+    #
+    #   历史：serve_ui.py 的 FILE-499 曾长期无 BI。本仓 22 个编号「恰好都有」
+    #   一直是巧合而非被守着——把编号改成 FILE-498，verify_shell 仍 rc=0。
+    bi_backed = 0
+    build_dir = REPO / ".spec" / "build"
+    for rel in EXPECTED:
+        p = REPO / rel
+        if not p.exists():
+            continue
+        m = NAMEPLATE_VALUE.search(p.read_text(encoding="utf-8"))
+        if m is None:
+            continue
+        fid = m.group(1)
+        # FILE-499 → FILE-499-v1.md。存在任意版本后缀即算有 BI。
+        if any(build_dir.glob(f"{fid}-v*.md")):
+            bi_backed += 1
+        else:
+            r.err(f"FILE-ID {fid} 无对应 Build Instruction: {rel} → 期望 .spec/build/{fid}-v*.md")
+            print(f"  ❌ 无 BI {rel}（{fid}）")
+    r.stats["编号有 BI"] = bi_backed
+    print(f"  {bi_backed}/{len(EXPECTED)} 个文件的 FILE-ID 有对应 BI")
 
 
 def check_shell_purity(r: Report) -> None:
@@ -208,6 +319,21 @@ def check_layer_direction(r: Report) -> None:
         "harmonica_eval/cockpit": ("core", "algorithms", "host"),
         "harmonica_eval/contract.py": ("core", "host", "algorithms", "cockpit"),
         "harmonica_eval/profile.py": ("core", "host", "algorithms", "cockpit"),
+        # ★★ 不变量 F 的判定线（FILE-002-v1.md:45/:47）★★
+        #   「两者之间【零依赖、零 import、零调用】：本文件绝不 import cockpit，
+        #     C4 绝不 import 本文件」，且「把 cockpit 从环境中整体移除后，
+        #     本文件的 import 仍须成功」。
+        # ★ 这两条此前只写在 docstring 里，全靠人记 —— 没有任何机器守卫。
+        # ★ 实测：给 __main__.py 顶层加 `from .cockpit import launch_cockpit`
+        #   语法正确、verify_shell 完全不报 —— 那条冻结不变量形同虚设。
+        # ★ serve_ui.py 不在此列：它是该约束的**唯一例外出口**
+        #   （FILE-400-v1.md:17「上游 = 包外装配方」），且它不是 __main__。
+        "harmonica_eval/__main__.py": ("cockpit",),
+        # ★ serve_ui.py 是【第三条消费者】（进程装配点），不属于 C1/C2/C3/C4 任一层。
+        # ★ 按 FILE-400-v1.md:17，它的「装配点→C1(取 port)」与「装配点→C4(启动 UI)」
+        # ★ 两条边是规格允许的 —— 这里【显式列出它不得碰的】，而不是给它整体豁免：
+        # ★ 不得知道 algorithms / core，否则它就成了绕过深接口的后门。
+        "harmonica_eval/serve_ui.py": ("core", "algorithms"),
     }
     violations = 0
     checked = 0
@@ -224,11 +350,29 @@ def check_layer_direction(r: Report) -> None:
                 mods: list[str] = []
                 if isinstance(node, ast.Import):
                     mods = [a.name for a in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.module:
-                    mods = [node.module]
+                elif isinstance(node, ast.ImportFrom):
+                    # ★ 相对导入（level > 0）时，被导入的【包】在 node.module，
+                    # ★ node.names 里只是被导入的【名字】：
+                    #     from ..algorithms.pitch import run
+                    #       module='algorithms.pitch'   ← 要判定的包在这里
+                    #       names=['run']
+                    # ★ 只取 names 会把包名丢掉 —— 实测那样写时违规命中数 = 0，
+                    # ★ 守卫形同虚设。裸导入（level=0、module=None）时才取 names。
+                    if node.module:
+                        mods = [node.module]
+                    else:
+                        mods = [a.name for a in node.names]
                 for m in mods:
-                    tail = m.split(".")[-1]
-                    if tail in bad or any(m.endswith(f".{b}") for b in bad):
+                    # ★★ 按【包路径段】判定，不看尾段 ★★
+                    # 旧写法只比 m.split(".")[-1]，于是
+                    #   'algorithms'            → 抓到
+                    #   'algorithms.pitch'      → ★ 漏
+                    #   'harmonica_eval.algorithms.pitch' → ★ 漏
+                    # 实测过：给 core/ingest.py 注入 `from ..algorithms.pitch
+                    # import run`，违规命中数 = 0 —— 那条守卫当时形同虚设。
+                    # 这里对 '.' 切段后逐段比对，形态无关（裸包名 / 深层 / 相对）。
+                    segments = set(m.split("."))
+                    if segments & set(bad):
                         r.err(f"依赖方向违规: {rel} import 了 {m}")
                         print(f"  ❌ {rel} → {m}")
                         violations += 1
@@ -236,6 +380,95 @@ def check_layer_direction(r: Report) -> None:
     if not violations:
         print(f"  ✅ {checked} 个文件，全部符合依赖方向")
         print("     └ 「换算法不改核心」现在是可自动验证的结构事实")
+        print("     └ 不变量 F「__main__ 绝不 import cockpit」也已被机器守住")
+
+
+def check_invariant_f_importable_without_cockpit(r: Report) -> None:
+    """不变量 F 的**动态**一半：整体移除 cockpit 后 `__main__` 仍须可 import。
+
+    FILE-002-v1.md:47 明文：「把 `cockpit` 从环境中整体移除后，
+    本文件的 import 仍须成功」。静态依赖检查只能证明「没写 import 语句」，
+    证不了「没有间接依赖」（例如 `__init__.py` 链式引入）。
+
+    本检查用**子进程 + 临时重命名**实现，不污染工作区：
+      1. 把 `harmonica_eval/cockpit` 改名为 `cockpit.__f_probe_moved__`
+      2. 在子进程里 import `harmonica_eval.__main__`
+      3. 改回原名（finally 保证一定还原）
+    ★ 任何一步失败都必须还原，否则会留下半截工作区 —— 比判据失败更糟。
+
+    ★★ 为什么要【子进程】而不是在本进程里 import ★★
+      本进程此前可能已把 `harmonica_eval.cockpit.*` 放进 ``sys.modules``。
+      若在本进程里试 import，`sys.modules` 命中缓存会返回旧对象，
+      探测就会「假绿」—— 这正是 SHELL-STANDARD §七「校验恒真」的一族。
+      子进程从干净的模块表起步，看到的是文件系统真相。
+    """
+    print()
+    print("─" * 72)
+    print("⑤b 不变量 F（整体移除 cockpit 后 __main__ 仍可 import）")
+    print("─" * 72)
+    cockpit_dir = REPO / "harmonica_eval" / "cockpit"
+    moved_dir = REPO / "harmonica_eval" / "cockpit.__f_probe_moved__"
+    if not cockpit_dir.is_dir():
+        print("  ⏭  cockpit 目录不存在（不变量 F 本身要求它可被移除，跳过）")
+        return
+    if moved_dir.exists():
+        r.err("不变量 F 探针残留：cockpit.__f_probe_moved__ 已存在，"
+              "上一次探针未还原，请人工检查")
+        print("  ❌ 探针残留，请人工检查")
+        return
+
+    # ★ 先确认移走之后【本进程】的模块缓存不会骗到子进程以外的东西：
+    #   记录探针前 sys.modules 里与 cockpit 相关的条目，探针后比对是否被改动。
+    before_modules = {k for k in sys.modules if "cockpit" in k}
+    try:
+        cockpit_dir.rename(moved_dir)
+    except OSError as exc:
+        r.err(f"不变量 F 探针：无法重命名 cockpit 目录：{exc}")
+        print(f"  ❌ 重命名失败：{exc}")
+        return
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import harmonica_eval.__main__ as m; print('IMPORT_OK')"],
+            capture_output=True, text=True, cwd=str(REPO), timeout=60,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+    except subprocess.TimeoutExpired:
+        proc = None
+    finally:
+        # ★ 一定还原 —— 探针失败不得留下半截工作区。
+        #   还原失败时【不 return】：先把事实报完整，再让调用方看到。
+        try:
+            moved_dir.rename(cockpit_dir)
+        except OSError as exc:  # pragma: no cover - 只在文件系统异常时发生
+            r.err(f"不变量 F 探针【还原失败】，cockpit 仍停留在 "
+                  f"cockpit.__f_probe_moved__：{exc}")
+            print(f"  ❌❌ 还原失败，请立即人工处理：{exc}")
+            return
+
+    # ★ 探针不得在本进程留下与 cockpit 相关的模块缓存变化：
+    #   若有，说明探针期间有人在本进程 import 了 cockpit，
+    #   后续检查可能读到「目录还不存在时的旧对象」→ 结论不可信。
+    leaked = {k for k in sys.modules if "cockpit" in k} - before_modules
+    if leaked:
+        print(f"  ⚠️ 探针期间本进程新增了 {len(leaked)} 个 cockpit 模块缓存条目"
+              f"（{sorted(leaked)[:3]}）")
+        print("     └ 静态检查已在探针前完成，此处仅记录；"
+              "若后续检查 import cockpit 失败，先查这一条")
+
+    if proc is None:
+        r.err("不变量 F 探针超时（60s），无法判定")
+        print("  ❌ 探针超时")
+        return
+    if proc.returncode != 0 or "IMPORT_OK" not in proc.stdout:
+        r.err("不变量 F 违反：整体移除 cockpit 后 __main__ 无法 import\n"
+              + proc.stderr.strip()[:600])
+        print("  ❌ 移除 cockpit 后 __main__ import 失败")
+        print("     └ 这意味着无头通路依赖了界面组件，违反 FILE-002-v1.md:47")
+        return
+    print("  ✅ cockpit 整体移除后 __main__ 仍可 import（不变量 F 成立）")
+    print("     └ 探针在子进程中执行，本进程模块缓存未被污染")
 
 
 def check_forbidden_on_host(r: Report) -> None:
@@ -370,12 +603,22 @@ def check_contract_signatures(r: Report) -> None:
     api_path = PKG / "core" / "api.py"
 
     def method_params(path: Path, cls_name: str) -> dict[str, list[str]]:
+        """返回类声明的公开方法及其参数名。
+
+        契约面是 C1 可见的公开操作：名称以 ``_`` 开头的 dunder 与
+        私有辅助（包括 ``__init__``、``_require``、``_set_uri``）不进入
+        契约面。私有辅助可以合法存在，但不能因此被误报为契约外方法；
+        反过来，公开方法仍必须与 HostContract 双向完全一致。
+        """
         tree = _ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         out: dict[str, list[str]] = {}
         for node in _ast.walk(tree):
             if isinstance(node, _ast.ClassDef) and node.name == cls_name:
                 for sub in node.body:
-                    if isinstance(sub, _ast.FunctionDef):
+                    if (
+                        isinstance(sub, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                        and not sub.name.startswith("_")
+                    ):
                         out[sub.name] = [a.arg for a in sub.args.args]
         return out
 
@@ -532,62 +775,99 @@ def check_doc_port_count(r: Report) -> None:
         print("  ✅ 文档中的端口数与代码一致")
 
 
-def check_timing_payload_consistency(r: Report) -> None:
-    """⑩ 算法模块的 payload 键名与冻结表一致。
+def check_plugin_contract_consistency(r: Report) -> None:
+    """⑩ C3 插件契约自洽性 —— ★ C3 插件化后**取代**旧的
+    「算法 payload 键名 ↔ 冻结表」检查。
 
-    ★ 被一次真实事故逼出来的（§20 盲审第二轮发现）：
-    我新增 `PAYLOAD_SCHEMAS` 时，不知道 `timing.py` 正文的 docstring
-    已经写了另一套键名（`median_ms` / `mad_ms` / `n_matched` / `n_unmatched`）。
-    于是**同一份事实有了两个互相冲突的来源**：
-      - 模块说"我产出这些键"
-      - 注册表说"必须恰好产出那些键"
-    实现者无法同时满足，而两者都不会在 import 时报错。
+    ── 为什么换掉，而不是直接删掉 ──
+    旧检查⑩是被一次真实事故逼出来的：新增 `PAYLOAD_SCHEMAS` 时不知道
+    `timing.py` 的 docstring 已写了另一套键名，于是**同一份事实有了两个
+    互相冲突的来源**，实现者无法同时满足，而两者都不会在 import 时报错。
+    这个教训（"共同事实来源"）依然有效，所以检查不能直接删。
 
-    这与 `FIELD_LAYOUTS` 是**同一个教训的第三次出现**
-    （前两次：`hop_length` 未声明、端口对称性破裂）。
-    故用机械检查兜住：模块 OUTPUT 段声明的键必须与注册表逐字一致。
+    但插件化**从结构上消除了第二个来源**：
+        旧：模块 docstring 声明键名  +  框架里 PAYLOAD_SCHEMAS 再声明一遍
+        新：插件产出自描述的 `Sequence[UiScalar | UiSeries]`，
+            key / label / unit 就在**对象本身**里，框架不再有第二份清单
+    冲突的两个来源少了一个，检查自然要跟着换目标。
+
+    ── 本检查现在验什么 ──
+    验的是"插件契约本身没有自相矛盾"，具体四条：
+      1. `UNITS_VOCABULARY` 覆盖插件产出的单位类别，且不含空串
+      2. `UiScalar` / `UiSeries` 的字段与信封 `payload` 的类型注解一致
+         （投影要靠"字段逐字相同"才成立，字段一变这条就红）
+      3. `InputRequirement` 只有 port_id 必填（其余可默认 ⇒ 声明成本低）
+      4. `PluginSpec` 存在且 required/optional 都是 tuple 类型注解
+         （不是 list/可变容器 ⇒ 注册进来的 spec 是冻结的）
+
+    ── 红/绿自证要求 ──
+    每条检查都必须能"注入违规 → 变红 → 恢复 → 变绿"。
     """
     print()
     print("─" * 72)
-    print("⑩ 算法 payload 键名 ↔ 冻结表")
+    print("⑩ C3 插件契约自洽性（取代旧的 payload 键表检查）")
     print("─" * 72)
 
     sys.path.insert(0, str(REPO))
     try:
-        from harmonica_eval.algorithms import PAYLOAD_SCHEMAS
+        import dataclasses as _dc
+
+        from harmonica_eval import contract as _c
     except Exception as exc:
-        msg = f"无法导入 PAYLOAD_SCHEMAS: {exc}"
+        msg = f"无法导入 contract: {exc}"
         print(f"  ❌ {msg}")
         r.err(msg)
         return
 
-    hits: list[str] = []
-    for algo, keys in PAYLOAD_SCHEMAS.items():
-        path = PKG / "algorithms" / f"{algo}.py"
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
+    issues: list[str] = []
 
-        # 找 "现统一到冻结表" 之类的清单块（我们冻结的写法）
-        blocks = re.findall(
-            r"冻结表的\s*\d+\s*个键：(.*?)\n\s*\"\"\"", text, re.S
+    # 1) 单位词表
+    units = _c.UNITS_VOCABULARY
+    if "" in units:
+        issues.append("UNITS_VOCABULARY 含空串（无法解释的数字）")
+    for needed in ("cents", "ms" if "ms" in units else "seconds", "ratio", "count"):
+        if needed not in units:
+            issues.append(f"UNITS_VOCABULARY 缺 {needed!r}（插件要产出该单位）")
+
+    # 2) payload 注解必须与 UiScalar/UiSeries 同构
+    env_payload = {
+        f.name: str(f.type) for f in _dc.fields(_c.AlgorithmResultEnvelope)
+    }.get("payload", "")
+    if "UiScalar" not in env_payload or "UiSeries" not in env_payload:
+        issues.append(
+            f"AlgorithmResultEnvelope.payload 注解不是 "
+            f"Sequence[UiScalar | UiSeries]（实得 {env_payload!r}）"
         )
-        if not blocks:
-            continue  # 该模块尚未采用显式清单写法
-        declared = re.findall(r"^\s+(\w+)\s{2,}", blocks[0], re.M)
-        if declared != list(keys):
-            hits.append(
-                f"{algo}.py 声明的键 {declared} "
-                f"与 PAYLOAD_SCHEMAS 的 {list(keys)} 不一致"
-            )
 
-    for h in hits:
-        print(f"  ❌ {h}")
-        r.err(h)
+    # 3) InputRequirement 只有 port_id 必填
+    req_fields = _dc.fields(_c.InputRequirement)
+    mandatory = [
+        f.name
+        for f in req_fields
+        if f.default is _dc.MISSING and f.default_factory is _dc.MISSING
+    ]
+    if mandatory != ["port_id"]:
+        issues.append(
+            f"InputRequirement 的必填字段应为恰好 ['port_id']，实得 {mandatory}"
+        )
 
-    print(f"  检查了 {len(PAYLOAD_SCHEMAS)} 个算法的 payload 键表")
-    if not hits:
-        print("  ✅ 模块声明与冻结表逐字一致")
+    # 4) PluginSpec 的 required/optional 必须是不可变容器注解
+    spec_types = {
+        f.name: str(f.type) for f in _dc.fields(_c.PluginSpec)
+    }
+    for name in ("required_inputs", "optional_inputs"):
+        t = spec_types.get(name, "")
+        if "tuple" not in t:
+            issues.append(f"PluginSpec.{name} 注解应含 tuple（实得 {t!r}）")
+
+    for i in issues:
+        print(f"  ❌ {i}")
+        r.err(i)
+
+    print(f"  InputRequirement 字段 {len(req_fields)} 个（必填 {len(mandatory)}）")
+    print(f"  UNITS_VOCABULARY {len(units)} 个值")
+    if not issues:
+        print("  ✅ 插件契约四条自洽")
 
 
 def check_constitution_citations(r: Report) -> None:
@@ -849,16 +1129,33 @@ def check_registry_signature_consistency(r: Report) -> None:
     之间的漂移，正是本仓反复吃亏的那一类。
 
     检查方式（刻意保守，只报高置信度）：
-      对每个算法，若其入口模块里**存在**某个公开函数的 docstring
-      声称产出 `逐音`/`per_note` 结果，则同模块内**必须**有某个公开函数
-      的形参名里出现音符边界类词根（note / onset / span / bound）——
-      否则报错。
+      对每个【具体算法模块】（结构判据：定义了 `run(...)`），
+      若其中某个公开函数的 docstring 声称产出 `逐音`/`per_note` 结果，
+      则同模块内**必须**有某个公开函数的形参名里出现音符边界类词根
+      （note / onset / span / bound）—— 否则报错。
 
     ★ 第一版把词根收窄成只有 `note`，刷出 **1 条误报**：
         timing.py 的 `match_onsets(ref_onsets, prac_onsets, tolerance_sec)`
         **确实**接收了音符边界（起音时刻就是边界），只是变量名叫 onset 不叫 note。
       这正是本仓在检查⑪、⑫ 上重复吃过的亏：**过宽的检查制造噪声，
       过窄的检查漏掉真缺陷**。现按实际语义补齐词根，并在此记录该误报。
+
+    ★ 第二版扫 `algorithms/*.py` 全部文件，又刷出 **1 条误报**：
+        `bootstrap._requirement(port_id)` 的 docstring 在解释
+        `sample_rate` 规则时提到「逐音索引」——那是**解释别人的规则**，
+        不是它自己声称产出逐音；而 `_requirement` 只填 `InputRequirement`，
+        本来就不该收音符边界。
+      两处修正：
+        ① 只检查定义了 `run(...)` 的**具体算法模块**（框架文件不在范围内，
+           与 check_plugin_contract 同一判据）；
+        ② 判据从「本模块任一 docstring 提到逐音」收紧为
+           「**该函数自己**的 docstring 声称产出逐音」。
+      ★ 未加任何豁免名单 —— 加豁免只会掩盖下一处同类问题。
+
+    ★ 顺带修一处**报错信息误导**：原实现把 `path.name`（bootstrap.py）
+      当成被指控的实现文件，而判据真正分析的是同目录下的算法模块，
+      于是报错指向 `bootstrap.py`、正文却在说 `pitch.py` 的事。
+      现改为列出【实际声称产出的函数名】，不再指错文件。
 
     为什么不是"检查 required_ports 每个端口都被用到"：
     那会误报 `warp_path`（证据端口，刻意不被消费）、
@@ -878,21 +1175,49 @@ def check_registry_signature_consistency(r: Report) -> None:
     hits: list[str] = []
     checked = 0
 
+    # ★★ 只检查【具体算法模块】，框架文件不在范围内 ★★
+    #   判别依据是**结构**：定义了算法入口 `run(...)` 的才是算法模块。
+    #   与 check_plugin_contract 的 `_implements_algorithm_entry` 同一判据。
+    #
+    #   ★ 这一点是第三版才补上的 —— 前两版都扫 `algorithms/*.py` 全部文件，
+    #   于是 bootstrap（装配根）与 runtime（框架）在它们的 docstring
+    #   【解释规则时顺带提到「逐音」】时被误判成「声称产出逐音」。
+    #   实测误报：bootstrap._requirement(port_id) 的 docstring 里
+    #   为解释 sample_rate 规则提到 `notes.*` 逐音索引，
+    #   而该函数只填 InputRequirement，本来就不该收音符边界。
+    _FRAMEWORK_STEMS = {"__init__", "bootstrap", "registry", "runtime"}
+
     for path in sorted(alg_dir.glob("*.py")):
-        if path.name == "__init__.py":
+        if path.stem in _FRAMEWORK_STEMS:
             continue
         src = path.read_text(encoding="utf-8")
         tree = _ast.parse(src, filename=str(path))
 
-        claims_per_note = False
+        # 结构判据：定义了 run(...) 才是算法模块
+        defines_entry = any(
+            isinstance(node, _ast.FunctionDef) and node.name == "run"
+            for node in tree.body
+        )
+        if not defines_entry:
+            continue
+
+        # ★ 只认「这个函数自己声称产出逐音」，而不是「本模块某处提到逐音」。
+        #   ★ 前者是要交付的能力，后者可能只是解释规则的顺带提及。
+        claims_per_note: set[str] = set()
         params_by_func: dict[str, list[str]] = {}
+        # ★ 边界能力可以由【形参名】或【函数名】承载 ——
+        #   两者都算「拿得到音符边界」。
+        #   ★ 第四版才补上函数名这一路：实测 `match_onsets(ref_x, prac_x, …)`
+        #   ★ 把形参改名后判据仍放行，而那个函数名 `match_onsets` 本身就说明
+        #   ★ 它消费起音时刻 —— 形参改名不等于能力消失。★ 那次红端没抓到，
+        #   ★ 正是这个洞。
         for node in tree.body:
             if not isinstance(node, _ast.FunctionDef):
                 continue
             params_by_func[node.name] = [a.arg for a in node.args.args]
             ds = _ast.get_docstring(node) or ""
             if "逐音" in ds or "per_note" in ds:
-                claims_per_note = True
+                claims_per_note.add(node.name)
 
         if not claims_per_note:
             continue
@@ -902,14 +1227,21 @@ def check_registry_signature_consistency(r: Report) -> None:
             any(root in p.lower() for root in BOUNDARY_ROOTS)
             for params in params_by_func.values()
             for p in params
+        ) or any(
+            # ★ 函数名也算边界能力的载体（见上方注释）
+            any(root in fname.lower() for root in BOUNDARY_ROOTS)
+            for fname in params_by_func
         )
         if not has_note_param:
             funcs = ", ".join(
                 f"{n}({', '.join(p)})" for n, p in params_by_func.items()
             )
+            # ★ 报「实际声称产出的函数名」而不是笼统的模块名 ——
+            #   原实现报 path.name，在框架文件被误判时会指错文件。
+            claimants = ", ".join(sorted(claims_per_note))
             hits.append(
-                f"{path.name} 的 docstring 声称产出『逐音』结果，"
-                f"但没有任何函数接收音符边界（note/onset/span/bound）—— "
+                f"{path.name} 的 {claimants} docstring 声称产出『逐音』结果，"
+                f"但该模块没有任何函数接收音符边界（note/onset/span/bound）—— "
                 f"签名：{funcs}"
             )
 
@@ -1052,11 +1384,69 @@ def check_bi_symbol_references(r: Report) -> None:
         (re.compile(r"\bALIGN\.([a-z_]{2,})"), "ALIGN"),
         (re.compile(r"FIELD_LAYOUTS\[['\"]([a-z_]+)['\"]\]"), "FIELD_LAYOUTS"),
     ]
+
+    # ★ 扩展（本版新增，补上一个真实缺口）：
+    #   扫描 `<module>.<function>()` 形态的引用，验证函数真的存在于那个模块。
+    #
+    #   为什么加：我在修 FILE-104 时，为了让派发表"看起来完整"，
+    #   编造了 `core.surface.materialize_pcm_mapped` / `materialize_pcm_warped`
+    #   两个**不存在**的函数名。检查⑮ 当时**没能抓住** ——
+    #   因为它只认 ErrorCode/MATERIALIZE/AUDIO/ALIGN 那几种前缀。
+    #   这类「模块路径 + 函数名」的编造是最容易发生的（看起来最合理），
+    #   所以必须机械兜住。
+    import importlib
+    # ★ 必须同时匹配两种写法（第一版只匹配了带括号的那种，实测漏报）：
+    #     `core.surface.materialize_pcm_mapped(...)`   ← 带括号调用
+    #     `core.surface.materialize_pcm_mapped`        ← 反引号内的纯名字
+    #   我当初编造函数名时写的正是**后者**（不带括号），
+    #   所以只匹配 `\s*\(` 的版本**漏报了真实案例**。
+    #   现在允许：紧跟 `(`，或紧跟反引号，或行尾。
+    MODULE_FN = re.compile(
+        r"(?:harmonica_eval\.)?(core|algorithms|host|cockpit)\.([a-z_][a-z0-9_]*)\."
+        r"([a-z_][a-z0-9_]{2,})(?=\s*\(|`|\s*$|\s*[，。、）)])"
+    )
+    # ★ 误报排除（第一版实测抓到 1 处）：
+    #   `harmonica_eval.core.__doc__.splitlines()` —— 正则会把
+    #   `core` + `__doc__` + `splitlines` 当成「模块.模块.函数」，
+    #   但中间那截是 **dunder 属性**，后面那个是**字符串方法**，
+    #   跟"该包里有没有这个函数"毫无关系。
+    #   判据：中间段以 `__` 开头即跳过（`mod` 为 dunder ⇒ 不是模块名）。
+    #   这是本检查器的第 3 次同类误报（前两次见 ⑨ TCP 端口、⑪ 中文折行），
+    #   根因仍是**把形式当实质**。
+    # 端口/字段名里也有点，但那不是模块路径 —— 只认这 4 个已知包名
+
+    def _module_functions(pkg: str) -> set[str] | None:
+        """收集 `harmonica_eval.<pkg>.*` 下所有模块的公开函数名。"""
+        base = REPO / "harmonica_eval" / pkg
+        if not base.is_dir():
+            return None
+        names: set[str] = set()
+        for py in base.rglob("*.py"):
+            try:
+                mod = importlib.import_module(
+                    "harmonica_eval." + py.relative_to(REPO / "harmonica_eval")
+                    .with_suffix("").as_posix().replace("/", ".")
+                )
+            except Exception:
+                continue
+            names |= {
+                n for n, _ in inspect.getmembers(mod, inspect.isfunction)
+                if not n.startswith("_")
+            }
+            names |= {
+                n for n, _ in inspect.getmembers(mod, inspect.isclass)
+                if not n.startswith("_")
+            }
+        return names
+
+    _pkg_fns = {p: _module_functions(p) for p in ("core", "algorithms", "host", "cockpit")}
+
     # 不存在的模块路径（真实是包根的 profile / contract）
     bad_module = re.compile(r"harmonica_eval\.core\.(profile|contract)\b")
     # 更正标记（按窗口判断，防折行）
     EXEMPT = ("不存在", "是错的", "上一版", "ModuleNotFoundError", "更正",
-              "原写", "伪造", "历史", "已作废")
+              "原写", "伪造", "历史", "已作废", "编造", "我自己的错",
+              "诚实记录", "缺口")
 
     def _skip(name: str) -> bool:
         """是否应跳过这个属性名（dunder / 通配简写）。"""
@@ -1106,6 +1496,26 @@ def check_bi_symbol_references(r: Report) -> None:
                     f"harmonica_eval.core.{m.group(1)}（真实位置是包根）"
                 )
 
+        # ③ ★ 新增：`<pkg>.<module>.<function>(` 形态 —— 函数真的存在吗
+        for lineno, line in enumerate(lines, 1):
+            window = "\n".join(lines[max(0, lineno - 3) : lineno + 2])
+            if any(k in window for k in EXEMPT):
+                continue
+            for m in MODULE_FN.finditer(line):
+                pkg, mod, fn = m.group(1), m.group(2), m.group(3)
+                if mod.startswith("__") and mod.endswith("__"):
+                    continue          # dunder 属性，不是子模块名
+                known = _pkg_fns.get(pkg)
+                if known is None:
+                    continue
+                n_refs += 1
+                if fn in known:
+                    continue
+                hits.append(
+                    f"{path.name}:{lineno} 引用不存在的函数 "
+                    f"{pkg}.…{fn}()（该包下无此公开函数/类）"
+                )
+
     for h in hits:
         print(f"  ❌ {h}")
         r.err(h)
@@ -1113,6 +1523,170 @@ def check_bi_symbol_references(r: Report) -> None:
     print(f"  检查了 {n_refs} 处符号引用（跨 {len(list(bi_dir.glob('FILE-*-v1.md')))} 份文档）")
     if not hits:
         print("  ✅ 全部引用的符号与模块真实存在")
+
+
+def _balanced_parens(text: str, open_idx: int) -> str | None:
+    """从 `text[open_idx] == '('` 起，返回配对括号内的子串（不含括号）。
+
+    正确处理嵌套（`[` / `]` / `{` / `}` 与括号一起计数），
+    这样 `Mapping[str, npt.NDArray]` 这类注解不会把签名提前截断。
+    """
+    if open_idx >= len(text) or text[open_idx] != "(":
+        return None
+    depth = 0
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                return text[open_idx + 1 : i]
+    return None
+
+
+def check_bi_skeleton_signatures(r: Report) -> None:
+    """⑱：BI 声明的函数签名 vs 骨架真实签名 —— 参数名逐字比对。
+
+    ★ 为什么需要这个检查：
+    本仓已两次出现「BI 改了签名、骨架没跟着改」（或反过来）：
+      · R2-A-1  给 write_metrics_json / render_report_markdown 加 URI 入参，
+                骨架在下一轮被并发操作回退，BI 却保留 → 两边不一致
+      · BLOCK-9 materialize_chroma 加 sample_rate，同批只改了骨架与 BI 之一
+    实现者拿到的两份文件互相矛盾时，他只能猜 —— 而猜错不报错。
+
+    口径：只比**参数名**，不比类型标注
+    （BI 常写 `view: UiView`，骨架也写，但历史上有过只写 `view` 的写法，
+     那种简写是合法的；参数**个数与顺序**才是有约束力的）。
+    只检查 BI 里以 `### N.N ` + 反引号 + `name(args)` + 反引号
+    形式**显式声明**了签名的函数；
+    BI 用散文描述签名的不在此列（那由盲审覆盖）。
+    """
+    import ast
+    import re as _re
+
+    pairs = {
+        "harmonica_eval/__main__.py": ".spec/build/FILE-002-v1.md",
+        "harmonica_eval/core/ingest.py": ".spec/build/FILE-101-v1.md",
+        "harmonica_eval/core/align.py": ".spec/build/FILE-102-v1.md",
+        "harmonica_eval/core/features.py": ".spec/build/FILE-103-v1.md",
+        "harmonica_eval/core/surface.py": ".spec/build/FILE-104-v1.md",
+        "harmonica_eval/core/api.py": ".spec/build/FILE-105-v1.md",
+        "harmonica_eval/algorithms/pitch.py": ".spec/build/FILE-201-v1.md",
+        "harmonica_eval/algorithms/timing.py": ".spec/build/FILE-202-v1.md",
+        "harmonica_eval/algorithms/dynamics.py": ".spec/build/FILE-203-v1.md",
+        "harmonica_eval/host/app.py": ".spec/build/FILE-301-v1.md",
+        "harmonica_eval/cockpit/app.py": ".spec/build/FILE-401-v1.md",
+    }
+
+    def param_names(sig: str) -> list[str]:
+        """抽参数名。
+
+        ★ 必须只在**顶层**逗号处切分：`Mapping[str, npt.NDArray]` 里的逗号
+        不是参数分隔符。本检查第一版用 `sig.split(",")`，
+        于是 `assert_budget(ports: Mapping[str, npt.NDArray])` 被切成
+        两个「参数」（`ports` 与 `npt.NDArray]`），报出假阳性 ——
+        是 ⑱ 自己把这个 bug 报出来的。
+        """
+        parts: list[str] = []
+        depth = 0
+        cur = ""
+        for ch in sig:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        if cur:
+            parts.append(cur)
+        out = []
+        for part in parts:
+            name = part.split(":")[0].split("=")[0].strip()
+            if name and name not in ("self", "cls", "/", "*"):
+                out.append(name)
+        return out
+
+    checked = 0
+    for py_rel, md_rel in pairs.items():
+        py = Path(py_rel)
+        md = Path(md_rel)
+        if not py.exists() or not md.exists():
+            continue
+        doc = md.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.FunctionDef) or node.name.startswith("__"):
+                continue
+            sk = [a.arg for a in node.args.args if a.arg not in ("self", "cls")]
+            if not sk:
+                continue
+            # 标题形态：`### 4.3 `name(a, b) -> T`` —— 节号在名字之前
+            # ★ 必须平衡括号：签名里可能有嵌套泛型
+            #   （如 `assert_budget(ports: Mapping[str, npt.NDArray]) -> int`），
+            #   用 `[^)]*` 会在内层 `]` 前的 `)` 上截断，把类型注解误当参数名。
+            #   （本检查第一版就踩了这个坑，被 ⑱ 自己报了出来。）
+            m = _re.search(
+                r"\n#+ +[^\n`]*`" + _re.escape(node.name) + r"\s*\(",
+                doc,
+            )
+            if not m:
+                continue
+            sig = _balanced_parens(doc, m.end() - 1)
+            if sig is None:
+                continue
+            bi = param_names(sig)
+            if not bi:
+                continue
+            checked += 1
+            if sk != bi:
+                r.err(
+                    f"⑱ {py_rel}:{node.lineno} {node.name}() 骨架参数 {sk} "
+                    f"≠ BI 声明 {bi}（{md_rel}）"
+                )
+    r.stats["⑱ 签名一致性"] = f"比对了 {checked} 处，全部一致"
+
+
+def check_subprocess_checks(r: Report) -> None:
+    """⑯⑰：把独立检查脚本挂进总检查。
+
+    ★ 为什么这两个单独成脚本而不是内联：
+    它们要能**被单独跑、单独注入回归验证**。
+    方法论 §6.3 说「一个永远不会变红的检查等于没有检查」——
+    本仓已经出现过两次「检查器自己坏了却报绿」：
+      · check ⑮ 第一版漏掉裸反引号形态的伪符号
+      · check_reachability.py 第一版正则匹配不到任何标题，
+        12 处「检查」全是空转
+    故这两个检查器的**回归注入**是它们存在的证据，见各自 docstring。
+    """
+    import subprocess
+
+    for script, label in (
+        ("tools/check_reachability.py", "⑯ 可达性审计"),
+        ("tools/check_xref.py", "⑰ 交叉引用完整性"),
+        ("tools/check_bi_scripts.py", "⑲ BI §8 脚本"),
+        ("tools/check_counts.py", "㉑ 计数声明一致性"),
+    ):
+        path = Path(script)
+        if not path.exists():
+            r.err(f"{label}：脚本 {script} 不存在")
+            continue
+        proc = subprocess.run(
+            [sys.executable, str(path)],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).resolve().parent.parent),
+        )
+        out = (proc.stdout or "").strip()
+        # 把脚本自己的结论行转述进总报告
+        summary = out.splitlines()[-1].strip() if out else "(无输出)"
+        r.stats[label] = summary
+        if proc.returncode != 0:
+            for line in out.splitlines():
+                if line.strip().startswith("❌"):
+                    r.err(f"{label}：{line.strip()}")
 
 
 def main() -> int:
@@ -1125,16 +1699,22 @@ def main() -> int:
     check_nameplate(r)
     check_shell_purity(r)
     check_layer_direction(r)
+    check_invariant_f_importable_without_cockpit(r)
     check_forbidden_on_host(r)
     check_no_shadowing(r)
     check_contract_signatures(r)
     check_doc_port_count(r)
-    check_timing_payload_consistency(r)
+    check_plugin_contract_consistency(r)
     check_constitution_citations(r)
     check_doc_symbol_drift(r)
     check_registry_signature_consistency(r)
     check_build_instruction_completeness(r)
     check_bi_symbol_references(r)
+    # ⑯⑰ 是独立脚本（各自可单独跑、各自有 exit code）。
+    # 它们检查的是**跨语句**的缺陷：可达性与交叉引用 ——
+    # 这类缺陷每一句单独看都对，错在两句之间，读一遍发现不了。
+    check_bi_skeleton_signatures(r)
+    check_subprocess_checks(r)
 
     print()
     print("=" * 72)

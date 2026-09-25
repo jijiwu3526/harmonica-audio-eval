@@ -57,6 +57,7 @@ import ast
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Sequence
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "harmonica_eval"
@@ -64,6 +65,10 @@ sys.path.insert(0, str(REPO))
 
 # Jaccard 相似度高于此值 → 视为同一坨
 MERGE_THRESHOLD = 0.34
+
+
+class ClusterDataUnavailableError(RuntimeError):
+    """组件推导所需的插件声明尚未装配，当前不能诚实聚类。"""
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -122,7 +127,53 @@ def _import_edges(tree: ast.AST, mod: str, path: Path, mods: dict[str, Path]) ->
     return out
 
 
-def extract_signals() -> dict:
+def load_registry_specs() -> tuple[object, ...]:
+    """取得已装配 Registry 的 PluginSpec 清单。
+
+    ★ 本工具【不】import 被分析的具体算法实现，只经 bootstrap 这个唯一
+      装配根取得声明式清单（FILE-206 装配根唯一性）。
+
+    ★ 取不到才抛 ClusterDataUnavailableError，判据是【真实的】：
+      bootstrap 抛异常 / 清单为空 / 元素缺字段。
+      ★ 绝不按「文件看起来是空壳」判断——那是阶段态判据，注入完成即失效，
+        会让本工具在项目推进后永远拒绝工作。
+    """
+    try:
+        from harmonica_eval.algorithms.bootstrap import build_default_registry
+    except Exception as exc:
+        raise ClusterDataUnavailableError(
+            f"无法导入装配根 harmonica_eval.algorithms.bootstrap：{exc}"
+        ) from exc
+    try:
+        specs = tuple(build_default_registry().list())
+    except Exception as exc:
+        raise ClusterDataUnavailableError(
+            f"build_default_registry() 失败，无法取得已装配清单：{exc}"
+        ) from exc
+    if not specs:
+        raise ClusterDataUnavailableError(
+            "已装配 Registry 为空（build_default_registry().list() 返回空序列）"
+        )
+    for spec in specs:
+        if not hasattr(spec, "algorithm_id") or not hasattr(spec, "required_inputs"):
+            raise ClusterDataUnavailableError(
+                f"已装配清单元素缺 algorithm_id/required_inputs：{spec!r}"
+            )
+    return specs
+
+
+def extract_signals(plugin_specs: Sequence[object] | None = None) -> dict:
+    """提取纯 AST / 声明式信号，不 import 被分析的具体算法实现。
+
+    ``plugin_specs`` 缺省时由 ``load_registry_specs()`` 自行从已装配
+    Registry 取得（算法入口模块与 required_inputs 端口足迹这两个关键信号）。
+    ★ 「数据面不足」只按【真实取不到】判定，★ 绝不按「文件看起来是空壳」——
+      那会让本工具在注入完成后永远拒绝工作。
+    ★ 也绝不把「缺数据」伪装成「推导为空」。
+    """
+    if plugin_specs is None:
+        plugin_specs = load_registry_specs()
+
     files = sorted(PKG.rglob("*.py"))
     mods = {_module_name(p): p for p in files}
 
@@ -170,7 +221,7 @@ def extract_signals() -> dict:
                 used.add(node.attr)
         footprint[mod] = used
 
-    # ---- 端口足迹：profile.PORTS[*].produced_by / ALGORITHMS[*].required_ports ----
+    # ---- 端口足迹：profile.PORTS[*].produced_by / PluginSpec.required_inputs ----
     try:
         from harmonica_eval import profile  # noqa: PLC0415
         port_producer = {p.port_id: p.produced_by for p in profile.PORTS}
@@ -180,12 +231,23 @@ def extract_signals() -> dict:
         port_producer, port_family = {}, {}
 
     try:
-        from harmonica_eval import algorithms  # noqa: PLC0415
-        algo_requires = {a.algorithm_id: tuple(a.required_ports) for a in algorithms.ALGORITHMS}
-        # 算法入口函数所在模块
-        algo_module = {a.algorithm_id: a.entry.__module__ for a in algorithms.ALGORITHMS}
+        algo_requires = {}
+        algo_module = {}
+        for spec in plugin_specs:
+            try:
+                algo_requires[spec.algorithm_id] = tuple(
+                    requirement.port_id for requirement in spec.required_inputs
+                )
+                algo_module[spec.algorithm_id] = spec.entry.__module__
+            except AttributeError as exc:
+                raise ClusterDataUnavailableError(
+                    "已提供的插件声明不完整：每个条目必须是含 "
+                    "algorithm_id / entry / required_inputs 的 PluginSpec。"
+                ) from exc
+    except ClusterDataUnavailableError:
+        raise
     except Exception as exc:  # pragma: no cover
-        print(f"  ⚠️  读 algorithms.ALGORITHMS 失败：{exc}")
+        print(f"  ⚠️  读插件声明失败：{exc}")
         algo_requires, algo_module = {}, {}
 
     return {
@@ -326,7 +388,12 @@ def main() -> int:
     ap.add_argument("--threshold", type=float, default=MERGE_THRESHOLD)
     args = ap.parse_args()
 
-    sig = extract_signals()
+    try:
+        sig = extract_signals()
+    except ClusterDataUnavailableError as exc:
+        print("❌ 组件聚类未执行：数据面不足。", file=sys.stderr)
+        print(f"原因：{exc}", file=sys.stderr)
+        return 1
     feats = feature_sets(sig)
 
     print("=" * 74)
@@ -345,7 +412,7 @@ def main() -> int:
     for producer, ports in sorted(fams.items()):
         print(f"   {producer:18s} 生产 {len(ports):2d} 个：{', '.join(ports)}")
 
-    print("\n【S3】算法消费（algorithms.ALGORITHMS → required_ports）")
+    print("\n【S3】算法消费（PluginSpec.required_inputs → required_inputs[*].port_id）")
     for aid, ports in sorted(sig["algo_requires"].items()):
         print(f"   {aid:9s} 需要 {len(ports)} 个端口：{', '.join(ports)}")
 
