@@ -1,0 +1,33 @@
+candidate_name,source_file_line,rejection_reason,rejection_basis,reconsiderable
+Agent 生成自然语言反馈,SPEC.md:13,"自然语言反馈与 Agent 生成不属于本项目，未来另立项目。","AGENTS.md:10-14 项目铁律：只做双音频客观数值指标；禁止自然语言反馈、Agent、LLM 评价。",否；仅在另立项目后重议
+AI 审美评价,SPEC.md:15,"与只输出客观、可解释差异指标的边界冲突。","AGENTS.md:10-14 项目铁律：禁止 AI 审美评价。",否
+生成理想演奏,SPEC.md:15,"项目不生成理想演奏。","AGENTS.md:10-14 项目铁律：禁止生成理想演奏。",否
+面向终端用户的产品化 UI,SPEC.md:15,"v0.1 仅允许 Mac 本机开发者调试视图，不是面向学习者的成品界面。","AGENTS.md:10-14 项目铁律：禁止 UI/产品化。",否；手机端/产品化须另立项目并由负责人裁定
+模型训练,SPEC.md:15,"项目范围不包含模型训练。","AGENTS.md:10-14 项目铁律：禁止模型训练。",否
+颤音/压音特征,SPEC.md:87,"稳定性与区分度均为中等且实现成本中等，被排到二期。","AGENTS.md:14 项目铁律：不得引入 SPEC.md 未列入首期范围的特征维度。",是；首期完成并由负责人批准后进入二期
+MFCC/谱质心等音色特征,SPEC.md:88,"对麦克风、距离与环境敏感，稳定性低；设备归一化完成前暂缓。","AGENTS.md:14 项目铁律：不得引入 SPEC.md 未确认的特征维度；SPEC.md:78-90 特征性价比裁定。",是；需先完成设备归一化并由负责人批准
+颤音/压音进入首期,SPEC.md:90,"首期建议只做音高、节奏、力度三维，颤音/压音不在首期。","AGENTS.md:14-15 项目铁律：不得自行扩大 SPEC.md 边界。",是；由负责人确认二期范围后
+预计算全部频谱字节（愿望清单）,COMPONENTS.md:355-359,"三档 STFT、frame bank、flux、zero crossing 等按算法采购单归纳的愿望清单属于 L2 越权并撤回。","COMPONENTS.md:6-8 宪章 §43 Brownfield：冻结行为、不冻结结构；COMPONENTS.md:330-359 profile 职责收敛。",是；L2 测得预算后可按需提出新候选
+动态插件系统（dylib/扫描/ABI discovery/版本协商）,COMPONENTS.md:37,"v0.1 明确不做；逻辑插件已足够。","COMPONENTS.md:6-8 宪章 §18 逻辑插件已够；AGENTS.md:16 零噪声原则。",是；v0.1 之后按真实需求重评
+检验站作为产品组件,COMPONENTS.md:38,"检验站不是产品组件，应归铸造厂 L5 验证角色与 Evidence。","COMPONENTS.md:6-8 宪章 §36、§20、§6-L5；COMPONENTS.md:12-19 自我纠错。",否；角色定位已冻结
+把 Canonicalizer/Alignment/Materializer/Port Store/Foundry 建模为独立组件,COMPONENTS.md:34,"这些内部模块外部不可见，没有独立可承包契约，只是 C2 内部模块。","COMPONENTS.md:25-27 宪章 §8 停止下钻判据：能作为黑盒独立承包才构成组件。",否；内部模块划分可随实现变化，但不能再冒充 L1 组件
+把算法执行编排建模为独立组件,COMPONENTS.md:35,"编排是 C1 的既有职责，不是独立组件。","COMPONENTS.md:35 + COMPONENTS.md:103-106 C1 保证 G2：编排逻辑只存在于 C1。",否
+把 Asset Manager/Result Store 建模为独立组件,COMPONENTS.md:36,"它们是 C1 会话内状态或 C2 内部职责，不是独立组件。","COMPONENTS.md:35-36 组件粒度收敛；COMPONENTS.md:77-125 四组件职责划分。",否
+Web Cockpit 命名与 Web/HTTP 实现路线,COMPONENTS.md:258-266,"C4 实际是 Mac 本机进程内开发者视图；Web 名称会误导去找 Web 框架和 HTTP 服务，超出当前边界。","SPEC.md:17-22 负责人裁定 Mac 开发者视图先行；AGENTS.md:10-14 禁止产品化 UI。",否；现名已定为 Developer Cockpit
+按需计算频谱的旧架构（lazy/cache.py/store.py）,PLAN.md:12-33,"要求 Core 为算法现场算数据，须附加特征声明→解析→版本→缓存失效→失败语义协议，使 Core 外部接口成为插件需求的函数。","PLAN.md:21-32 项目铁律：Core 预生成、端口清单封闭；COMPONENTS.md:396-407 负责人明确否决该方案。",否；除非负责人撤销现行架构裁定
+memmap,PLAN.md:35-45,"原型阶段 Mac 先行，手机内存不是硬约束；为不存在的手机约束做架构妥协。","PLAN.md:35-45 负责人裁定；AGENTS.md:16 零噪声、未要求不实现。",是；手机移植前基于真机预算重评
+LRU 缓存,PLAN.md:44,"本轮不引入，数据已在内存中。","PLAN.md:35-45 负责人裁定；AGENTS.md:16 零噪声。",是；出现已测量的性能瓶颈后可重评
+HDF5,PLAN.md:44,"本轮不引入任何存储后端。","PLAN.md:35-45 负责人裁定；AGENTS.md:16 零噪声。",是；有可测量的持久化需求后重评
+Zarr,PLAN.md:44,"本轮不引入任何存储后端。","PLAN.md:35-45 负责人裁定；AGENTS.md:16 零噪声。",是；有可测量的持久化需求后重评
+面向手机端的适配与优化,PLAN.md:44-45,"Mac 先行，手机端不是本轮范围。","PLAN.md:39-45 负责人裁定；SPEC.md:21-22 平台路线。",是；Mac 核心调试完成并由负责人启动移植后
+基于 CENS/chroma-only 的唯一对齐路线,SPEC.md:103-105,"chroma 是八度不变特征，会丢失八度信息、无法反映走音，禁止作为唯一对齐依据。","SPEC.md:96-108 §5 行为契约 4；口琴单声部必须保留绝对音高信息。",否；可作粗对齐候选之一，但不能作为唯一依据
+未建立时间映射时直接逐点比较的降级路线,SPEC.md:100-102,"会把没有有效映射的两段音频硬比，产出看似有效实则无意义的结果。","SPEC.md:96-108 §5 行为契约 3；AGENTS.md:17 不确定时显式失败。",否
+把对齐算法写死到 SPEC（先前提出的具体算法冻结）,SPEC.md:110-114,"具体算法属于 L2 实现选型，规格应冻结行为而不是焊死结构。","SPEC.md:59-74 更正裁定与 COMPONENTS.md:442；宪章 §43 冻结行为、不冻结结构。",否
+把音高引擎选择直接冻结而不做对照实验,SPEC.md:143-148,"神经网络与传统 DSP 都只是实现候选，最终选择前必须用同一批音频做独立对照实验。","SPEC.md:131-150 §7 行为契约 5；AGENTS.md:15 未确认项不得进入默认路径。",是；完成 SPEC §7.5 对照实验后可重新裁定
+冻结前提前注入实现代码,PLAN.md:228-235,"未完成空壳与盲审前禁止写实现代码。","PLAN.md:198-208 执行流程第 4-6 步；AGENTS.md:15-16 未确认项不得实现、零噪声。",否；须先完成盲审与 CAST-FREEZE
+fastdtw,.spec/review/round-2/report-B.md:481-483,"规格明确列为不可用；审查时实测未安装，且 DTW 必须用 scipy 或纯 numpy 实现。",".spec/review/round-2/report-B.md:448-483 对 FILE-102 的实测与建议；依赖白名单约束。",否；若冻结依赖与资源预算发生变化，可由负责人重开候选
+dtw,.spec/review/round-2/report-B.md:481-483,"规格建议明确列为不可用，要求以 scipy 或纯 numpy 实现 DTW。",".spec/review/round-2/report-B.md:448-483 对 FILE-102 的实测与建议。",否；若改用第三方包，需负责人批准依赖变更
+tslearn,.spec/review/round-2/report-B.md:481-483,"规格建议明确列为不可用，要求以 scipy 或纯 numpy 实现 DTW。",".spec/review/round-2/report-B.md:448-483 对 FILE-102 的实测与建议。",否；若改用第三方包，需负责人批准依赖变更
+把 scipy.spatial.distance.cdist 列为不可用,.spec/review/round-2/report-B.md:448-483,"审查实测 scipy 1.17.1 中 cdist 存在且可用；禁用它会改用高内存广播并违背内存约束。",".spec/review/round-2/report-B.md:459-479 真实运行证据；同报告 :481-483 建议恢复该依赖。",是；应撤销旧禁令，但需同步修正 FILE-102 冻结规格
+将谱面/乐句自动分段作为 v0.1 默认,SPEC.md:118-129,"C/D 分段成本更高或需要谱面，是否采用仍待负责人决定。","SPEC.md:15-16、118-129；AGENTS.md:15 未确认项不得进入主流程默认路径。",是；负责人确认 §6 后可采用
+将 sections 写入 v0.1 metrics.json,SPEC.md:44-74,"§6 尚未确认，sections 依赖未确认分段方式；且旧 JSON 片段已降级为示意。","SPEC.md:59-74 ★更正；AGENTS.md:15 未确认项不得实现。",是；负责人确认 §6 后重新设计

@@ -1,0 +1,13 @@
+# ★ Python 依赖基线
+# 版本取自 2026-09-27 本机 Python 3.13.13 / arm64 的实际安装版本。
+# Python 要求：>=3.11（由已安装 NumPy 2.4.4 与 SciPy 1.17.1 的 Requires-Python 共同约束）。
+
+# 必需：核心数值类型、音频读写、MIDI 解析、采样重采样、pYIN 音高质检与 DTW 实验。
+numpy==2.4.4
+soundfile==0.13.1
+mido==1.3.3
+scipy==1.17.1
+librosa==0.11.0
+
+# 可选：仅用于数据集构建时生成波形/音高质检图；不生成质检图时可不安装。
+matplotlib==3.10.9
