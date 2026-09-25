@@ -58,6 +58,23 @@ C4 缺席时，正式无头入口仍是 `harmonica_eval/__main__.py`：接收参
 - **零依赖铁律**：页面为原生 HTML/CSS/JS，无 npm、无 CDN、无外部字体、无图表库、无 `<script src>`、无 `<link>`。★ 「让手机能用」指的是**网络可达**（监听地址 + viewport + 响应式 + 44px 触控目标），**不是**引入依赖。
 - **监听边界**：恒绑 `LOCAL_BIND_HOST`。★ 负责人裁定「直接支持局域网访问，这只是测试，没有安全问题」，故值为 `0.0.0.0`；但**不加认证、不做 CORS、不设 Cookie、不做 HTTPS、不做端口转发、不做开机自启**。★ `0.0.0.0` 是监听地址、不可直接访问，故启动时另探真实 IP 并打印两个可点击 URL。界面进程退出即消失。
 
+## 选曲 → 自动跑完整轮（★ 主流程）
+
+启动横幅已自动跑过一轮，所以页面首次呈现就是 `DATA_READY` + 有指标。此时 `SET_REFERENCE` / `SET_PRACTICE` **在当前状态下非法**，那两个按钮随之置灰——这是正确的，不是故障。
+
+要换曲子，**用下拉框**：任一 `<select>` 的 `change` 事件触发 `runSelection(ref, pra)`，它**串行**下发五条命令：
+
+```
+RESET → SET_REFERENCE → SET_PRACTICE → BUILD_SURFACE → RUN_ALGORITHMS
+```
+
+- **为什么先 RESET**：`SET_*` 只在 `{CREATED, INPUT_READY}` 合法；不重置就发，会被内核 400 拒绝。跳过 RESET 的反证见 `tests/test_cockpit_flow.py::test_skipping_reset_is_rejected_by_kernel`。
+- **为什么串行**：服务端是 `ThreadingHTTPServer`，并发 POST 落不同线程、到达顺序不保证。顺序是承重的。
+- **换曲即作废上一次结果**：新曲名下挂旧数字是本项目最防的假绿。整轮成功后 reload，页面只呈现新曲的指标。
+- **`settle()` 轮询到「真有指标」才 reload**：服务端有 0.5s 轮询线程会在 `build_surface` 途中刷出 `BUILDING` 帧；跑完立刻 reload 可能把用户丢到一个「进度 0%、无指标」的页面。
+- **只改一个下拉**：每次 change 重读**两个**下拉的现值，各发一次，所以换一个不必重选另一个。选择记忆在 `localStorage`（纯客户端，不动冻结契约）。
+- **`path-input` 保留**：下拉之外的任意路径仍可手打，走原有按钮路径。清单来自 `/dataset` 与首屏内嵌（`scan_dataset()` 的真实返回），不写死任何曲名。
+
 ## 相关规格
 
 - 产品边界与 Mac/开发者例外：[`SPEC.md` §1](../../SPEC.md)（`SPEC.md:9-24`）。
@@ -98,3 +115,27 @@ C4 缺席时，正式无头入口仍是 `harmonica_eval/__main__.py`：接收参
 - **陈旧的下游提示不能作为端口或注册清单**：`.spec/prompts/COMP-C3/downstream.md` 仍写旧注册/端口/时间轴口径；当前 C3 入口应看 FILE-200/205 与源码，历史提示仅作追溯。（`.spec/prompts/COMP-C3/downstream.md:42-92`；`.spec/build/FILE-200-v1.md:112-127`、`:163-172`；`.spec/build/FILE-205-v1.md:82-194`）
 - **🔴 GC-204-01：C1 session API 尚未统一。** 这不由 C4 实现解决，但当前 HostApp 快照所依赖的会话句柄/状态投影仍受显式 `session_id` 与隐式当前会话的未决冲突影响。★ **实测补充**：`UiProjectionPort` 只有 `snapshot` / `submit` 两个操作且 `submit` 无 `session_id` —— 这与「一个前台看一个会话」一致（`session_id` 在 `UiView` 快照里），**但 HostApp 本身持有完整 HostContract（含显式 `session_id` 的 `set_reference(uri)` 等）**，两者是宽窄不同的两个接口。多会话能力属于 HostApp，界面侧只见到窄口。**未裁定是否满足「统一」，阻塞 Cast Freeze。**（`harmonica_eval/contract.py:759-838`；`harmonica_eval/host/app.py:89-110`、`:127-168`；`.spec/GATE-CHALLENGES-C3.md:12-86`、`:449-464`）
 - **✅ GC-204-08 已关闭（原「🔴 未裁定，阻塞插件迁移」）**：这项裁定不改变 C4 的边界——C4 仍只消费 C1 发布的投影与命令，不 import 具体算法、也不持有注册表。裁定内容是「物理装配根为 `harmonica_eval/algorithms/bootstrap.py`，Host 只接收它产出的已装配 `Registry`」（`.spec/GATE-CHALLENGES-C3.md:544`、`:543`；`harmonica_eval/host/app.py:113-124`）。★ **装配链已接通**（★ 2026-09-25 实测，原写「尚未接通、bootstrap 无模块 import」已过期）：`build_default_registry()` 返回 `['pitch', 'timing', 'dynamics']` 三个已注册插件，五个缺陷样本端到端全 `rc=0`。
+
+## 对比图（参考 / 练习 叠放）
+
+页面的「对比图」区把成对的两条曲线画进**同一坐标系**，差异一眼可见，
+而不必让人心算两个数字的差。
+
+| 图 | X 轴 | Y 轴 | 数据源 |
+| --- | --- | --- | --- |
+| 音高轨迹 | 音序（第几个音，**非秒**） | 音分（0=准，100=一个半音） | `*.per_note_f0_reference` / `_practice` |
+| 能量包络 | 时间（秒） | dB | `*.envelope_db_reference` / `_practice` |
+
+- 配对靠 key 的 `_reference` / `_practice` 后缀**现算**，界面不按算法名写死：
+  新插件若产出同样成对后缀的曲线，对比图自动出现。
+- **音高图画音分而非 hz**：绝对频率在低频区会放大差异
+  （`03_气息不匀` 只差约 48 Hz，在 200 Hz 基频上是巨大垂直距离，
+  读者会误以为音高差很多）。换算用 `1200*log2(f_practice/f_reference)`，
+  与 `pitch.per_note_cents` 同算法同语义。
+- 两侧点数不等时**各画各的，不拉伸、不补零**，并在图上留注释说明
+  （`05_漏音断句` 的能量侧是 34/21）。
+- 元素只用 `<text>` / `<polyline>` / 注释（FILE-401 §4.7 冻结四类），
+  零外部请求。
+
+**warp_path 可视化留待后续**：它在 C2 侧，不属于任一算法，
+要投影得动 `UiView`，而 `FILE-003:254` 已冻结 UiView 的扩面先例。

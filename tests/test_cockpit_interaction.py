@@ -90,29 +90,66 @@ def live_ui():
       —— 实测 `serve_ui` 会 fork 子进程接管服务，父进程随即退出，
       ★ 若用 `poll()` 判死会把「服务好好的」误判成「提前退出」。
     ★ 这就是「探针报错先怀疑探针」。
+
+    ★ 历史留档（★ 不是判据）：2026-09-25 此处曾用 `_free_port()` 先挑一个
+      空闲端口、再假设 `serve_ui` 会选同一个。那是巧合而非契约 ——
+      `serve_ui` 内部调 `app._pick_port()` 独立探测，两边各选各的。
+      那时启动快（只建数据面，★ 不跑算法），端口恰好对上的概率高；
+      负责人裁定「启动即自动跑算法」后启动变慢，时间窗一大就暴露了：
+      实测 9 passed + 10 errors「serve_ui 180 秒内未就绪」——
+      而那不是服务没起来，★ 是【连错了端口】。
+      现在改为从启动横幅里读【真实端口】。
     """
-    port = _free_port()
+    stdout = subprocess.PIPE
     proc = subprocess.Popen(
         [sys.executable, "-m", "harmonica_eval.serve_ui",
          "--reference", _REF, "--practice", _PRA],
-        cwd=_REPO, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        cwd=_REPO, stdout=stdout, stderr=subprocess.STDOUT,
+        text=True,
     )
     try:
+        # ★ 启动横幅里 run_local_ui 打印「http://127.0.0.1:<port>/」
         deadline = time.monotonic() + 180
-        ready = False
+        ready_port = None
+        banner = ""
         while time.monotonic() < deadline:
-            try:
-                status, _ = _get(port)
-            except (urllib.error.URLError, ConnectionError, OSError):
-                time.sleep(1.0)
-                continue
-            if status == 200:
-                ready = True
-                break
-        if not ready:
+            line = proc.stdout.readline()
+            if line:
+                banner += line
+                if proc.stdout is not None and "127.0.0.1:" in line:
+                    tail = line.split("127.0.0.1:")[1]
+                    digits = ""
+                    for ch in tail:
+                        if ch.isdigit():
+                            digits += ch
+                        else:
+                            break
+                    if digits:
+                        ready_port = int(digits)
+            if ready_port is not None:
+                try:
+                    status, _ = _get(ready_port)
+                except (urllib.error.URLError, ConnectionError, OSError):
+                    status = None
+                if status == 200:
+                    break
+            if ready_port is None:
+                time.sleep(0.2)
+        if ready_port is None:
             proc.terminate()
-            pytest.fail("serve_ui 180 秒内未就绪")
-        yield port
+            pytest.fail(
+                "serve_ui 180 秒内未打印启动横幅（★ 无法得知它选了哪个端口）\n"
+                f"横幅内容：{banner[:400]}"
+            )
+        try:
+            status, _ = _get(ready_port)
+        except (urllib.error.URLError, ConnectionError, OSError) as exc:
+            proc.terminate()
+            pytest.fail(f"横幅说端口 {ready_port}，但连不上：{exc}")
+        if status != 200:
+            proc.terminate()
+            pytest.fail(f"横幅端口 {ready_port} 返回 {status}，应为 200")
+        yield ready_port
     finally:
         # ★ 用端口所属的进程组收尾，★ 不靠 parent pid
         subprocess.run(
@@ -161,16 +198,116 @@ def test_port_rows_show_shape_not_just_name(live_ui):
 # ═════════════════════════════════════════════════════════════════════
 
 
-def test_state_b_no_source_when_algorithms_not_run(live_ui):
-    """`serve_ui` 启动只建数据面、不跑算法 → 判为 B「已通但无数据」。
+# ★★★ 四态判别的永续判据（★ 不依赖启动路径）★★★ ★★
+# ★ 历史留档（★ 不是判据）：2026-09-25 此处曾有一条
+#   `test_state_b_no_source_when_algorithms_not_run`，它经 `live_ui` 启动服务
+#   并断言页面出现「已通但无数据」。那条断言的是【启动后的阶段态】——
+#   负责人裁定「启动即自动跑算法」后，它必然失效。
+#   ★ 阶段态判据在本项目反复过期（见 FILE-002:518 的同类修法），
+#   故改为下面这条：直接构造四态的 UiView，判它【能不能被正确认出来】。
+#   ★ 断言的是【判别能力】，任何阶段都成立。
+def _ui_view(*, state, scalars=(), error_code=None, error_detail=None):
+    """造一个最小的 UiView，只填四态判别真正读取的字段。"""
+    from harmonica_eval.contract import SessionState, UiView
 
-    ★ 这不是缺陷而是设计：`RUN_ALGORITHMS` 是界面自己的一条命令。
-    ★ 但它必须被明确显示，而不是让用户以为「跑过了却没结果」。
+    return UiView(
+        session_id="synthetic",
+        state=state,
+        series=(),
+        scalars=tuple(scalars),
+        progress=1.0,
+        port_summary=(),
+        error_code=error_code,
+        error_detail=error_detail,
+        note="",
+    )
 
-    红端：把 `_classify_view` 改成恒返回 "C_HAS_DATA" → 本用例应红。
+
+def _one_scalar():
+    from harmonica_eval.contract import UiScalar
+
+    return UiScalar(key="probe.value", label="探针", value=1.0, unit="x")
+
+
+@pytest.mark.parametrize(
+    ("case", "kwargs", "expected"),
+    [
+        (
+            "A_UNBUILT：state 非 DATA_READY → 数据面未就绪",
+            {"state": "CREATED"},
+            "A_UNBUILT",
+        ),
+        (
+            "B_NO_SOURCE：无标量且无诊断 → 已通但无数据",
+            {"state": "DATA_READY", "scalars": (), "error_code": None,
+             "error_detail": None},
+            "B_NO_SOURCE",
+        ),
+        (
+            "C_HAS_DATA：有标量 → 有指标",
+            {"state": "DATA_READY", "scalars": None},
+            "C_HAS_DATA",
+        ),
+        (
+            "D_BLOCKED：无标量但有诊断 → 管线中断",
+            {"state": "DATA_READY", "scalars": (),
+             "error_code": "INCOMPATIBLE", "error_detail": "三个算法全部不兼容"},
+            "D_BLOCKED",
+        ),
+    ],
+)
+def test_four_state_classification_is_stage_independent(case, kwargs, expected):
+    """★ 四态判别必须在【任何输入】下都正确，★ 与启动路径无关。
+
+    ★ 互斥判据（来自一次真实假绿）：三个算法全 INCOMPATIBLE 时，
+    state 仍是 DATA_READY、scalars 为空，而 error_detail 里有诊断。
+    若按「无标量 ⇒ B 已通无源」画，就把「全挂」画成了「正常但没数据」。
+
+    ★ 为什么改成构造而非走 live_ui：
+    `serve_ui` 启动即自动跑算法（负责人裁定），启动路径恒为 C_HAS_DATA。
+    ★ 断言那条路径等于把判据钉死在当前裁定上，★ 下次改动又会红。
+
+    红端：把 `_classify_view` 改成恒返回 "C_HAS_DATA"
+      → 本用例的 A/B/D 三行应立刻红。
     """
-    _, page = _get(live_ui)
-    assert "已通但无数据" in page, "未跑算法时必须显示 B 态文案"
+    from harmonica_eval.contract import SessionState
+    from harmonica_eval.cockpit.app import _classify_view, _verify_view_consistency
+
+    kwargs = dict(kwargs)
+    raw_state = kwargs.pop("state")
+    state = SessionState[raw_state] if isinstance(raw_state, str) else raw_state
+    if kwargs.get("scalars", ()) is None:
+        kwargs["scalars"] = (_one_scalar(),)
+
+    view = _ui_view(state=state, **kwargs)
+    assert _classify_view(view) == expected, case
+    # 同一判据还有一份运行时自证；两条必须一致，否则渲染时会画错。
+    assert _verify_view_consistency(view) == expected, case
+
+
+def test_d_blocked_must_not_render_as_no_data():
+    """★ D 态【不得】被画成「无数据」——★ 那是本项目踩过的假绿。
+
+    ★ 判据：scalars 为空但 error_code 非空时，界面必须显示诊断，
+    而「已通但无数据」是另一回事（无标量且无诊断）。
+    """
+    from harmonica_eval.contract import SessionState
+    from harmonica_eval.cockpit.app import _classify_view
+
+    blocked = _ui_view(
+        state=SessionState.DATA_READY,
+        scalars=(),
+        error_code="INCOMPATIBLE",
+        error_detail="三个算法全部 INCOMPATIBLE",
+    )
+    no_source = _ui_view(
+        state=SessionState.DATA_READY, scalars=(), error_code=None, error_detail=None
+    )
+
+    assert _classify_view(blocked) == "D_BLOCKED"
+    assert _classify_view(no_source) == "B_NO_SOURCE"
+    # ★ 两者必须不同：★ 若判别把它们判成同一态，界面就会把故障画成「没数据」。
+    assert _classify_view(blocked) != _classify_view(no_source)
 
 
 def test_state_c_has_data_after_run_algorithms(live_ui):
@@ -340,14 +477,112 @@ def test_scalars_renderer_is_generic_not_hardcoded():
     assert "42" in shown, f"数值没渲染，实得：{shown!r}"
 
 
-def test_no_algorithm_names_hardcoded_in_cockpit():
-    """★ 源码里不许出现具体算法名。
+def _functions_named(tree, names):
+    """按名字挑出模块级与嵌套的函数定义。"""
+    import ast
 
-    ★ 红端：在 `_render_page` 里写死 `pitch.reference` 等 → 本用例应红。
+    return [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in names]
+
+
+def _literal_names(node):
+    """收集节点内所有字符串字面量。"""
+    import ast
+
+    return [
+        n.value
+        for n in ast.walk(node)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+
+
+def test_no_algorithm_names_hardcoded_in_cockpit():
+    """★ 渲染路径不得【按算法名分支】——★ 界面不该知道有哪些算法。
+
+    ★ 这条判据的范围被收窄过一次（2026-09-25），★ 值得说明为什么：
+    旧版断言是「`app.py` 全文不得出现 `pitch.` / `timing.` / `dynamics.`」，
+    ★ 那把两件不同的事混为一谈：
+      · 【该守】渲染路径按算法名分支（★ 真正的架构问题）
+      · 【误伤】说明文案里提到算法名（★ 负责人要的「架构优越性可见」，
+        ★ 页面要说清「这些数字是逐个插件算出来的，★ 新插件接入后自己出现」）
+    ★ ★ 「文案提及」≠「按名渲染」★ 两者语义完全不同
+
+    ★ 所以现在查的是【AST 结构】：★ 渲染函数里有没有拿算法名做比较或分支。
+    ★ 收窄后【仍必须能抓】——★ 见本用例 docstring 末的红端。
+
+    红端：在 `_render_page` 里写 `if 'pitch.' in item.key:` 这样的分支
+      → 本用例应红。
     """
+    import ast
+
     src = (_REPO / "harmonica_eval" / "cockpit" / "app.py").read_text("utf-8")
-    for name in ("pitch.", "timing.", "dynamics."):
-        assert name not in src, f"cockpit 里硬编码了算法名 {name} —— 界面不该知道算法"
+    tree = ast.parse(src)
+
+    # ★ 渲染路径上的函数：★ 谁负责把 UiView 变成页面。
+    render_fns = _functions_named(tree, {"_render_page", "render_scalars", "build_plots",
+                                         "render_series_plot", "render_status",
+                                         "render_progress", "render_error"})
+
+    known_algorithm_ids = {"pitch", "timing", "dynamics"}
+    offenders = []
+    for fn in render_fns:
+        for name in _literal_names(fn):
+            head = name.split(".")[0].split(":")[0].strip()
+            if head in known_algorithm_ids:
+                offenders.append(f"{fn.name}:{name}")
+    assert not offenders, (
+        "渲染路径里出现了具体算法名，★ 界面不该知道算法："
+        f"{offenders}。★ 若那只是页面说明文案（不是分支），"
+        "请把它挪到渲染函数之外。"
+    )
+
+    # ★ 正面判据：★ 标量区是【遍历】渲染的，★ 所以任何插件的指标都会自动出现。
+    render_scalars = next(
+        n for n in render_fns if n.name == "render_scalars"
+    )
+    loops = [
+        n
+        for n in ast.walk(render_scalars)
+        if isinstance(n, (ast.For, ast.comprehension))
+    ]
+    assert loops, (
+        "render_scalars 里没有遍历 ——★ 若它只渲染固定几个，"
+        "新插件的指标就不会出现在页面上（★ 那正是这条判据要守的）"
+    )
+
+
+def test_render_scalars_has_no_algorithm_name_branch():
+    """★ 更强的一条：★ 遍历变量上不得出现按算法名的比较。
+
+    ★ 上一条查的是「函数体里有没有算法名字面量」；
+    ★ 这一条查的是「有没有拿它做分支」——★ 后者才是真正的架构问题。
+    ★ 两条并存，★ 收窄判据才不会变成「什么都抓不住」。
+
+    红端：把 `for item in scalars:` 改成
+      `for item in scalars: if item.key.startswith("pitch."): …`
+      → 本用例应红。
+    """
+    import ast
+
+    src = (_REPO / "harmonica_eval" / "cockpit" / "app.py").read_text("utf-8")
+    tree = ast.parse(src)
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "render_scalars"
+    )
+
+    known = {"pitch", "timing", "dynamics"}
+    offenders = []
+    for node in ast.walk(fn):
+        # ★ 只看比较与属性访问，★ 单纯的字面量说明不算分支
+        if isinstance(node, ast.Compare) or isinstance(node, ast.Call):
+            for name in _literal_names(node):
+                head = name.split(".")[0].split(":")[0].strip()
+                if head in known:
+                    offenders.append(f"{fn.name}:{getattr(node,'lineno','?')}:{name}")
+    assert not offenders, (
+        f"render_scalars 里按算法名做了比较/调用：{offenders}"
+    )
 
 
 def test_plugin_metric_reaches_page_end_to_end(live_ui):
