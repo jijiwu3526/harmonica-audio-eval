@@ -160,16 +160,28 @@ app.py               开发者调试界面（Mac）
 
 ### 依赖方向（可自动检查）
 
+> **★ 实测基准（AST 扫描 `harmonica_eval/` 的 18 个 `.py` 文件；相对 import 已展开）**：下面的
+> “依赖”均指源码中的 import 关系，不把运行期函数调用、依赖注入或文档中的模块名提及算进去。
+> 这与连接关系图描述的运行期职责分工不是同一层事实。
+
 ```text
-contract.py  ← 谁都依赖它，它不依赖任何人
-profile.py   ← 只被 core/ 依赖
-core/        ← 只依赖 contract.py + profile.py   禁止 import host/ algorithms/
-algorithms/  ← 只依赖 contract.py                禁止 import core/ 内部
-host/        ← 可依赖全部（装配点，唯一允许跨界）
-cockpit/     ← 只依赖 contract.py                禁止直连 core/ algorithms/
+contract.py  ← 被 __main__.py、profile.py、core/api.py、core/surface.py、
+                 algorithms/{__init__,pitch,timing,dynamics}.py、
+                 host/app.py、cockpit/{__init__,app}.py 依赖；自身不 import 仓内模块
+profile.py   ← 当前没有任何仓内文件 import 它；它自身 import contract.py
+core/        ← api.py import contract.py + surface.py；surface.py import contract.py；
+               ingest.py / align.py / features.py / __init__.py 无仓内 import；
+               禁止 import host/ algorithms/（实测未发现）
+algorithms/  ← __init__.py import contract.py + 三个同层算法模块；
+               pitch.py / timing.py / dynamics.py 各 import contract.py；
+               禁止 import core/ 内部（实测未发现）
+host/        ← app.py 当前只 import contract.py；虽然它是装配点，但当前骨架没有实际跨层 import
+cockpit/     ← __init__.py / app.py 只 import contract.py；
+               禁止直连 core/ algorithms/（实测未发现）
 ```
 
 只要 `core/` 不 import `algorithms/`，「换算法不改核心」就是**能自动验证的事实**。
+当前 `verify_shell.py` 的依赖方向检查实际覆盖 14 个文件，输出为“全部符合依赖方向”。
 
 ---
 

@@ -34,7 +34,7 @@
 | Canonicalizer / Alignment / Materializer / Port Store / Foundry | C2 内部模块 | 外部不可见 ⇒ 无独立契约 |
 | 算法执行编排 | **C1 的职责**（非组件） | 见 §3 保证 G2 |
 | Asset Manager / Result Store | C1 会话内状态 + C2 内部 | 同上 |
-| 动态插件系统（`.dylib`/扫描/ABI discovery/版本协商） | v0.1 不做 | 用户裁定；§18 逻辑插件已够 |
+| 动态插件系统（`.dylib`/扫描/ABI discovery/版本协商） | v0.1 不做 | 用户裁定。★ C3 插件化后此裁定**不变且更有约束力**：v0.1 的"插件"只表示"遵守统一契约、显式 `Registry.register`、可由 Host/UI 按 id 选择的逻辑算法组件"，**不涉及任何动态装载机制**。目录扫描、entry-points、热加载、进程隔离全部永不做 |
 | **检验站（评测台）** | **铸造厂 L5 验证角色 + Evidence** | §36、§20、§6-L5 |
 | `chroma_cens` / DTW / CREPE / pyin 具体算法 | **C2、C3 的内部选型**（L2） | §43：冻结行为，不冻结结构 |
 
@@ -115,7 +115,8 @@ invariants:
   - INV-C1-2 不 import C3 的算法实现模块（只依赖契约）
   - INV-C1-3 删除 C4 后，C1/C2/C3 仍能无头跑通
 failure_modes:
-  - 文件不可读 / 权限拒绝 / 用户取消 → FAILED + 原因码
+  - 文件不可读 / 权限拒绝 → FAILED + 原因码
+  - 「用户取消」不属失败：若指会话 `CANCEL`，按 `COMMAND_EFFECTS` 转移、不产生 `ErrorCode`、状态不是 `FAILED`；若指文件选择对话框取消，则不进入本组件，也不产生 `ErrorCode`
   - C2 构建失败 → FAILED，如实上报，不重试、不降级、不伪造结果
 recovery_semantics: 会话不可续；重新 create_session 从头开始。v0.1 不做断点续算
 side_effects: 读取平台文件；占用会话资源；不写用户数据
@@ -223,17 +224,30 @@ guarantees:
   - G10 只读；绝不修改数据面
   - G11 不依赖 C2/C1 内部符号，只依赖契约
   - G12 失败被隔离：自身 FAILED 不影响数据面与其他算法
-  - G13 声明 required_ports 仅用于兼容性检查，绝不反向触发 C2 生成数据
+  - G13 声明 required_inputs / optional_inputs 仅用于兼容性检查，
+        绝不反向触发 C2 生成数据
 state_model: 无独立状态机。算法是**无状态**的：
-             run(surface) 一次调用内完成，结果状态体现在
-             AlgorithmResultEnvelope.status ∈ {'OK','FAILED','INCOMPATIBLE'}
+             entry(surface) 一次调用内完成，结果状态体现在
+             AlgorithmResultEnvelope.status ∈
+             {'OK','DEGRADED','INCOMPATIBLE','FAILED'}
 ★ 更正：原写 CREATED → COMPATIBILITY_CHECKED → RUNNING → RESULTS_SUBMITTED/FAILED。
-  但代码里没有这些状态，也没有算法状态机 —— algorithms/__init__.py 的
-  AlgorithmSpec 只有 id/version/required_ports/entry/label。
+  但代码里没有这些状态，也没有算法状态机 —— C3 的插件契约
+  （PluginSpec）只有 algorithm_id/algorithm_version/label/required_inputs/
+  optional_inputs/entry 六个字段，全部是**声明**，不含任何生命周期状态。
+★ C3 插件化补充：status 域由 3 值扩为 4 值，新增 DEGRADED，
+  用于表达"optional 输入缺失导致只提供部分能力"。它不是新状态机，
+  只是让"少算了"这件事在结果里有正式位置可写，不再被迫报 OK。
 invariants:
   - INV-C3-1 不持有跨越会话生命周期的端口指针
   - INV-C3-2 不依赖 process-global 可变单例
   - INV-C3-3 结果符合声明的 result_schema
+  - ★ INV-C3-4 payload 必须是自描述的 Sequence[UiScalar | UiSeries]，
+        不得返回裸 dict —— 裸 dict 需要框架侧维护一张按 algorithm_id
+        索引的字段名表，那张表会让框架必须认识每一个具体算法，
+        从而使"新增算法必须改框架文件"（本组件 v1 的实际缺陷）
+  - ★ INV-C3-5 status == 'DEGRADED' 时必须伴随 coverage 非空或
+        warnings 非空；否则判 ALGORITHM_RESULT_INVALID
+        （把"不许偷偷少算"变成可机械验证的断言）
 failure_modes:
   - 崩溃 / 死循环 / NaN / 非法 schema / 无界内存 / 超大结果
 recovery_semantics: |
@@ -319,13 +333,13 @@ AlgorithmDataContract.read(port_id, range) → BufferView    # 零拷贝或分�
 
 | 项 | 内容 |
 | --- | --- |
-| `PortDescriptor` | `port_id, schema_version, element_type, dimensions, units, timeline_basis, sample_rate, length, content_hash` |
-| `BufferView` | `data, element_count, element_type, stride` |
+| `PortDescriptor` | `port_id, schema_version, element_type, dimensions, shape, units, field_names, timeline_basis, hop_length, sample_rate, content_hash`（11 个） |
+| `BufferView` | `data, element_count, element_type`（3 个）——★ **无 `stride` 字段**；视图连续性由 `data` 自身 strides 表达 |
 | 强制保证 | 两份 **aligned PCM** 永远存在（mapped + warped）——本仓自定保证，算法可自行做特有预处理 |
 | `timeline_basis` | 每端口必须声明：参考时间轴 / 归一化时间轴 |
 | **必须包含 `sample_rate`** | 实测依据：同一段音频在 22.05 kHz 下 pYIN 把 D5 判成 D4（恰好 −1200 音分），44.1 kHz 下正常。**采样率是算法结果的成因，不是元数据** |
 | 内存规则 | Core 拥有 Core 数据；算法只可借用，不得释放、不得修改、不得跨会话保存指针；结果所有权移交 Result 侧 |
-| 兼容性 | `required_ports` **只用于** `exists? YES/NO`；缺失即 `INCOMPATIBLE`，**绝不反推 C2 生成** |
+| 兼容性 | ★ C3 插件化后，插件声明的是 `InputRequirement`（含时间轴 / dtype / 字段 / 采样率等**语义**约束），不只是端口名存在与否；缺 `required_inputs` 任一条即 `INCOMPATIBLE`，**绝不反推 C2 生成**。`optional_inputs` 缺失允许运行，但须 `DEGRADED` 并在 warnings / coverage 中如实说明 |
 
 ### 4.3 CORE_PROFILE_V0.1（配置，不是组件）
 
@@ -367,7 +381,7 @@ v0.1 profile（**已由 SPIKE 裁定**，见 §6/§10）：
 | --- | --- | --- | --- |
 | **A** | 同一输入 + 同一 profile ⇒ 数据面与算法装载无关 | 装 0 个 vs 装 N 个算法，比对端口清单 + content_hash（同 build） | 契约 |
 | **B** | 换算法 ⇒ Core 0 修改 | 依赖方向测试：`core/` 不得 import `algorithms/` | 契约 |
-| **C** | 新增算法不改处理 DAG | 只允许新增 `algorithms/<name>/`；CI 拒绝 `core/` 改动 | 契约 |
+| **C** | 新增算法不改处理 DAG | ★ **已从"约定"变成可机械判定**：新增插件只允许写 `algorithms/<name>/` 与在**物理装配根 `algorithms/bootstrap.py`** 装配点多一行 `registry.register(...)`（2026-09-24 裁定，GC-204-08 已 CLOSED）；`core/` 与 `host/` 均不得 import 具体算法实现模块；框架不得出现按 algorithm_id 索引的 payload 字段表。三条全部可由 AST 静态判定，见 `tools/check_plugin_contract.py` | 契约 |
 | **D** | 任一算法失败不影响数据面与其他算法 | 故障注入（崩溃/NaN/超大结果/死循环） | 契约 |
 | **E** | **每个端口产出符合其冻结契约** | schema/维度/单位/时间基准/采样率校验 + 黄金向量 | 契约 |
 | **F** | 删除 C4，其余三件仍跑通 | 无头 Mission Thread | 系统 |

@@ -41,12 +41,12 @@
 - `metrics.json` — 全部客观指标
 - `report.md` — 人类可读的数值报告（**只陈述数值，不下教学结论**）
 
-`metrics.json` 最小结构：
+`metrics.json` 最小结构（**★ 见下方更正：本片段已降级为示意，不是冻结契约**）：
 
 ```json
 {
   "meta": { "ref": "...", "user": "...", "sr": 22050, "duration_ref": 0.0, "duration_user": 0.0 },
-  "alignment": { "method": "...", "mean_abs_warp_sec": 0.0, "tempo_ratio": 1.0, "confidence": 0.0 },
+  "alignment": { "mean_abs_warp_sec": 0.0, "tempo_ratio": 1.0 },
   "global": { "pitch_cents_mae": 0.0, "in_tune_ratio": 0.0, "timing_mae_ms": 0.0, "energy_db_delta": 0.0 },
   "sections": [
     { "index": 1, "t_start": 0.0, "t_end": 8.0,
@@ -55,6 +55,33 @@
   ]
 }
 ```
+
+> ### ★ 更正（负责人 2026-09-24 裁定）
+>
+> 上面这份 JSON 片段**降级为示意**，**不是**冻结的落盘契约。
+> 实际 `metrics.json` 的顶层结构以 `.spec/build/FILE-002-v1.md §4.3` 为准：
+> `schema_version` / `inputs` / `state` / `scalars` / `series`。
+>
+> **为什么**：本片段仍含**没有可计算定义或数据来源**的键：
+> - `in_tune_ratio` / `pitch_bias_cents` / `voiced_ratio`：全仓定义数 **0**；
+> - `alignment` 只保留两项可由 `warp_path` 派生的数值：`mean_abs_warp_sec` /
+>   `tempo_ratio`，口径见 §5；`method` 与全局 `confidence` 没有数据来源，删除；
+>   `pitch.*.confidence` 是逐帧音高置信度，不是 `alignment.confidence`，不能混用；
+> - `sections[]`：依赖 §6，而 **§6 尚未确认**（见 §8），
+>   按 AGENTS.md 铁律 3 不得写入主流程。
+>
+> 本片段要表达的量，在 `scalars` 结构里都有落点（★ C3 插件化后：
+> 结果字段名不再由框架侧的冻结表决定，而由插件产出的
+> `UiScalar` / `UiSeries` 对象的 `key` 字段自带 ——
+> `algorithms.PAYLOAD_SCHEMAS` 已随插件化删除，理由见
+> `harmonica_eval/contract.py` 的 `AlgorithmResultEnvelope.payload`）。
+> 历史逐键映射见 `.spec/review/round-1/DISPOSITION.md`。
+>
+> **本片段保留在此不删** —— 删掉它会让"为什么最终结构不是这样"失去上下文。
+>
+> 图中数值仅示意**非退化**情形。退化时，实际 `metrics.json` 中上述两个对应量所在的
+> `UiScalar.value` 必须写为 JSON `null`，不得替换为 `0`、`0.0`、`1.0` 或其他默认值；
+> 具体边界见 §5 与 `.spec/build/FILE-002-v1.md` 本节开头。
 
 ## 4. 特征性价比（待负责人确认）
 
@@ -77,7 +104,51 @@
 **本规格承诺的行为**（这些是契约，不可协商）：
 
 1. **产出**：一个单调、近似保序的时间映射 `ref_time → user_time`，以及由它导出的
-   `mean_abs_warp_sec`、`tempo_ratio`、`confidence`。
+   `mean_abs_warp_sec` 与 `tempo_ratio`。`alignment` 不承诺 `method` 或
+   `confidence`：方法名与全局对齐置信度没有数据来源；`pitch.*.confidence`
+   是逐帧音高置信度，不是 `alignment.confidence`，不能混用。
+   ★ **本口径由本轮裁定补充**（此前只有字段名、没有唯一公式）：
+
+   ```text
+   mean_abs_warp_sec = mean_i |practice_frame_i - reference_frame_i|
+                       × profile.ALIGN.hop_length / sample_rate
+   tempo_ratio       = (practice_frame_n - practice_frame_1)
+                       / (reference_frame_n - reference_frame_1)
+   ```
+
+   **退化边界（两项分别判断，不得用一项的数值替另一项补默认值）**：
+
+   ```text
+   A. warp_path 行数 = 0:
+      mean_abs_warp_sec = null
+      tempo_ratio = null
+      理由：对空集求均值无定义；速度比也无法从退化路径导出。
+
+   B. warp_path 行数 = 1:
+      mean_abs_warp_sec = |practice_frame_1 - reference_frame_1|
+                          × profile.ALIGN.hop_length / sample_rate
+      tempo_ratio = null
+      理由：单行路径上的均值有定义，但速度比无法从退化路径导出。
+
+   C. warp_path 行数 >= 2 且 reference_frame_n == reference_frame_1
+      （两端 reference_frame 相同，跨度为 0）:
+      mean_abs_warp_sec = mean_i |practice_frame_i - reference_frame_i|
+                          × profile.ALIGN.hop_length / sample_rate
+      tempo_ratio = null
+      理由：此时 tempo_ratio 分母为 0，速度比无法从退化路径导出。
+   ```
+
+   `tempo_ratio` 的 `null` 口径与 `.spec/build/FILE-102-v1.md:203`
+   「`warp_path` 行数 < 2 → 不抛，返回 `None`（单点路径天然单调）」一致。
+   `null` 如实表示无定义 / 不可导出，**不得**以 `0`、`1.0` 或任何默认值代替。
+
+   `warp_path` 两列均为帧号（`harmonica_eval/profile.py:246-249`；
+   `harmonica_eval/core/align.py:98-100`；`.spec/build/FILE-102-v1.md:230-240`）；
+   帧 → 秒必须使用 `profile.ALIGN.hop_length`（当前 **2048**，
+   `harmonica_eval/profile.py:92-110`）与 `sample_rate`（当前 **44100**，
+   `harmonica_eval/profile.py:64-70`）。**不得**读取 `PortSpec.hop_length` 换算：
+   该端口自身 `hop_length == 0`（`harmonica_eval/profile.py:246-253`），它表示路径点
+   表不是等间隔帧栅格，不表示两列帧号没有时间单位。
 2. **约束**：映射路径必须受**全局带宽约束**，禁止病态弯曲（例如把整首曲子压成一点）。
 3. **失败语义**：无法建立有效映射时，**必须显式失败**（`CORE_BUILD_FAILED`），
    **不得**静默降级为"不配准直接逐点比"。

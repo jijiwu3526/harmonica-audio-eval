@@ -70,10 +70,18 @@ C4 缺席时，正式无头入口仍是 `harmonica_eval/__main__.py`：接收参
 
 ## 已知缺口与未决项
 
-- **当前未注入**：`launch_cockpit`、本机 UI 入口及所有渲染/命令函数仍是 SHELL；不能把渲染协议描述当作已运行的界面。（`harmonica_eval/cockpit/__init__.py:43-61`；`harmonica_eval/cockpit/app.py:77-92`、`:99-263`；`.spec/OWNER-DIRECTIVES.md:50-87`）
+- **已注入并实测**（★ 2026-09-25 更新，★ 原写「当前未注入」已过期）：
+  `launch_cockpit`、本机 UI 入口及全部渲染/命令函数均已实现，
+  端到端实测 `python3 -m harmonica_eval.serve_ui --reference 原曲.wav --practice 练习曲.wav`
+  起服务，12 个端口逐个可见、六个按钮按状态机顺序全部 200。
+  （`harmonica_eval/cockpit/__init__.py`；`harmonica_eval/cockpit/app.py`）
+- **命令的拒绝要可读**（★ 2026-09-25 修）：内核对用户输入的明确拒绝
+  （`ContractViolation` / `CoreBuildError` / `AlgorithmError`）回 **400 + 原因原文**，
+  只有真正的未预料异常才回 500。原先一律 `500 internal error` 五个字，
+  会让「状态不对」被误读成「服务端坏了」。（`harmonica_eval/cockpit/app.py:840-880`）
 - **时间轴展示依赖正确轴标注**：REFERENCE 与 WARPED 的物理含义不同；若实现漏标轴，界面会把归一化位置误读为抢拍/拖拍，这是当前必须现场验证的风险。（`harmonica_eval/cockpit/app.py:130-143`；`harmonica_eval/contract.py:1000-1012`）
 - **构建进度是粗粒度/可能为 None**：C4 不得自行从状态推断百分比；平滑进度需要 C1/契约层另行裁定，C4 不得补造。（`harmonica_eval/cockpit/app.py:159-171`；`harmonica_eval/contract.py:1022-1066`）
-- **端口/实现未闭合，不能端到端宣称可用**：C4 依赖调用方注入已实现的 `UiProjectionPort`；当前 HostApp 的快照/提交仍为 SHELL。（`harmonica_eval/host/app.py:227-252`；`harmonica_eval/cockpit/app.py:77-92`）
+- **端口已闭合**（★ 2026-09-25 更新，★ 原写「未闭合」已过期）：`HostApp.snapshot/submit` 已实现并被 `serve_ui` 注入，12 端口端到端可见。（`harmonica_eval/host/app.py:618-648`）
 - **“可整体删除”仍需真实测试证据**：BI 给出非破坏性删除等价检验，而不是在本 README 中伪造通过结果。（`.spec/build/FILE-400-v1.md:166-172`、`:231-246`）
 - **【未裁定 · 规格内部冲突】C4 “不得加入 HTTP”与 FILE-401 冻结的本机 HTTP 方案冲突。** `COMPONENTS.md:271-279` 明确警告不要为界面添加 HTTP 服务；`.spec/build/FILE-401-v1.md:107-138` 则冻结零第三方依赖的 `http.server.ThreadingHTTPServer` + 系统浏览器方案，并规定只绑 `127.0.0.1`（绑定细则见 `.spec/build/FILE-401-v1.md:142-179`）。两处都是规格材料且未给出冲突裁定；**本文不裁定哪一方为准，也不把 HTTP 方案写成已获最终批准。** 当前 `cockpit/app.py` 仍只有空壳入口，不能据此宣称 HTTP 界面已经存在。（`harmonica_eval/cockpit/app.py:77-92`）
 - **陈旧的下游提示不能作为端口或注册清单**：`.spec/prompts/COMP-C3/downstream.md` 仍写旧注册/端口/时间轴口径；当前 C3 入口应看 FILE-200/205 与源码，历史提示仅作追溯。（`.spec/prompts/COMP-C3/downstream.md:42-92`；`.spec/build/FILE-200-v1.md:112-127`、`:163-172`；`.spec/build/FILE-205-v1.md:82-194`）
