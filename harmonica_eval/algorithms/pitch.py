@@ -232,8 +232,38 @@ def compare_pitch_curves(
         mid = len(vals) // 2
         return vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2.0
 
+    def _span_median_f0(curve: object, span: tuple[int, int]) -> float:
+        """一个音内的【中位绝对频率】（Hz），供画图用。
+
+        与 `note_median_cents` **共用同一套过滤**：只看 voiced 帧、只看
+        f0 > 0 的帧、只在该音的 span 内。两者是同一次观测的两种读法，
+        所以「图上看到的音高」与「指标算出的偏差」必然同源。
+
+        ★ 该音若无任何可用帧，返回 0.0；调用侧据此跳过该点
+          （画 0 会被误读成「这个音低到 0 Hz」）。
+        """
+        start, end = span
+        vals: list[float] = []
+        for row in curve[start:end]:
+            if not bool(row[voiced_i]):
+                continue
+            f0 = float(row[f0_i])
+            if f0 <= 0.0:
+                continue
+            vals.append(f0)
+        if not vals:
+            return 0.0
+        vals.sort()
+        mid = len(vals) // 2
+        return vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2.0
+
     per_note: list[float] = []
     onsets: list[float] = []
+    # ★ 曲线用：两条【绝对音高】（该音内的中位 f0），单位 Hz。
+    # ★ 收集点在下面那个循环里，与偏差计算共用同一套 spans 与 voiced 过滤，
+    # ★ 保证「图上的错音」与「指标算的错音」是同一件事（口径一致性）。
+    ref_medians: list[float] = []
+    prac_medians: list[float] = []
     n_paired = 0
     n_unpaired = abs(len(ref_spans) - len(prac_spans))
     # ★ FILE-201 §4.2 第 4 项：帧数不足 150 ms 的短音一律丢弃 ——
@@ -254,10 +284,16 @@ def compare_pitch_curves(
         n_paired += 1
         per_note.append(c_prac - c_ref)
         onsets.append(float(ref_notes[idx][onset_i]))
+        # ★ 绝对音高：同一 span 内 voiced 帧的 f0 中位数。
+        # ★ 复用同一套过滤条件，★ 绝不另写一套映射。
+        ref_medians.append(_span_median_f0(ref_pitch, ref_spans[idx]))
+        prac_medians.append(_span_median_f0(prac_pitch, prac_spans[idx]))
 
     return {
         'per_note_cents': per_note,
         'onset_sec': onsets,
+        'ref_f0_hz': ref_medians,
+        'prac_f0_hz': prac_medians,
         'n_paired': n_paired,
         'n_unpaired': n_unpaired,
     }
@@ -366,6 +402,28 @@ def run(surface: AlgorithmDataContract) -> AlgorithmResultEnvelope:
                 unit='cents',
                 timeline_basis=TimelineBasis.REFERENCE,
                 source_port='pitch.reference',
+            ),
+            # ★ 画图用：两条【绝对音高】。X 是音序（1..n），不是秒 ——
+            # ★ UiSeries.t 的契约是「时间轴（秒）」，所以这两条刻意
+            # ★ 放音序，界面【必须标注横轴为音序】以免被误读成时间。
+            # ★ 与 per_note_cents 同一 span、同一 voiced 过滤、同一批音。
+            UiSeries(
+                key='per_note_f0_reference',
+                label='参考逐音音高',
+                t=list(range(1, len(compared['ref_f0_hz']) + 1)),
+                values=compared['ref_f0_hz'],
+                unit='hz',
+                timeline_basis=TimelineBasis.REFERENCE,
+                source_port='pitch.reference',
+            ),
+            UiSeries(
+                key='per_note_f0_practice',
+                label='练习逐音音高',
+                t=list(range(1, len(compared['prac_f0_hz']) + 1)),
+                values=compared['prac_f0_hz'],
+                unit='hz',
+                timeline_basis=TimelineBasis.REFERENCE,
+                source_port='pitch.practice',
             ),
             UiScalar('median_abs_cents', '中位绝对偏差',
                      summary['median_abs_cents'], 'cents'),

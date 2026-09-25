@@ -117,7 +117,9 @@ from ..contract import (
     AlgorithmDataContract,
     AlgorithmResultEnvelope,
     ErrorCode,
+    TimelineBasis,
     UiScalar,
+    UiSeries,
 )
 
 ALGORITHM_ID: str = "dynamics"
@@ -162,6 +164,26 @@ def to_db(rms: object) -> object:
         raise ValueError(f"to_db 需要实数或 ndarray，实得 {type(rms).__name__}")
     clamped = max(float(rms), _FLOOR_LINEAR)
     return 20.0 * math.log10(clamped)
+
+
+def _span_means_db(curve_db: object, spans: object) -> list[float]:
+    """每个音区间内的【平均 dB】，供画能量包络用。
+
+    与 `align_by_note` 读的是同一条 `to_db(...)` 结果、同一份 `spans`，
+    所以「图上看到的能量」与「指标算出的 median_db」必然同源。
+
+    ★ 空区间或无有效帧时返回 0.0；界面须跳过该点，
+      画 0 dB 会被误读成「这个音完全无声」。
+    """
+    out: list[float] = []
+    for span in spans:
+        start, end = int(span[0]), int(span[1])
+        chunk = [float(x) for x in curve_db[start:end]]
+        if not chunk:
+            out.append(0.0)
+        else:
+            out.append(sum(chunk) / len(chunk))
+    return out
 
 
 def note_spans(notes: object, rms_hop_length: int, sample_rate: int) -> object:
@@ -404,7 +426,34 @@ def run(surface: AlgorithmDataContract) -> AlgorithmResultEnvelope:
         deltas_db = compute_deltas(aligned)
         summary = summarize_deltas(deltas_db, aligned["n_unpaired"])
 
+        # ★ 画图用：两条【绝对能量包络】（dB），与 median_db 同一批读数。
+        # ★ 复用上面已算好的 ref_rms_db / prac_rms_db，★ 不重算、不平滑。
+        # ★ X 是音序（1..n）——刻意不放秒，★ 界面须标注横轴为音序。
+        # ★ ★ 每条曲线用【自己那一侧】的音数：两侧不等长时
+        #   （本项目的不等长配对正是如此），共用一个 t 会让
+        #   len(t) != len(values) 而被 validate_result 拒绝。
+        _ref_env = _span_means_db(ref_rms_db, ref_spans)
+        _prac_env = _span_means_db(prac_rms_db, prac_spans)
+
         payload = (
+            UiSeries(
+                key="envelope_db_reference",
+                label="参考能量包络",
+                t=list(range(1, len(_ref_env) + 1)),
+                values=_ref_env,
+                unit="db",
+                timeline_basis=TimelineBasis.REFERENCE,
+                source_port="rms.reference",
+            ),
+            UiSeries(
+                key="envelope_db_practice",
+                label="练习能量包络",
+                t=list(range(1, len(_prac_env) + 1)),
+                values=_prac_env,
+                unit="db",
+                timeline_basis=TimelineBasis.REFERENCE,
+                source_port="rms.practice",
+            ),
             UiScalar(
                 key="median_db",
                 label="中位能量差（练习−参考）",
