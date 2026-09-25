@@ -67,9 +67,101 @@ OUTPUT
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 __all__ = ["main"]
+
+# ── 数据集清单 ────────────────────────────────────────────────────────
+# ★ 浏览器拿不到文件系统，★ 所以「选曲列表」必须由本层扫出来给界面。
+# ★ 位置与形态依据 FILE-499-v1.md §6；★ 落在 data/out/ 与其它结论同处。
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_DATASET_DIR = _REPO_ROOT / "harmonica_mvp_dataset"
+_INVENTORY_JSON = _REPO_ROOT / "data" / "out" / "dataset_inventory.json"
+
+
+def _sort_key(name: str) -> tuple[int, int, str]:
+    """曲名目录排序键：数字前缀按【数值】排，无前缀的排后面。
+
+    ★ 目录名形如 `01_奇异恩典`；★ 若按字符串排，`10_艰难时光` 会排在
+    `02_绿袖子` 前面（'1' < '2'），★ 那是错的。
+    """
+    head = name.split("_", 1)[0]
+    if head.isdigit():
+        return (0, int(head), name)
+    return (1, 0, name)
+
+
+def scan_dataset(root: Path = _DATASET_DIR) -> dict:
+    """扫数据集，产出【按曲子分组】的清单。
+
+    契约（FILE-499-v1.md §6）：
+    - 路径全部**相对仓库根**，因为 `set_reference(uri)` 吃的就是它；
+      绝对路径换机即失效，清单会不可复现。
+    - **只收 `.wav`**；质检图 PNG 与乐谱 midi 不进清单。
+    - **不写死任何文件名**：扫到什么算什么。
+    - 空目录（如 `_download` / `data`）被过滤，但**过滤项要报出来** ——
+      静默过滤会让「我扫到 12 个而界面只有 10 个」变成谜。
+    """
+    songs: list[dict] = []
+    skipped: list[dict] = []
+
+    if not root.is_dir():
+        return {"root": root.name, "songs": [], "skipped": [
+            {"name": root.name, "reason": "数据集目录不存在"}],
+            "song_count": 0, "wav_count": 0}
+
+    for song_dir in sorted((p for p in root.iterdir() if p.is_dir()),
+                           key=lambda p: _sort_key(p.name)):
+        original = song_dir / "原曲_完整版.wav"
+        melody = song_dir / "标准旋律版.wav"
+        practice_dir = song_dir / "练习曲"
+        practices = (
+            sorted(p for p in practice_dir.iterdir()
+                   if p.is_file() and p.suffix.lower() == ".wav")
+            if practice_dir.is_dir() else []
+        )
+        if not (original.is_file() or melody.is_file() or practices):
+            skipped.append({"name": song_dir.name,
+                            "reason": "目录内无 .wav 文件",
+                            "relative": str(song_dir.relative_to(_REPO_ROOT))})
+            continue
+        songs.append({
+            "name": song_dir.name,
+            "title": (song_dir.name.split("_", 1)[-1]
+                      if "_" in song_dir.name else song_dir.name),
+            "original": (str(original.relative_to(_REPO_ROOT))
+                         if original.is_file() else None),
+            "melody_version": (str(melody.relative_to(_REPO_ROOT))
+                               if melody.is_file() else None),
+            "practice": [{"name": p.stem,
+                          "path": str(p.relative_to(_REPO_ROOT))}
+                         for p in practices],
+        })
+
+    return {
+        "root": str(root.relative_to(_REPO_ROOT)),
+        "songs": songs,
+        "skipped": skipped,
+        "song_count": len(songs),
+        # ★ 只数真实存在的条目：原曲 + 旋律版 + 练习曲。
+        # ★ 曾经写成 `1 + bool(...) + bool(...) + len(...)`，★ 那个 1
+        # ★ 会给每首曲子白加一个（10 首 → 70 变 80），★ 已修。
+        "wav_count": sum(
+            len([p for p in (s["original"], s["melody_version"]) if p])
+            + len(s["practice"])
+            for s in songs
+        ),
+    }
+
+
+def _write_inventory(inventory: dict) -> Path:
+    """把清单落盘，供 C4 读取。返回落盘路径。"""
+    _INVENTORY_JSON.parent.mkdir(parents=True, exist_ok=True)
+    _INVENTORY_JSON.write_text(
+        json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return _INVENTORY_JSON
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -132,18 +224,38 @@ def _run(reference_uri: str, practice_uri: str) -> int:
     except ImportError as exc:
         raise ImportError(f"harmonica_eval.cockpit 不可用：{exc}") from exc
 
-    # ① 装配 C1 —— 它同时就是 UiProjectionPort 的实现（host/app.py:88）。
+    # ① 扫数据集并落盘清单。
+    #    ★ 浏览器拿不到文件系统，★ 所以「选曲列表」只能由本层给。
+    #    ★ 顺序不可调换：清单要在界面起来之前备好。
+    inventory = scan_dataset()
+    inventory_path = _write_inventory(inventory)
+    print(f"数据集清单：{inventory['song_count']} 首曲子 / "
+          f"{inventory['wav_count']} 个音频 → "
+          f"{inventory_path.relative_to(_REPO_ROOT)}", file=sys.stderr)
+    for item in inventory["skipped"]:
+        print(f"  跳过目录 {item['name']}：{item['reason']}"
+              "（无音频，不列入界面）", file=sys.stderr)
+
+    # ② 装配 C1 —— 它同时就是 UiProjectionPort 的实现（host/app.py:88）。
     app = build_default_app()
 
-    # ② 建会话并把两端音频装进去。
+    # ③ 建会话并把两端音频装进去。
     session_id = app.create_session("v1")
     app.set_reference(session_id, reference_uri)
     app.set_practice(session_id, practice_uri)
 
-    # ③ 构建数据面（12 个端口）。界面只看得见这 12 个端口。
+    # ④ 构建数据面（12 个端口）。
     app.build_surface(session_id)
 
-    # ④ 交出端口，启动界面，阻塞至其关闭。
+    # ⑤ 运行算法。★ 缺这一步界面必然无指标：`build_surface` 只产出 12 个端口，
+    #    标量指标要等 `run_algorithms`。此前只建了数据面就启动界面，
+    #    导致首屏「标量指标」与「曲线」两节皆空、四态判别落进
+    #    B_NO_SOURCE「已通但无数据」——★ 那不是设计取舍，是漏调一次。
+    #    裁定：启动即跑算法（打开就有指标），界面上的「运行算法」按钮保留，
+    #    供数据面重建后再次运行。
+    app.run_algorithms(session_id)
+
+    # ⑤ 交出端口，启动界面，阻塞至其关闭。
     #    ★ 不传端口号：端口由 C4 自行在 8721–8784 探测（app._pick_port）。
     return launch_cockpit(port=app)
 
