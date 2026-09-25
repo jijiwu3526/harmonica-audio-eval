@@ -448,6 +448,40 @@ PORT_INDEX: dict[str, PortSpec] = {p.port_id: p for p in PORTS}
 """按 port_id 索引。surface.py 用它来驱动生成与校验。"""
 
 
+# FILE-104 §4.0 模块级常量（数值写死）
+SAMPLE_RATE_FREE_PREFIXES: frozenset[str] = frozenset({"chroma", "warp_path", "notes"})
+"""与采样率无关的端口前缀。
+
+这些端口描述的不是「某段采样」，而是「音级表」「对齐关系」「逐音索引」，
+没有采样率可言。bootstrap 侧与 surface 侧共用这一份名单，否则两侧口径
+会漂移 —— 症状是三个算法全部 `INCOMPATIBLE: notes.*`。
+
+★ **这是【字面量名单】，不是推导式 —— 改不得。**
+
+★ 看着像能写成 `{p.port_id.split(".")[0] for p in PORTS if p.hop_length == 0}`，
+★ 但那会【多算一个】：`pcm.mapped.reference` / `pcm.mapped.practice` 的
+★ `hop_length` 同样是 0，它们【不在】本名单里。
+★ ★ 理由：pcm.mapped.* 描述的是「采样点序列」本身，两侧都取 44100
+★ ★   （已实跑确认；`audio` 是全局规格，逐端口的 0 反而会让
+★ ★   `runtime.resolve_inputs` 的精确匹配把它判为不可用）
+★ ★ 而 chroma / warp_path / notes 描述的是「由采样率导出但已脱离采样域」
+★ ★   的派生索引，那里 0 才是正确值。
+★ ★ ★ 所以「凡 hop==0 就免采样率」是错的推导式 —— 本名单必须逐项写死。
+"""
+
+
+def port_prefix(port_id: str) -> str:
+    """取 port_id 中第一个 `.` 之前的子串；无 `.` 时返回原串。
+
+    ★ 用 `partition` 而非 `split`：`warp_path` 没有点，`split(".")` 会
+    ★ 返回单元素列表、`[0]` 恰好也对，但语义上「无分隔符」是本函数
+    ★ 明确要处理的一种情况（`warp_path` 正是这种 port_id），
+    ★ `partition` 的 `sep` 分支把这件事写明了。
+    """
+    head, sep, _tail = port_id.partition(".")
+    return head if sep else port_id
+
+
 def assert_profile_integrity() -> None:
     """profile 自检。**在 import 时即执行**，让配置错误立刻暴露。
 
@@ -576,5 +610,8 @@ __all__ = [
     "AUDIO", "ALIGN", "MATERIALIZE", "BUDGET",
     "AudioSpec", "AlignSpec", "MaterializeSpec", "BudgetSpec",
     "PORTS", "PORT_INDEX", "PortSpec",
+    # ★ 与采样率无关的端口前缀（字面量名单，见其 docstring 的「不可推导」说明）
+    "SAMPLE_RATE_FREE_PREFIXES",
+    "port_prefix",
     "assert_profile_integrity",
 ]

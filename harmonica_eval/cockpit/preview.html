@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<!-- 手机端预留：这一行 + 下方的 flex/grid 布局，使同一页面在手机上可读 -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>契约结构预览 · C4</title>
+<style>
+  /* ── 零依赖：无 CSS 框架、无 webfont、无 CDN ── */
+  :root {
+    --bg: #14161a; --card: #1e2229; --line: #2e343e;
+    --fg: #e6e9ef; --dim: #9aa3b2; --accent: #6aa9ff; --warn: #ffb454; --gap: #5fd38d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+    /* 手机端可读性：系统字体，无需下载 */
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; color: var(--accent); }
+  .sub { color: var(--dim); font-size: .85rem; margin-bottom: 16px; }
+  /* grid + minmax → 窄屏自动折行，不设固定像素宽 */
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; /* 卡片内边距；本页无交互控件，故不涉及 44px 触控目标 */
+  }
+  .badge {
+    display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 10px;
+    background: #2a3140; color: var(--accent); margin-right: 6px;
+  }
+  ul { margin: 6px 0 0; padding-left: 20px; }
+  li { margin: 2px 0; }
+  code { background: #262b34; padding: 1px 5px; border-radius: 4px; font-size: .85em; }
+  .gap {
+    border: 1px solid #5a4520; background: #2a2317; border-radius: 8px;
+    padding: 14px; margin: 12px 0;
+  }
+  .gap h2 { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #262b34; }
+  .yes { color: var(--gap); font-weight: 600; }
+  .no  { color: #6b7280; }
+  /* SVG 状态机：宽度用百分比，窄屏自动缩放 */
+  .svg-wrap { width: 100%; overflow-x: auto; }
+  svg { display: block; min-width: 520px; width: 100%; height: auto; }
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    h1 { font-size: 1.2rem; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<h1>契约结构预览</h1>
+<div class="sub">C4 开发者调试视图 · 数据源：<code>harmonica_eval/contract.py</code>（冻结契约层）</div>
+
+<!-- 缺口如实标注，不假装完整。
+     通道已裁定（2026-09-24）且契约字段已落地。标题初始为中性「读取中」，
+     由脚本按三态改写：未实施 / 已通但无数据源 / 有数据。 -->
+<div class="gap" id="portsGap">
+  <h2 id="gapTitle">12 个端口：读取中…</h2>
+  <p><strong>这是本视图的重要产出，不是遗漏。</strong></p>
+  <ul>
+    <li><strong>已裁定</strong>（负责人，2026-09-24）：<strong>由 C1 在 <code>UiView</code> 里投影端口摘要</strong>，
+        C4 只消费 <code>UiView</code>，不直连 C2。</li>
+    <li><strong>为什么不能直接读</strong>：<code>COMPONENTS.md G14</code> —— C4「只与 C1 通讯，不直连 C2/C3」。
+        12 个端口由 <strong>C2</strong> 发布（<code>profile.PORTS</code>），C4 直接 import 它
+        ＝ 绕过 G14 直连 C2，<strong>比违反字面约束严重得多</strong>。</li>
+    <li>契约层定义了 <code>PortDescriptor</code> 类型，但<strong>零实例</strong>
+        —— 它只是「端口长什么样」，不是那 12 个端口本身。</li>
+    <li><strong>已实施</strong>：<code>UiView</code> 已增
+        <code>port_summary: Sequence[PortDescriptor]</code>，<code>CONTRACT-UI</code> 已升 v2
+        （<strong>2026-09-24</strong>）。<strong>本页看不到 12 张卡片，是因为本预览没有会话</strong>——
+        C1（Host）当前仍是 SHELL，无处调用 <code>snapshot()</code> 投影真实值。
+        <strong>通道已通，缺的是数据源，不是实现。</strong></li>
+    <li><strong>投影字段子集（已裁定）</strong>：<code>port_id</code> / <code>units</code> /
+        <code>dimensions</code> / <code>shape</code> / <code>timeline_basis</code>
+        <br><span style="color:var(--dim)">不投影 C2 实现细节（sample_rate / hop_length /
+        content_hash / schema_version / element_type / field_names）——
+        经 C1 转手投影全部 11 个字段，实质仍是把 C2 内部结构泄露给 C4。
+        <code>field_names</code> 前端从 <code>FIELD_LAYOUTS</code> 取，不重复投影。</span></li>
+  </ul>
+  <p style="color:var(--dim);font-size:.85rem">
+    本页用 <code>getattr</code> 前向兼容读取该字段 —— <strong>契约实施后无需改本页任何代码</strong>，
+    12 张端口卡片会自动出现。
+  </p>
+</div>
+
+<div id="portsCards" hidden>
+  <h2>12 个端口（数据面结构）</h2>
+  <p style="color:var(--dim);font-size:.85rem">
+    数据源：<code>UiView.port_summary</code>（由 C1 投影，C4 不直连 C2 ——
+    <code>COMPONENTS.md G14</code>）。
+  </p>
+  <div class="grid" id="portsGrid"></div>
+</div>
+
+<div id="app">载入中…</div>
+
+<script>
+// 零依赖：不引任何库。数据全部来自 /api/contract，不在前端硬编码数量。
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function card(title, badges, body) {
+  return `<div class="card"><h2>${esc(title)}</h2>
+    <div>${(badges||[]).map(b=>`<span class="badge">${esc(b)}</span>`).join('')}</div>${body}</div>`;
+}
+
+// 手写 SVG 状态机：节点=状态，边=命令
+function stateSvg(d) {
+  const S = d.states, C = d.commands, L = d.legality;
+  const W = 760, H = 190, pad = 70, colW = (W - pad*2) / Math.max(S.length - 1, 1);
+  const y = 70, r = 17;
+  const pos = S.map((s,i) => [pad + i*colW, y]);
+  // 每条命令画成一条下弧；标签放在弧中点
+  const colors = ['#6aa9ff','#ffb454','#5fd38d','#c792ea','#ff8fa3','#89ddff'];
+  const arcs = C.map((c,i) => {
+    const from = L.find(x=>x.command===c.kind);
+    const allow = new Set(from ? from.allowed_states : []);
+    const idx = S.map((s,j)=>allow.has(s)?j:-1).filter(j=>j>=0);
+    if (!idx.length) return '';
+    const a = Math.min(...idx), b = Math.max(...idx);
+    if (a === b) return `<text x="${pos[a][0]}" y="${y+r+26}" fill="${colors[i%6]}"
+        font-size="10" text-anchor="middle">${esc(c.kind)} → ${esc(S[a])}</text>`;
+    const dip = 24 + (i % 4) * 15;               // 多弧错开，避免重叠
+    const x1=pos[a][0], x2=pos[b][0];
+    const mx=(x1+x2)/2, my=y+r+dip;
+    return `<path d="M ${x1} ${y+r} Q ${mx} ${my} ${x2} ${y+r}" fill="none"
+        stroke="${colors[i%6]}" stroke-width="1.3" opacity=".75" marker-end="url(#a)"/>
+      <text x="${mx}" y="${my-4}" fill="${colors[i%6]}" font-size="9.5"
+        text-anchor="middle">${esc(c.kind)}</text>`;
+  }).join('');
+  const nodes = S.map((s,i)=>
+    `<circle cx="${pos[i][0]}" cy="${y}" r="${r}" fill="#1e2229" stroke="#6aa9ff" stroke-width="1.6"/>
+     <text x="${pos[i][0]}" y="${y+4}" fill="#e6e9ef" font-size="9.5" text-anchor="middle">${esc(s)}</text>`
+  ).join('');
+  return `<div class="card" style="grid-column:1/-1"><h2>状态机（6 状态 × 6 命令）</h2>
+    <div class="svg-wrap"><svg viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="会话状态与命令的合法转移图">
+      <defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6"
+        markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#6aa9ff"/></marker></defs>
+      <text x="10" y="18" fill="#9aa3b2" font-size="11">弧线 = 命令，颜色对应下方命令卡片</text>
+      ${arcs}${nodes}
+    </svg></div></div>`;
+}
+
+function render(d) {
+  const units = card('受控单位词表', [d.units.length + ' 个'],
+    `<ul>${d.units.map(u=>`<li><code>${esc(u)}</code></li>`).join('')}</ul>
+     <p style="color:var(--dim);font-size:.8rem">封闭词表 · 新增单位需改契约</p>`);
+
+  const cmds = d.commands.map(c =>
+    `<tr><td><code>${esc(c.kind)}</code></td><td>${esc(c.effect)}</td></tr>`).join('');
+  const cmdCard = card('命令与效果', [d.commands.length + ' 个'],
+    `<table><tr><th>命令</th><th>契约效果</th></tr>${cmds}</table>`);
+
+  const legal = d.legality.map(l =>
+    `<tr><td><code>${esc(l.command)}</code></td><td>${l.allowed_states.map(s=>esc(s)).join(', ')}</td></tr>`).join('');
+  const legalCard = card('命令合法状态', ['来自 COMMAND_LEGALITY'],
+    `<table><tr><th>命令</th><th>允许的起始状态</th></tr>${legal}</table>`);
+
+  const layouts = Object.entries(d.field_layouts).map(([k,v]) =>
+    `<tr><td><code>${esc(k)}</code></td><td>${v.map(x=>esc(x)).join(' · ')}</td></tr>`).join('');
+  const layoutCard = card('多维端口字段布局', [Object.keys(d.field_layouts).length + ' 组'],
+    `<table><tr><th>端口</th><th>第二维字段顺序（必须按此解释）</th></tr>${layouts}</table>`);
+
+  const typeCard = name => {
+    const f = d.types[name], docs = d.type_docs[name] || {};
+    return `<tr><td><code>${esc(name)}</code>（${f.length} 字段）</td><td>${
+      f.map(x=>`<div><code>${esc(x.name)}</code>${docs[x.name]?
+        ` <span style="color:var(--dim)">— ${esc(docs[x.name])}</span>`:''}</div>`).join('')
+    }</td></tr>`;
+  };
+  const types = card('契约类型', ['冻结'],
+    `<table><tr><th>类型</th><th>字段</th></tr>${['UiScalar','UiSeries','UiView'].map(typeCard).join('')}</table>`);
+
+  const pd = card('PortDescriptor（契约层已定义）', [d.types.PortDescriptor.length + ' 字段'],
+    `<p style="color:var(--dim);font-size:.85rem">端口的<strong>类型</strong>定义。
+     通道已于 2026-09-24 裁定：<strong>由 C1 在 <code>UiView.port_summary</code> 里投影</strong>，
+     C4 不直连 C2（G14）。</p>
+     <table><tr><th>字段</th></tr>${d.types.PortDescriptor.map(x=>
+       `<tr><td><code>${esc(x.name)}</code></td></tr>`).join('')}</table>`);
+
+  // ★ 端口卡片：前向兼容。契约未实施 → port_summary 为空 → 保持上方告警可见；
+  //   契约实施后自动渲染 12 张卡片，告警自动撤下。无需改本页任何代码。
+  const gap = document.getElementById('portsGap');
+  const cards = document.getElementById('portsCards');
+  const grid = document.getElementById('portsGrid');
+  const summary = d.port_summary || [];
+  if (summary.length) {
+    grid.innerHTML = summary.map(p => `
+      <div class="card">
+        <h3><code>${esc(p.port_id)}</code></h3>
+        <table>
+          <tr><th>units</th><td><code>${esc(p.units)}</code></td></tr>
+          <tr><th>dimensions</th><td>${(p.dimensions||[]).map(esc).join(' × ')}</td></tr>
+          <tr><th>shape</th><td>${(p.shape||[]).map(esc).join(' × ') || '—'}</td></tr>
+          <tr><th>timeline_basis</th><td><code>${esc(p.timeline_basis)}</code></td></tr>
+        </table>
+      </div>`).join('');
+    cards.hidden = false;
+    gap.hidden = true;
+  } else if (d.not_shown && d.not_shown.ports) {
+    // 三态互斥。措辞必须说清「通道已通但本页无数据源」——
+    // 那不是"还没做完"，也不是故障。
+    const t = document.getElementById('gapTitle');
+    const gap = document.getElementById('portsGap');
+    if (d.not_shown.ports.implemented) {
+      // 状态 B：字段已落地，但本预览无会话，C1 仍是 SHELL，无处调用 snapshot() 投影
+      t.textContent = '12 个端口：通道已实施，本页无会话数据源';
+      gap.classList.remove('pending');
+    } else {
+      // 状态 A：契约尚未增 port_summary 字段
+      t.textContent = '⏳ 12 个端口：通道已裁定，契约待实施';
+      gap.classList.add('pending');
+    }
+  }
+
+  document.getElementById('app').innerHTML =
+    stateSvg(d) +
+    `<div class="grid">${units}${cmdCard}${legalCard}${layoutCard}${types}${pd}</div>`;
+}
+
+fetch('/api/contract')
+  .then(r => r.json())
+  .then(render)
+  .catch(e => { document.getElementById('app').textContent = '载入失败：' + e; });
+</script>
+</body>
+</html>

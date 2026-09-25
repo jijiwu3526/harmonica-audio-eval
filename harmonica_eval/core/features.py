@@ -24,6 +24,17 @@ MUST:
     - 音高必须是**绝对音高**（Hz），不得 chroma 化
     - 未发声帧的 f0 置 0 且 voiced=0（不要用 NaN —— 它会污染后续统计）
 
+★ 依赖边界（★ 本节解释为何本文件 import librosa 合规）：
+    - FILE-103-v1.md §3 的第三方允许清单明列：`numpy`、`numpy.typing`、
+      `librosa`（0.11.0）—— ★ 故本文件 `import librosa`（:46）合规。
+    - ★ 对照：`FILE-104-v1.md:138` 写有「禁止 import 任何音频 I/O 或解码库：
+      soundfile、librosa、audioread…」，★ 但那一条位于 FILE-104 的
+      【本文件依赖禁令】清单内，★ 约束目标是 `core/surface.py` 一个文件，
+      ★ ★ 不是「整个 core 层的通用禁令」。
+    - ★ core 各文件依赖面不同：align 只用 numpy+scipy（FILE-102 §3）、
+      ingest 用 soundfile 解码（FILE-101 定其为独有职责）。
+      ★ ★ 不可把某一文件的禁令推广到全层。
+
 MUST NOT:
     - 硬编码端口名列表（必须由 profile.PORTS 驱动）
     - 降采样后算音高（实测：22.05 kHz 下 D5 被判成 D4，恰好 −1200 音分）
@@ -43,7 +54,12 @@ BUILD-INSTRUCTION:
 
 from __future__ import annotations
 
+import librosa
+import numpy as np
 import numpy.typing as npt
+
+from ..contract import FIELD_LAYOUTS, CoreBuildError, ErrorCode
+from ..profile import ALIGN, AUDIO, MATERIALIZE
 
 MIN_STABLE_NOTE_SEC: float = 0.150
 """参与音准统计的最短音长（秒）。
@@ -60,6 +76,57 @@ VOICED_CONFIDENCE_FLOOR: float = 0.5
 """
 
 
+def _reject_nonfinite(values: npt.NDArray, what: str) -> None:
+    """非有限输入显式失败（§5），禁止让 NaN 污染下游统计。"""
+    if not np.isfinite(values).all():
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"{what} 含 NaN 或 inf —— 显式失败，不降级",
+        )
+
+
+def _check_rate(sample_rate: int) -> None:
+    if sample_rate <= 0:
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"sample_rate 必须为正，得到 {sample_rate}",
+        )
+
+
+def _as_mono_float32(samples: npt.NDArray, what: str) -> npt.NDArray:
+    """规整成 1-D float32，并做非有限检查。"""
+    _reject_nonfinite(samples, what)
+    out = np.asarray(samples, dtype=np.float32)
+    if out.ndim != 1:
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"{what} 必须是 1-D 单声道，得到 {out.ndim}-D",
+        )
+    return out
+
+
+def _frame_count(n_samples: int, frame_length: int, hop_length: int) -> int:
+    """帧数 = 1 + (n - frame) // hop；不足一帧时按补零语义产出 1 帧（§5）。
+
+    ★ 帧数完全由「输入长度 ÷ 帧移」导出，**不写死任何 fps 数字**。
+    实测 rms hop=256 → 172.3 fps、pitch hop=2048 → 21.5 fps，
+    没有一个端口是 100 fps（FILE-203:361 的「100 Hz」是陈旧残留）。
+    """
+    if n_samples < frame_length:
+        return 1
+    return 1 + (n_samples - frame_length) // hop_length
+
+
+def _rect_frames(x: npt.NDArray, n_frames: int, frame_length: int,
+                 hop_length: int) -> npt.NDArray:
+    """按矩形窗切帧并补齐到 n_frames 帧（不足处补零）。"""
+    need = frame_length + (n_frames - 1) * hop_length
+    if len(x) < need:
+        x = np.pad(x, (0, need - len(x)))
+    idx = np.arange(frame_length)[None, :] + hop_length * np.arange(n_frames)[:, None]
+    return x[idx]
+
+
 def materialize_pitch(samples: npt.NDArray, sample_rate: int) -> npt.NDArray:
     """生成逐帧音高曲线，形状 (n_frames, n_fields)。
 
@@ -74,7 +141,48 @@ def materialize_pitch(samples: npt.NDArray, sample_rate: int) -> npt.NDArray:
     未发声帧：f0_hz = 0, voiced = 0, confidence 如实报告。
     **不要用 NaN** —— 它会静默污染中位数/均值等后续统计。
     """
-    raise NotImplementedError("SHELL: FILE-103 待注入实现")
+    _check_rate(sample_rate)
+    x = _as_mono_float32(samples, "materialize_pitch 的 samples")
+    n_fields = len(FIELD_LAYOUTS["pitch"])
+    if x.size == 0:
+        return np.zeros((0, n_fields), dtype=np.float32)
+
+    n_frames = _frame_count(x.size, MATERIALIZE.pitch_frame_length,
+                            MATERIALIZE.pitch_hop_length)
+    try:
+        # ★ 帧长须 ≥ 2×hop，否则 librosa 内部会告警；此处按 profile 声明，
+        #   而非自选参数（§7「不引入未被 MATERIALIZE 声明的参数」）。
+        f0, voiced_flag, voiced_prob = librosa.pyin(
+            y=x,
+            sr=sample_rate,
+            fmin=MATERIALIZE.fmin_hz,
+            fmax=MATERIALIZE.fmax_hz,
+            frame_length=MATERIALIZE.pitch_frame_length,
+            hop_length=MATERIALIZE.pitch_hop_length,
+            center=True,
+        )
+    except Exception as exc:  # 估计器内部失败 → 显式失败（§5）
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"pyin 估计失败：{exc}",
+        ) from exc
+
+    f0 = np.nan_to_num(np.asarray(f0, dtype=np.float64), nan=0.0,
+                       posinf=0.0, neginf=0.0)
+    prob = np.nan_to_num(np.asarray(voiced_prob, dtype=np.float64), nan=0.0,
+                         posinf=1.0, neginf=0.0)
+    prob = np.clip(prob, 0.0, 1.0)
+    # ★ 阈值口径冻结：confidence >= floor ⇒ voiced == 1（等号视为发声）。
+    voiced = (prob >= VOICED_CONFIDENCE_FLOOR).astype(np.float64)
+    # ★ 未发声帧的 f0 强制 0 —— 绝不让估计器的猜测值漏出去（§7）。
+    f0 = np.where(voiced > 0, f0, 0.0)
+
+    n = min(len(f0), n_frames)
+    out = np.zeros((n_frames, n_fields), dtype=np.float32)
+    out[:n, 0] = f0[:n]
+    out[:n, 1] = voiced[:n]
+    out[:n, 2] = prob[:n]
+    return out
 
 
 def materialize_rms(samples: npt.NDArray) -> npt.NDArray:
@@ -85,10 +193,19 @@ def materialize_rms(samples: npt.NDArray) -> npt.NDArray:
 
     单位：线性 RMS。**不要在这里转 dB** —— 转 dB 是算法侧的表达选择。
     """
-    raise NotImplementedError("SHELL: FILE-103 待注入实现")
+    x = _as_mono_float32(samples, "materialize_rms 的 samples")
+    if x.size == 0:
+        return np.zeros((0,), dtype=np.float32)
+
+    n_frames = _frame_count(x.size, MATERIALIZE.rms_frame_length,
+                            MATERIALIZE.rms_hop_length)
+    frames = _rect_frames(x, n_frames, MATERIALIZE.rms_frame_length,
+                          MATERIALIZE.rms_hop_length)
+    out = np.sqrt(np.mean(np.square(frames.astype(np.float64)), axis=1))
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
 
 
-def materialize_chroma(samples: npt.NDArray) -> npt.NDArray:
+def materialize_chroma(samples: npt.NDArray, sample_rate: int) -> npt.NDArray:
     """生成低分辨率 chroma，形状 (n_frames, 12)。
 
     字段顺序 = contract.FIELD_LAYOUTS['chroma']，**bin 0 = C**（不是 A）。
@@ -98,7 +215,43 @@ def materialize_chroma(samples: npt.NDArray) -> npt.NDArray:
     chroma 八度不变，无法区分 C4 与 C5。
     保留在数据面里是为了让审查者能重跑对齐、验证 warp_path 不是凭空来的。
     """
-    raise NotImplementedError("SHELL: FILE-103 待注入实现")
+    _check_rate(sample_rate)
+    x = _as_mono_float32(samples, "materialize_chroma 的 samples")
+    n_chroma = len(FIELD_LAYOUTS["chroma"])
+    if x.size == 0:
+        return np.zeros((0, n_chroma), dtype=np.float32)
+
+    try:
+        # ★ sr 必传：漏传会用 librosa 默认的 22050，频率轴整体错一倍且不报错。
+        #   帧移取 ALIGN.hop_length（与 chroma.lowres.* 声明的 hop_length 一致）。
+        out = librosa.feature.chroma_stft(
+            y=x,
+            sr=sample_rate,
+            n_fft=MATERIALIZE.frame_length,
+            hop_length=ALIGN.hop_length,
+            n_chroma=n_chroma,
+            tuning=0.0,
+            norm=np.inf,
+            center=True,
+        )
+    except Exception as exc:
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"chroma_stft 失败：{exc}",
+        ) from exc
+
+    out = np.asarray(out, dtype=np.float32)
+    if out.ndim != 2 or out.shape[0] != n_chroma:
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"chroma 输出形状异常：{out.shape}",
+        )
+    out = np.nan_to_num(out.T, nan=0.0, posinf=0.0, neginf=0.0)
+    # ★ 静音帧整行为 0，不参与归一化（否则 0/0 → NaN）。
+    norm = np.max(np.abs(out), axis=1, keepdims=True)
+    live = norm[:, 0] > 0.0
+    out[live] /= norm[live]
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
 
 
 def materialize_notes(
@@ -116,4 +269,69 @@ def materialize_notes(
 
     只对 voiced 且连续时长 ≥ MIN_STABLE_NOTE_SEC 的片段成音。
     """
-    raise NotImplementedError("SHELL: FILE-103 待注入实现")
+    _check_rate(sample_rate)
+    p = np.asarray(pitch, dtype=np.float32)
+    r = np.asarray(rms, dtype=np.float32)
+    n_fields = len(FIELD_LAYOUTS["notes"])
+
+    if p.ndim != 2 or p.shape[1] != len(FIELD_LAYOUTS["pitch"]):
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"pitch 形状不符：{p.shape}（应为 (n_frames, "
+            f"{len(FIELD_LAYOUTS['pitch'])}）",
+        )
+    if r.ndim != 1:
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            f"rms 必须 1-D，得到 {r.ndim}-D",
+        )
+    _reject_nonfinite(p, "materialize_notes 的 pitch")
+    _reject_nonfinite(r, "materialize_notes 的 rms")
+
+    # ★ §5 判定按序：无片段时**不检查 rms**（纯静音是合法输入，不该报错）。
+    if p.shape[0] == 0:
+        return np.zeros((0, n_fields), dtype=np.float32)
+
+    hop = MATERIALIZE.pitch_hop_length
+    rms_hop = MATERIALIZE.rms_hop_length
+    voiced = p[:, 1] > 0.5
+    if not voiced.any():
+        return np.zeros((0, n_fields), dtype=np.float32)
+    if r.size == 0:
+        # ★ 有音却无能量帧 ⇒ 数据面自相矛盾，显式失败（§5 第 2 条）。
+        raise CoreBuildError(
+            ErrorCode.CORE_BUILD_FAILED,
+            "rms 为空但 pitch 含有发声片段 —— 数据面自相矛盾",
+        )
+
+    # 1) voiced 列上的连续段切分
+    edges = np.flatnonzero(np.diff(voiced.astype(np.int8)) != 0) + 1
+    starts = np.concatenate(([0], edges))
+    ends = np.concatenate((starts[1:], [len(voiced)]))
+    rows = []
+    for s, e in zip(starts, ends):
+        if not voiced[s]:
+            continue
+        # 2) 片段时长 = 帧数 × pitch_hop ÷ sr；3) 丢弃 < MIN_STABLE_NOTE_SEC
+        dur = (e - s) * hop / sample_rate
+        if dur < MIN_STABLE_NOTE_SEC:
+            continue
+        # 4) onset 取首帧时间；f0 取片段内 voiced 帧中位数
+        onset = s * hop / sample_rate
+        f0_med = float(np.median(p[s:e, 0]))
+        #    rms 取「时间上被片段覆盖」的帧的中位数（两侧帧移不同，按时间对齐）
+        t0 = s * hop / sample_rate
+        t1 = e * hop / sample_rate
+        j = np.flatnonzero((np.arange(r.size) * rms_hop / sample_rate >= t0)
+                           & (np.arange(r.size) * rms_hop / sample_rate < t1))
+        if j.size == 0:
+            # 片段短于 rms 帧移 → 取最近的一帧，不填充 0（§5 禁止用 0 掩盖）
+            j = np.array([int(np.clip(round(t0 * sample_rate / rms_hop),
+                                     0, r.size - 1))])
+        rows.append((onset, f0_med, float(np.median(r[j]))))
+
+    # 5) 按 onset 升序
+    rows.sort(key=lambda t: t[0])
+    if not rows:
+        return np.zeros((0, n_fields), dtype=np.float32)
+    return np.asarray(rows, dtype=np.float32)

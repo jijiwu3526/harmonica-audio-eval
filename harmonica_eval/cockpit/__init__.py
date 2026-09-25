@@ -58,7 +58,32 @@ def launch_cockpit(port: UiProjectionPort) -> int:
     说明：本函数**阻塞**。它运行在哪个线程或进程，由包外装配方决定，
           C4 不假设也不管理进程模型。
     """
-    raise NotImplementedError("SHELL: FILE-400 待注入实现")
+    # ── ① 校验 port（§5）────────────────────────────────────────
+    #   ★ 校验失败必须【先失败、不启动服务】，所以这一步在延迟 import 之前。
+    #   ★ 不吞异常：port 自己抛出的异常原样向上传播
+    #     （刷新循环的处理是 app 的责任，不在本文件重复实现）。
+    if port is None:
+        raise TypeError(
+            "launch_cockpit(port): port 为 None；"
+            "C4 不构造 UiProjectionPort，必须由调用方注入（见本文件 MUST）"
+        )
+    for _name in ("snapshot", "submit"):
+        if not callable(getattr(port, _name, None)):
+            raise TypeError(
+                f"launch_cockpit(port): port 缺可调用的 {_name}()；"
+                "它必须实现 UiProjectionPort（见本文件 MUST）"
+            )
+
+    # ── ② 延迟 import app（§4.2 第 2 步）─────────────────────────
+    #   ★★ 为什么必须放在函数体内：包导入期 import 子模块会造成
+    #      导入顺序耦合与循环 import（见本文件 MUST NOT），
+    #      且 §8 命令 A 断言导入后 sys.modules 里没有 .app。
+    #   ★★ 这里【只】取符号并转发，不复制 app 的任何常量：
+    #      绑定地址、端口探测、刷新周期、并发上限全在 app 侧（§4.2 第 3/4 步）。
+    from . import app
+
+    # ── ③ 启动并原样返回退出码（§4.2 第 3 步）───────────────────
+    return app.run_local_ui(port)
 
 
 __all__ = ["launch_cockpit"]

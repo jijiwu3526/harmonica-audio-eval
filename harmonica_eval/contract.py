@@ -25,14 +25,16 @@ DESIGN-RULING（负责人裁定，不可推翻）:
     **Core 预生成，端口清单封闭。算法适配 Core，不是 Core 适配算法。**
     故 AlgorithmDataContract 只有两个**纯查表**操作（manifest / read），
     read() **无副作用**：它不会触发任何计算，也不会失败于「算不出来」。
-    若算法需要数据面之外的东西，**从 PCM 自己算**，不许要求 Core 提供。
+    此外，协议附带一个**只读状态** `resolution`：它把本次输入解析的事实
+    以不可变视图交给插件，不增加第三个可调用行为。若算法需要数据面之外的
+    东西，**从 PCM 自己算**，不许要求 Core 提供。
 
 INPUT:
     （无）
 
 OUTPUT:
     SessionState · TimelineBasis · AlignmentRepresentation · AudioFormat
-    PortDescriptor · BufferView · SurfaceManifest · AlgorithmResultEnvelope
+    PortDescriptor · BufferView · SurfaceManifest · ResolutionView · AlgorithmResultEnvelope
     ErrorCode · HarmonicaError 族
     HostContract · AlgorithmDataContract · UiProjectionPort
     FORBIDDEN_OPERATIONS · CORE_REQUIRED_PORTS
@@ -45,7 +47,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping, Protocol, Sequence
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -58,9 +61,11 @@ import numpy.typing as npt
 class SessionState(str, Enum):
     """会话状态。**C1 只允许看到这些**；C2 内部阶段不得外泄。
 
-    单调推进，不可回退：
+    正常流程状态单调推进，不跳过数据面构建：
         CREATED → INPUT_READY → BUILDING → DATA_READY
         任一状态可 → FAILED；结束 → CLOSED
+    `CANCEL` 与 `RESET` 是管理操作，允许回退到稳定态
+    （具体转移见 `COMMAND_EFFECTS` 的冻结语义）。
     """
 
     CREATED = "CREATED"
@@ -229,6 +234,8 @@ UNITS_VOCABULARY: frozenset[str] = frozenset({    "amplitude",
     "cents",
     "seconds",
     "db",
+    "ratio",
+    "count",
 })
 """端口的合法 `units` 取值（G10 修正）。
 
@@ -246,7 +253,21 @@ UNITS_VOCABULARY: frozenset[str] = frozenset({    "amplitude",
 预留但当前未用：`cents`（音分，来自算法 payload）、`db`（同上）、
 `seconds`（时刻，来自 payload）。
 **预留项必须由某个未来的 profile 真正使用，否则应删** ——
-本词表不收集"以后可能有用"的值。"""
+本词表不收集"以后可能有用"的值。
+
+★ C3 插件化追加两值（`ratio` / `count`），与上面"预留必须真用"同一原则：
+
+    ratio     0–1 的比例，如 off_pitch_ratio / early_ratio
+    count     无量纲计数，如 n_notes_used / n_unpaired
+
+追加理由是**已经有一个无法自圆其说的缺口**，不是预防性设计：
+`off_pitch_ratio` 是比例、`n_notes_used` 是计数，它们都要出现在
+插件产出的 `payload` 里。旧词表 8 个值里没有任何一个能正确描述它们；
+若留空字符串，则违反项目铁律「每个数字都要能回答它是什么、怎么算的、
+单位是什么」——没有单位的数字在报告里无法解释。
+本词表原先已把 `cents`/`db`/`seconds` 标为"来自 payload"，
+说明"payload 的单位也归本表管"这条规则早已存在，
+只是当时漏了比例与计数两类。"""
 
 
 @dataclass(frozen=True)
@@ -270,6 +291,24 @@ class PortDescriptor:
     """维度语义名，如 ('sample',) / ('frame',) / ('frame', 'field')。"""
 
     shape: Sequence[int]
+    """端口数组的**实际**维度大小，如 `(220500,)` / `(108, 12)`。
+
+    ★ **本字段是运行期事实，不在 `profile.PortSpec` 中**
+    （负责人裁定 2026-09-24：shape 由 C1 向 C2 询问获得）。
+
+    理由：多维端口的帧数依赖音频实际时长与 hop，
+    例 `chroma.lowres.*` 帧数 = `ceil(n_samples / 2048)`，
+    而 `n_samples` 只在 C2 内部 —— 静态 profile 无法给出。
+
+    ★ **严禁**从 `dimensions` 的语义名反推尺寸：`'frame'` / `'bin'`
+    只表维度**种类**，不含大小（见本模块 §G6 修正）。
+
+    取值必须是 Python `int`（`numpy.int64` 会破坏 dataclass 的 `==` 与哈希）。
+
+    C1 的取得方式：经 `Surface.manifest().ports[*].shape`，
+    **不需新增任何 port 操作**（`FILE-003` §4.15 仍禁止增第三个操作）。
+    """
+
     units: str
     """物理单位。★ 取值见 `UNITS_VOCABULARY`（受控词表，G10 修正）。
 
@@ -334,6 +373,8 @@ class PortDescriptor:
 
     注意：本 hash 用于**同一实现内的回归**与**跨实现的对照**，
     **不**用于安全用途（不是抗碰撞承诺）。
+
+    版本身份由 `SurfaceManifest.profile_version` 承载，**不**进入本 hash。
     """
 
 
@@ -368,6 +409,32 @@ class SurfaceManifest:
 
 
 @dataclass(frozen=True)
+class ResolutionView:
+    """插件运行入口可见的输入解析只读视图。
+
+    ★ 这是契约层的**视图类型**，不是 runtime.py 的 `InputResolution`。
+    `InputResolution` 是一次执行的私有记录；插件只应看到这里定义的
+    不可变事实，不能拿到、修改或重新构造 C1 的解析对象。
+
+    两个集合都使用 `frozenset`，对象本身由 `frozen=True` 保护：
+    没有 setter、没有变更方法，也没有可变映射可供插件写入。
+
+    `is_available()` 是唯一的查询操作；`missing_optional` 可直接枚举，
+    回答本次运行究竟缺了哪些 optional 端口。
+    """
+
+    available: frozenset[str]
+    """本次解析认为实际可用的 required / optional 端口 id。"""
+
+    missing_optional: frozenset[str]
+    """声明了但本次未取得、未通过检查的 optional 端口 id。"""
+
+    def is_available(self, port_id: str) -> bool:
+        """返回该端口本次是否真的可用；未知或缺失端口均为 False。"""
+        return port_id in self.available
+
+
+@dataclass(frozen=True)
 class AlgorithmResultEnvelope:
     """算法的标准回执。
 
@@ -377,7 +444,22 @@ class AlgorithmResultEnvelope:
     algorithm_id: str
     algorithm_version: str
     status: str
-    """'OK' | 'FAILED' | 'INCOMPATIBLE'。"""
+    """`'OK' | 'DEGRADED' | 'INCOMPATIBLE' | 'FAILED'`。
+
+    ★ C3 插件化把域从 3 值扩为 4 值（新增 `DEGRADED`）。四值严格语义：
+
+        OK           兼容并正常完成**全部**预期功能
+        DEGRADED     正常运行，但因 optional 输入缺失或明确的输入质量限制，
+                     只提供**部分**能力。绝不允许"少算了却报 OK"
+        INCOMPATIBLE required 输入不满足，算法**根本没运行**
+        FAILED       输入本来兼容，但执行过程中失败
+
+    这四值与 `ErrorCode` 的对应是机械的，不需要额外映射表：
+        INCOMPATIBLE → `PLUGIN_INCOMPATIBLE`
+        FAILED       → `ALGORITHM_FAILED` / `ALGORITHM_TIMEOUT` /
+                       `ALGORITHM_RESULT_INVALID`
+        DEGRADED / OK → `error_code is None`（降级不是错误，二者都不得带错误码）
+    """
 
     required_ports: Sequence[str]
     """算法声明需要的端口。仅用于兼容性检查（单向）。"""
@@ -386,12 +468,229 @@ class AlgorithmResultEnvelope:
     """本次**实际读取**的端口。仅用于证据与追溯，
     **绝不**反向触发 C2 生成数据。"""
 
-    payload: Mapping[str, Any]
-    """结果本体。形状由算法自己声明，C1 不解释其内部。"""
+    payload: Sequence[UiScalar | UiSeries]
+    """★ C3 插件化：类型由 `Mapping[str, Any]` 改为**自描述序列**。
+
+    为什么必须改（这是本轮要修的"框架必须认识具体算法"的总根源）：
+    `Mapping[str, Any]` 本身不携带任何字段名信息。旧设计靠框架里一张
+    `PAYLOAD_SCHEMAS`（键 = algorithm_id，值 = 字段名元组）来告诉校验器
+    "该查哪些键"——**那张表住在框架里，所以框架必须认识 pitch/timing/
+    dynamics 每一个算法的字段名**。加一个算法就要改框架，违反不变量
+    「新增算法不改 Host」。
+
+    改法不是"再加一张表"，而是**让结果自己说得清自己长什么样**：
+    payload 的元素改为已经冻结、已经自描述、UI 已经在用的
+    `UiScalar` / `UiSeries`。它们带 `key` / `label` / `unit`
+    （以及 series 的 `timeline_basis`），所以：
+
+        - 字段名住在**插件产出的对象里**，不在框架里
+        - C1 的投影退化成**同构字段复制**（见下），不需要任何映射表
+        - `PAYLOAD_SCHEMAS` 可以整张删掉
+
+    为什么复用 `UiScalar` / `UiSeries` 而不是新建 `ResultMetric` /
+    `ResultSeries`：这两类的字段与它们**逐字相同**
+    （`key,label,value,unit,threshold` / `key,label,t,values,unit,
+    timeline_basis,source_port`）。新建一对同构类型就是制造第二套
+    "结果数据面"，纯属多一个要维护的形状 —— 违反项目铁律「宁可少写」。
+
+    投影因此是零逻辑的：
+        payload[i] 是 UiScalar → 直接构造 UiView.scalars 条目
+        payload[i] is UiSeries  → 直接构造 UiView.series 条目
+    唯一需要的额外加工是 C1 既有的 series 下采样
+    （`MAX_PROJECTION_POINTS`，L2 选型），与本类型无关。
+
+    ★ 为什么不做 `events`：`per_note_cents`（逐音音分）这类"逐事件"
+    结果，用 `UiSeries`（`t` 放 onset_sec、`values` 放偏差、
+    `timeline_basis=REFERENCE`）即可表达。为它新建第三个概念是
+    为假想需求扩张，v0.1 不做。
+
+    ★ 破坏性说明：这是**改已有字段的类型**（dict → Sequence），
+    不是加字段。依赖旧 `Mapping` 形状的 3 个算法骨架与 5 份 Build
+    Instruction 必须同步迁移；按陈旧传播铁律（宪章 §40）已在
+    `.spec/` 记录，不允许"以后再说"。"""
 
     error_code: str | None = None
     error_detail: str | None = None
     elapsed_sec: float | None = None
+
+    coverage: float | None = None
+    """本次结果的**覆盖比例**，取值 `0.0`–`1.0`。
+
+    ★ 为什么允许 `None` 而不强制给数字：这对应架构铁律
+    「无法测量不能编码成数值 0」。当插件连一个音都没配上
+    （例如 `n_notes_used == 0`），"覆盖率是多少"这个问题**本身
+    没有答案**，此时必须写 `None`；写 `0.0` 会把"测不出"与
+    "测得为零"混成同一个数字，报告里将无法区分。
+    由 `algorithms.runtime.validate_result()` 机械校验取值域。
+
+    新增理由：这是 `DEGRADED` 状态唯一能被外部验证的凭据之一
+    —— 插件声称"只提供部分能力"时，coverage 给出缺了多少。
+    """
+
+    warnings: tuple[str, ...] = ()
+    """人可读的告警，每条一句。默认空元组。
+
+    ★ 关键不变式：`status == "DEGRADED"` 时本字段或 `coverage`
+    **至少有一项非空**。否则就是「少算了却报 OK」，必须由
+    `algorithms.runtime.validate_result()` 判为 `ALGORITHM_RESULT_INVALID`。
+    这条把"不许偷偷少算"从口头约定变成可机械验证的断言。
+
+    ★ 为什么佐证只有这两项（`coverage` / `warnings`），**不包括**
+    "缺了哪些 optional"：那项事实住在 `algorithms.runtime` 的
+    `InputResolution` 里，**不在信封内**。若把它列为佐证，
+    `validate_result(result)` 这个纯函数就拿不到它 —— 那要么迫使
+    校验器接收额外参数，要么迫使把 optional 缺失名单塞进信封，
+    后者等于**用结果数据传控制信息**，是更坏的设计。
+    所以职责划成两半，边界写在这里以免被当成遗漏：
+        本函数只管"结果自身是否自洽"（coverage 或 warnings 至少一项）
+        "consumed_ports 是否都在本次实际可用的端口里"由 **C1**
+        在调用点比对 —— 只有 C1 手里才有 resolution。"""
+
+
+# ═══════════════ C3 插件契约（C3 Plugin Contract）═══════════════
+#
+# ★ 本节解决的是"框架必须认识具体算法"这个架构错误。
+# 旧设计里 algorithms/__init__.py 用 `from . import dynamics, pitch, timing`
+# + `ALGORITHMS` 元组把三个具体算法硬绑进宿主，并用 `PAYLOAD_SCHEMAS`
+# 按 algorithm_id 索引字段名。两者合起来的后果是：**加一个算法必须改
+# 框架文件**。本节的两个类型把"插件声明什么"从框架里搬回插件自己。
+
+
+@dataclass(frozen=True)
+class InputRequirement:
+    """一个插件对**单个端口**的输入要求。
+
+    只有 6 个字段，其中 5 个有默认值 —— **只有 `port_id` 必填**。
+    每个字段都对应一种"如果不检查就会算错"的情形；不做形状断言、
+    不做版本范围、不做单位约束，理由逐条写在各字段 docstring 里。
+    """
+
+    port_id: str
+    """必填。目标端口 id，如 `'pcm.mapped.reference'`。"""
+
+    schema_version: str = "*"
+    """端口 schema 版本要求。默认 `'*'` 表示只要端口存在即可。
+
+    ★ 实测事实（不是推测）：当前 12 个端口的 `PortDescriptor.schema_version`
+    **全部等于 `'CORE_PROFILE_V0.1'`**，即它承载的是 profile 版本，
+    **不是**逐端口的语义版本。所以：
+        - 绝大多数插件应当用默认值 `'*'`
+        - 不要依赖它做细粒度兼容判断
+        - 细粒度判断用 `element_type` / `required_fields`
+    保留本字段是为了将来真的做 breaking change 时有地方可声明；
+    精确相等即可，**不做版本范围**（`>=1,<2` 之类）。
+    """
+
+    timeline_basis: TimelineBasis | None = None
+    """要求该端口处于哪条时间轴。`None` = 不约束。
+
+    ★ 这是最危险的一个检查点。`TimelineBasis` 只有 `REFERENCE`（真实时间）
+    与 `WARPED`（时间归一化后）两个值。若插件在 `REFERENCE` 轴上算节奏，
+    却在 `WARPED` 轴上取数，抢拍拖拍会被时间归一化**抹成 0** 且不报错 ——
+    这是"看起来完全合理、结果全错"的典型。插件**应当**显式声明它算的是
+    哪条轴，让不匹配在运行前就被判为 INCOMPATIBLE。
+    """
+
+    element_type: str | None = None
+    """要求 dtype，如 `'float32'` / `'int32'`。`None` = 不约束。"""
+
+    required_fields: tuple[str, ...] = ()
+    """要求该端口的 `field_names` 包含这些字段。空 = 不约束。
+
+    例：`FieldLayouts` 已知 `pitch.*` 是
+    `('f0_hz','voiced','confidence')`。若插件要按列名取值而非按下标，
+    就应声明 `('f0_hz','voiced')`，这样 Core 改列名时会立刻暴露，
+    而不是等到插件内部 `KeyError` 或更糟的**静默错位**。
+    """
+
+    sample_rate: int | None = None
+    """要求该端口的 `sample_rate` 等于此值。`None` = 不约束。
+
+    ★ 实测事实：当前 12 个端口里有 5 个 `sample_rate == 0`
+    （`warp_path` / `chroma.lowres.*` / `notes.*`），含义是
+    **"与采样率无关"**，不是数据缺失。所以：
+        - 这些端口可以被正常声明为 required/optional
+        - 但**不允许**插件写 `sample_rate=0` 当作"要求采样率为 0"
+          （那是一个永远匹配不到任何东西的无意义条件）
+
+    为什么值得单独设一个字段：SPEC §7.4 已裁定**采样率是 f0 结果的成因**，
+    必须与结果一起记录。音高类插件声明它，让跨采样率的结果不会被
+    静默地混在一起比较。
+    """
+
+
+@dataclass(frozen=True)
+class PluginSpec:
+    """一个算法插件的注册条目：**插件向框架声明的全部内容**。
+
+    装配期（C1 的 `build_default_app`）显式 `registry.register(spec)`，
+    之后 Host 与 UI 只面对 Registry。框架**不认识**任何具体算法。
+    """
+
+    algorithm_id: str
+    """稳定标识，如 `'pitch'`。出现在结果信封与 UI 中。
+
+    ★ 命名裁定（负责人，2026-09-24）：本字段原名 `plugin_id`，
+    已改为 `algorithm_id`，与 `AlgorithmResultEnvelope.algorithm_id`
+    **同名**。理由：契约要求"两者必须一致"，而原命名不一致
+    （`plugin_id` vs `algorithm_id`）迫使实现者自行猜测映射关系。
+    改名后一致性是**同名同值**，无映射歧义。
+    """
+
+    algorithm_version: str
+    """算法版本。行为改变时必须递增，否则结果无法追溯。
+
+    ★ 命名裁定：原名 `version`，已改为 `algorithm_version`，
+    与 `AlgorithmResultEnvelope.algorithm_version` 同名同义。
+    ★ **注意**：本字段与信封的 `algorithm_version` 目前是**两个独立值**，
+    契约要求实现者保证它们一致，但**没有机械校验**。
+    换言之它们**不共享同一数据源** —— 见本类 `entry` 的说明。
+    """
+
+    label: str
+    """给人看的中文短名，UI 直接显示。"""
+
+    required_inputs: tuple[InputRequirement, ...]
+    """**缺任何一个 → INCOMPATIBLE，入口根本不被调用。**
+
+    语义是"缺了就**算出来的数是错的**"，不是"功能少一点"。
+    典型只有两条 PCM：Level A 的保底入口保证"只吃 PCM 的新算法"
+    永远能接进来，不需要 Core 预先认识它。
+    """
+
+    optional_inputs: tuple[InputRequirement, ...]
+    """**有就使用；没有也允许运行。**
+
+    缺失时插件**必须**二选一：
+        - 关闭依赖该数据的能力
+        - 或返回 `status='DEGRADED'` 并在 warnings 里写清原因
+    **绝不允许** status 仍是 `OK` 却少算了东西。
+    这条由 `algorithms.runtime.validate_result()` 机械校验。
+
+    v0.1 只有 required / optional 两级，**不建** preferred / fallback /
+    minimal 三四套输入计划。
+    """
+
+    entry: Callable[[AlgorithmDataContract], AlgorithmResultEnvelope]
+    """算法入口，签名**已冻结**。
+
+        entry(surface: AlgorithmDataContract) -> AlgorithmResultEnvelope
+
+    实现约定：
+        - **同步、纯函数**：不修改 surface，不持有跨会话状态
+        - **不抛异常**：失败也返回信封（`status='FAILED'` + error_code），
+          异常穿透会破坏 C1 对单个插件的故障隔离
+        - 返回信封的 `algorithm_id` / `algorithm_version` 必须与本条目的
+          `algorithm_id` / `algorithm_version` **分别相等**
+        ★ **这两个值目前无机械链接**：信封的 `algorithm_version` 由算法
+          自己在 `entry` 内填写，本条目的 `algorithm_version` 由装配期填写，
+          两者是**各自独立的字符串**。契约只要求"实现者保证一致"，
+          **不提供自动校验**。若将来要消除该风险，正确做法是让框架
+          在校验信封时按 `algorithm_id` 查出本条目并比对版本 ——
+          那属于校验逻辑变更，须由负责人裁定。
+        - `payload` 必须是 `Sequence[UiScalar | UiSeries]`（自描述），
+          **不得**返回裸 dict —— 那正是 `PAYLOAD_SCHEMAS` 存在的原因
+    """
 
 
 class AlgorithmDataContract(Protocol):
@@ -402,10 +701,22 @@ class AlgorithmDataContract(Protocol):
 
     **read() 无副作用**：不触发计算、不会失败于「算不出来」。
     Seal 时数据面里已有算法要的一切——这是负责人的架构裁定。
+
+    ★ 此外暴露一个**只读状态** `resolution`（不是操作，不产生查询）：
+    它把 C1 为本次运行算出的输入解析事实，以 `ResolutionView` 交给插件，
+    使插件能够区分「optional 拿到了」与「optional 没拿到」。
+    C2 的 Surface 不实现该属性；C3 的 runtime 薄适配器组合 C2 数据面
+    与该只读视图后再交给单参 `entry`。视图没有 setter，原始
+    `InputResolution` 不会越过 runtime 边界。
     """
 
     def manifest(self) -> SurfaceManifest:
         """返回自描述清单，用于枚举端口并判断兼容性。"""
+        ...
+
+    @property
+    def resolution(self) -> ResolutionView:
+        """返回本次输入解析的只读视图（状态，不是操作）。"""
         ...
 
     def read(
@@ -481,6 +792,74 @@ CORE_REQUIRED_PORTS: tuple[str, ...] = (
 它们保证算法永远能自行做特有预处理，从而 profile 只决定「快不快」，
 不决定「能不能」。
 """
+
+
+# ═════════════════════════════════════════════════════════════════════
+# 二点五 · 端口 hop 的【契约层只读真相源】（2026-09-24 负责人裁定）
+# ═════════════════════════════════════════════════════════════════════
+#
+# ★ 为什么要放在这里 ★
+#
+# 权威源是 `profile.PORT_INDEX[...].hop_length`（C2 侧）。
+# ★ 但 `contract.py` **不能** import `profile` —— 那会形成 C2 → 契约层的反向依赖，
+#   违反「core 不得知道 algorithms 存在」的同源不变量。
+# ★ 而算法模块的 import 面被 FILE-201 §8 判据 G 冻结（只允许
+#   `__future__` / `math` / `statistics` / `time` / `typing` / `numpy` / `contract`），
+#   **不含 `profile`** —— 所以算法也读不到权威源。
+#
+# ★ 结果：hop 值此前被【复制】进 pitch.py（PITCH_HOP_LENGTH = 2048），
+# ★ 同一事实两处定义，迟早漂移。
+#
+# ★ 本表把「契约层承诺的 hop」显式化，作为算法侧唯一可读的通道。
+# ★ 它与 profile.PORT_INDEX 同源（见 tests 与 §8 判据的交叉核对），
+# ★ 双向不一致会被判据抓到。
+
+PORT_HOP_LENGTHS: Mapping[str, int] = MappingProxyType({
+    # ── pitch.*：音高轨迹，帧跳大（21.5 fps）──
+    "pitch.reference": 2048,
+    "pitch.practice": 2048,
+    # ── rms.*：能量轨迹，帧跳小（172.3 fps）──
+    "rms.reference": 256,
+    "rms.practice": 256,
+    # ── chroma.*：与 pitch 同帧跳 ──
+    "chroma.lowres.reference": 2048,
+    "chroma.lowres.practice": 2048,
+    # ── notes.*：逐音表，帧跳不适用（0）──
+    "notes.reference": 0,
+    "notes.practice": 0,
+    # ── pcm.*：样本序列，帧跳不适用（0）──
+    "pcm.mapped.reference": 0,
+    "pcm.mapped.practice": 0,
+    "pcm.warped.practice": 0,
+    # ── warp_path：帧对表，帧跳不适用（0）──
+    "warp_path": 0,
+})
+"""端口 id → 帧跳（采样点）。**只读映射**，调用方不得修改。
+
+★ **0 表示该端口的「帧」概念不适用**（样本序列、逐音表、帧对表），
+★   不表示「零帧跳」—— 对这类端口调用 `hop_of()` 会抛 `KeyError` 以免误用。
+★ ★ 真正需要帧跳的只有 pitch / rms / chroma 三族。
+"""
+
+
+def hop_of(port_id: str) -> int:
+    """返回该端口的帧跳（采样点）。
+
+    ★ 这是算法侧读取 hop 的**唯一合法通道** —— 判据 G 的 import 面冻结不含
+    `profile`，而 hop 的权威源在 C2 侧；契约层在此提供只读转供，
+    避免同一数值被复制进多个算法模块。
+
+    `port_id` 必须是帧概念适用的端口（`pitch.*` / `rms.*` / `chroma.*`）。
+    ★ 帧概念不适用者（`pcm.*` / `notes.*` / `warp_path`）抛 `KeyError` ——
+    ★ 宁可报错，也不要让「0」被误当成「零帧跳」而静默算出错误的帧号。
+    """
+    hop = PORT_HOP_LENGTHS[port_id]
+    if hop <= 0:
+        raise KeyError(
+            f"端口 {port_id!r} 的帧概念不适用（帧跳为 0）；"
+            "不得把它当作零帧跳使用"
+        )
+    return hop
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -700,7 +1079,12 @@ class AlgorithmError(HarmonicaError):
 
 
 # ═════════════════════════════════════════════════════════════════════
-# 五 · CONTRACT-UI-v1（C1 ↔ C4）
+# 五 · CONTRACT-UI-v2（C1 ↔ C4）
+# ★ v1 → v2（负责人裁定 2026-09-24）：`UiView` 新增 `port_summary` 数据字段。
+# ★ 仅为修补「C4 无合法通道得知端口结构」的通道缺失，属**有限扩面**，
+# ★ 不是 port 新增操作（§4.15「不得再增第三个操作」继续有效）。
+# ★ ★ 后续任何 UiView 字段增删须重新裁定，不得援引本次先例（见 FILE-003 §4.13）。
+# ★ 遗留：`CONTRACTS.md:32,141` 仍写 v1，**不在本轮授权文件范围**，需另派同步。
 # ═════════════════════════════════════════════════════════════════════
 
 @dataclass(frozen=True)
@@ -715,7 +1099,7 @@ class UiScalar:
     """给人看的短名，中文。"""
     value: float
     unit: str
-    """'cents' / 'ms' / 'db' / 'ratio' / ''。"""
+    """受 UNITS_VOCABULARY 封闭约束；例如 'cents' / 'seconds' / 'db' / 'ratio' / 'count'。"""
     threshold: float | None = None
     """可选参考阈值。None 表示纯陈述、无判定。"""
 
@@ -783,7 +1167,33 @@ class UiView:
 
         BUILD_SURFACE 期间    → 0.0 → 1.0 的**单次跳变**（或 None）
                                 没有中间值，因为那需要 Core 汇报内部阶段
-        RUN_ALGORITHMS 期间   → k / 3（k = 已完成算法数，按 registry 顺序）
+        RUN_ALGORITHMS 期间   → k / N
+
+    ── RUN_ALGORITHMS 期间分母 N 的冻结定义（负责人裁定，2026-09-24）──
+
+        N ＝ 该**会话** Registry 中已装配算法的总数，按 `Registry.list()`
+            的长度取**运行期快照**。
+
+    三个必须写清的要点：
+
+        1. **N 从哪来**：来自 C1 装配期显式 `register()` 之后的
+           `Registry.list()` 条目数。**不是**编译期常量、不是硬编码的 3。
+           框架**不认识**任何具体算法，故 N 必须由注册表在运行期给出。
+
+        2. **快照时机**：N 在**该会话建立装配时固定**，此后**不随注册表
+           增减而变**。`run_algorithms` 全程用同一个 N，
+           使 `k / N` 的分母在整个执行过程中恒定 —— 否则 k 增长而 N
+           同时变化，界面会看到进度**倒退**。
+
+        3. **N = 0 的边界**：N == 0 时 `RUN_ALGORITHMS` **无意义**
+           （没有任何算法可运行），此时**不得计算 k / N**，
+           避免除零。实现应按契约失败路径处理
+           （抛 `ErrorCode`，不产生 `None` 冒充 0.0 进度）。
+
+    ★ 修正记录：本条原写死为 `k / 3`，与「Registry 可扩展」直接冲突 ——
+    注册第 4 个合法插件会使 `progress` > 1.0，越出上文冻结的取值域
+    0.0–1.0。已改为运行期快照，与 `host/app.py` 的「顺序来自可扩展
+    Registry」一致。
 
     一个"平滑的构建进度条"需要 Core 开放内部阶段 —— 那是**契约变更**，
     会让 `CONTRACT-HOST-v1` 从 7 个操作变成 8 个（加一个进度查询），
@@ -795,6 +1205,42 @@ class UiView:
     ★ 记入已知缺口：若将来确实需要平滑进度，
     正确做法**不是**让 Core 汇报内部阶段，而是在 C1 里把构建拆成
     可观测的多次调用（那同样需要契约变更，须由负责人裁定）。"""
+
+    port_summary: Sequence[PortDescriptor] = ()
+    """数据面**端口结构的只读摘要**，供 C4 渲染结构视图（负责人裁定 2026-09-24）。
+
+    ── 为什么需要这个字段（不是冗余，是通道缺失）──
+
+    12 个端口由 **C2 发布**（`profile.PORTS`）。但 `COMPONENTS.md` G14 明文：
+    **C4 只与 C1 通讯，不直连 C2/C3**。于是 C4 想显示"数据面长什么样"时，
+    **没有任何合法通道**——直接 import `profile` 即绕过 G14 直连 C2。
+
+    本字段是那条缺失通道的**唯一**合法修补：由 **C1 在 `snapshot()` 时投影**，
+    C4 只消费。**它不是 port 上的第三个操作**（那仍被 FILE-003 §4.15 禁止），
+    而是 `UiView` 这个**数据类**上新增的一个字段。
+
+    ── 投影的是 5 字段子集，不是 PortDescriptor 全部 11 个 ──
+
+        投影   port_id / units / dimensions / shape / timeline_basis
+        不投影 schema_version / element_type / field_names /
+                hop_length / sample_rate / content_hash
+
+    ★ **理由**：后 6 个是 **C2 的实现细节**（采样率、hop、content_hash、
+    ★ schema 版本）。G14 说的是"不直连 C2"——若经 C1 转手把 11 个字段
+    ★ **全部**投影给 C4，那只是换了个手，**实质仍是 C2 内部结构泄漏**，
+    ★ 深组件随即在该方向瓦解。**降信息熵要在这个方向上也成立。**
+
+    ★ 字段名（`field_names`）不投影：它已由本模块的 `FIELD_LAYOUTS` 承载，
+    ★ **那是单一真相源**；再投影一份就是制造第二份，迟早漂移
+    ★ （与 `PluginSpec` / `AlgorithmResultEnvelope` 的身份字段复用同一原则）。
+
+    ── 语义 ──
+
+        `()` ＝ **C1 未提供**（该会话还没有数据面，或该投影未实现）
+              ★ 它**不是**「没有端口」的断言 —— 二者不得混为一谈
+        非空  ＝ C1 投影的端口摘要，按 `profile.PORTS` 顺序
+
+    ★ C1 **不得**为补全信息而让 C4 直连 C2（G14）。本页字段只消费不推导。"""
 
     error_code: str | None = None
     error_detail: str | None = None
@@ -862,20 +1308,21 @@ COMMAND_EFFECTS: Mapping[UiCommandKind, str] = {
 
 这些不定义，两个实现者会写出行为不同的会话机，而**界面看起来都正常**。
 
-冻结语义如下（`CANCEL` 的关键性质：**回到操作前的稳定态**）：
+冻结语义如下（`CANCEL` 的关键性质：在可即时响应的阶段回到操作前的稳定态；`BUILDING` 只记录并延迟目标转移）：
 
     CANCEL 在 INPUT_READY  → 无进行中操作，状态不变（幂等）
-    CANCEL 在 BUILDING     → 中止构建，**销毁未完成的数据面**，回 INPUT_READY
+    CANCEL 在 BUILDING     → **不打断同步构建**；构建完成后按 `CANCEL` 的目标转移生效
     CANCEL 在 DATA_READY   → 只中止正在运行的算法，**数据面保持有效**，
                              回 DATA_READY（已 Seal 的数据面不因取消而销毁）
 
     RESET 在任意状态       → 销毁数据面、清空已登记输入，回 CREATED
                              （会话对象本身保留，可继续登记新输入）
 
-★ 关于 `BUILDING` 期间的取消：`build_surface` 是**同步阻塞**调用，
-中途没有天然中断点。契约**要求**实现者提供检查点 ——
-至少在每个端口物化完成时检查一次取消标志。
-**不得**用"构建太快所以不用管"来回避（120 s 音频的构建是可感知的）。
+★ 关于 `BUILDING` 期间的取消：`build_surface` 是**同步阻塞调用**。因此
+`CANCEL` **不会打断正在进行的构建**；构建完成后，才按 `CANCEL` 的目标
+转移生效。`CANCEL` 只能在 `INPUT_READY` / `DATA_READY` 阶段被即时响应。
+契约没有取消标志的设置或观察通道，故不存在可执行的端口级检查要求；
+也**不得**注入后台线程、回调或 checkpoint 来改变这一冻结行为。
 
 ★ `CANCEL` 与 `RESET` 都**不是错误**：不得产生 `ErrorCode`，
 新状态不是 `FAILED`。用户主动中止 ≠ 系统失败。
@@ -909,7 +1356,7 @@ class UiCommand:
         RESET           {}              无载荷
 
     规则：
-        - 键名**不得**增删。需要新载荷时改契约并升 `CONTRACT-UI-v1` 版本。
+        - 键名**不得**增删。需要新载荷时改契约并升 `CONTRACT-UI-v2` 版本。
         - 未列出的 `kind` 用空 dict。
         - C1 **必须**校验：未知键、缺必需键、值类型不符 → 拒绝命令
           （拒绝而非忽略：忽略会让 C4 以为命令生效了）。
@@ -952,9 +1399,13 @@ __all__ = [
     # 会话与时间
     "SessionState", "TimelineBasis", "AlignmentRepresentation", "AudioFormat",
     # 数据面
-    "PortDescriptor", "BufferView", "SurfaceManifest", "AlgorithmResultEnvelope",
+    "PortDescriptor", "BufferView", "SurfaceManifest", "ResolutionView", "AlgorithmResultEnvelope",
     "FIELD_LAYOUTS",
     "AlgorithmDataContract", "CORE_REQUIRED_PORTS",
+    # 端口 hop 真相源（2026-09-24 裁定：避免 hop 被复制进算法模块）
+    "PORT_HOP_LENGTHS", "hop_of",
+    # C3 插件契约
+    "InputRequirement", "PluginSpec",
     # Host
     "HostContract", "FORBIDDEN_OPERATIONS",
     # 错误
