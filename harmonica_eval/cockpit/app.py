@@ -52,7 +52,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Sequence
 from urllib.parse import urlparse
 
-from ..contract import UiCommand, UiCommandKind, UiProjectionPort, UiScalar, UiSeries, UiView
+from ..contract import (
+    HarmonicaError,
+    UiCommand,
+    UiCommandKind,
+    UiProjectionPort,
+    UiScalar,
+    UiSeries,
+    UiView,
+)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -139,6 +147,20 @@ _SVG_HEIGHT = 240
 _HTML_CONTENT_TYPE = "text/html; charset=utf-8"
 """页面响应的 Content-Type，逐字冻结。"""
 
+_BROWSER_SUPPRESSED = os.environ.get("DSH_NO_BROWSER", "") not in ("", "0")
+"""★ 进程启动时【一次性】读 `DSH_NO_BROWSER`；非空且非 "0" 则不拉起系统浏览器。
+
+★ 为什么读环境变量而不给 `run_local_ui` 加参数：
+  `FILE-401-v1.md:172` 把签名 `run_local_ui(port) -> int` 逐字冻结，
+  加参数会破那条不变量。而 §4.4 第 8 步要求「随后 `webbrowser.open(该 URL)`」，
+  在该步前加一个条件判断【不改变默认行为】，也不动签名。
+
+★ 为什么不是 CLI 开关：`FILE-499-v1.md:160` 明文
+  「不提供 `--port` / `--host` / `--no-browser` 等任何额外开关」（铁律 4 零噪声），
+  且其 §8 判据把 `--no-browser` 列进 banned 集合。
+  ★ 环境变量是进程级约定，不新增命令行配置面。
+"""
+
 # ── INV-401-8：模块级可变全局【恰两个】────────────────────────────────
 
 _PAGE_LOCK = threading.Lock()
@@ -210,10 +232,11 @@ def run_local_ui(port: UiProjectionPort) -> int:
         # ★ 监听地址 0.0.0.0 不可直接访问，故打印本机回环 + 局域网实际 IP
         for url in _access_urls(actual_port):
             sys.stderr.write(url + "\n")
-        try:
-            webbrowser.open(f"http://127.0.0.1:{actual_port}/")
-        except Exception:
-            pass          # 降级路径之一：URL 已在 stderr，有替代路径
+        if not _BROWSER_SUPPRESSED:
+            try:
+                webbrowser.open(f"http://127.0.0.1:{actual_port}/")
+            except Exception:
+                pass          # 降级路径之一：URL 已在 stderr，有替代路径
 
         # 第 9 步 · 阻塞
         server.serve_forever()
@@ -807,40 +830,57 @@ def _make_handler(port: UiProjectionPort) -> type:
             try:
                 length = int(raw_len)
             except (TypeError, ValueError):
-                self._respond(400, "bad request")
+                self._respond(400, "bad request：Content-Length 缺失或不是整数")
                 return
             if length <= 0 or length > _HTTP_MAX_VIEW_BYTES:
-                self._respond(400, "bad request")
+                self._respond(400, f"bad request：Content-Length 须在 1..{_HTTP_MAX_VIEW_BYTES}，实得 {length}")
                 return
             # 第 3 步：读满并解 UTF-8
             raw = self.rfile.read(length)
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
-                self._respond(400, "bad request")
+                self._respond(400, "bad request：请求体不是合法 UTF-8")
                 return
             # 第 4 步：JSON 且必须是 dict
             try:
                 data = json.loads(text)
-            except ValueError:
-                self._respond(400, "bad request")
+            except ValueError as exc:
+                self._respond(400, f"bad request：请求体不是合法 JSON（{exc}）")
                 return
             if not isinstance(data, dict):
-                self._respond(400, "bad request")
+                self._respond(400, f"bad request：请求体须是 JSON 对象，实得 {type(data).__name__}")
                 return
             # 第 5 步：kind 必须是 6 个枚举值之一
             raw_kind = data.get("kind")
             if not isinstance(raw_kind, str) or raw_kind not in {
                     k.value for k in UiCommandKind}:
-                self._respond(400, "bad request")
+                self._respond(
+                    400,
+                    f"bad request：kind={raw_kind!r} 不是界面支持的 6 种意图之一"
+                    f"（{'/'.join(k.value for k in UiCommandKind)}）",
+                )
                 return
             # 第 6 步：还原枚举与载荷
             kind = UiCommandKind(raw_kind)
             payload = {"path": data["path"]} if "path" in data else None
             # 第 7 步：复用两个公开函数（不自己拼 UiCommand、不自己调 submit）
+            #   ★ 分两类：内核主动拒绝（可预期，用户改输入即可）→ 400
+            #     未预料的异常（真 bug）→ 500，并保留完整类型名便于定位
             try:
                 command = build_command(kind, payload)
                 submit_command(port, command)
+            except HarmonicaError as exc:
+                # 契约里已定义的错误（ContractViolation / CoreBuildError /
+                # AlgorithmError）。它们是内核对用户输入的明确拒绝，
+                # ★ 不是服务端故障 —— 回 400 并把原话带给用户。
+                sys.stderr.write(
+                    f"界面命令被内核拒绝：{type(exc).__name__}: {exc}\n"
+                )
+                self._respond(
+                    400, f"{type(exc).__name__}：{exc}"
+                )
+                return
             except Exception as exc:
                 sys.stderr.write(f"界面命令失败：{type(exc).__name__}: {exc}\n")
                 self._respond(500, "internal error")

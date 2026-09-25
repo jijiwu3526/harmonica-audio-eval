@@ -13,6 +13,7 @@
   · §8「`--help` 路径不 import C1/C4」 （INV-499-6，命令 F 的同义复核）
   · §8「`--help` 输出不含 `--port`」    （INV-499-5 的一部分）
   · §8「不存在的路径 → 非零退出 + 可读原因」（INV-499-4，命令 D 的同义复核）
+  · ★ `DSH_NO_BROWSER` 的双向行为（★ 默认开 / 设了不开）
 
 ★ **仍然只能人工验收的三条**（★ 详见 FILE-499-v1.md §8 的表格）：
   1. 真启动后打印两个地址（127.0.0.1 + 局域网 IP）
@@ -38,6 +39,7 @@ INTENT:
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
 import subprocess
 import sys
@@ -236,3 +238,99 @@ def test_main_module_has_no_cockpit_dependency() -> None:
                 if "cockpit" in a.name
             ]
     assert hits == [], hits
+
+
+# ── DSH_NO_BROWSER · 不弹系统浏览器（★ 治「测试时浏览器标签越塞越多」）──
+def _count_webbrowser_opens(env_value: str | None) -> int:
+    """在子进程里起一次 `run_local_ui`，返回 `webbrowser.open` 的调用次数。
+
+    ★ 为什么用子进程 + monkeypatch 而不是同进程调用：
+    `run_local_ui` 装 `signal.signal`，而 `signal.signal` 只允许【主线程】；
+    pytest 在主线程跑，但同进程调用会真的 bind 端口并阻塞。
+    ★ 而子进程里可以安全地替换 `webbrowser.open` 再让它起服务，
+    端口探测范围（8721–8784）由 C4 自行处理。
+
+    ★ ★ 为什么「数调用次数」是唯一可靠的测法：★★
+    ★ ★ 只看「浏览器有没有多开一个标签」不可靠 —— 那是浏览器状态，
+    ★ ★ 且本机没有辅助功能权限，读不到窗口列表（osascript -25211）。
+    ★ ★ 代码行为才是可断言的东西。
+
+    ★ ★ 为什么用真实的 `build_default_app()` 当端口：★★
+    ★ ★ 先前用 `object()` 与假类都失败过 —— ★ `run_local_ui` 第 1 步
+    ★ ★ `assert hasattr(port, 'snapshot')`，而第 6 步首屏会真调 `snapshot()`；
+    ★ ★ 两者任一不成立，★ 流程在第 8 步【之前】就退出，★ 永远数到 0 次。
+    ★ ★ ★ 那会是个【恒真】的测试：★ 它测的其实什么都没走到。
+    """
+    runner = (
+        "import sys, os, webbrowser, threading, time\n"
+        "calls = []\n"
+        "webbrowser.open = lambda url: (calls.append(url), True)[1]\n"
+        "sys.path.insert(0, {repo!r})\n"
+        "from harmonica_eval.host.app import build_default_app\n"
+        "from harmonica_eval.cockpit import app\n"
+        "def stop_later():\n"
+        "    time.sleep(3.0)\n"
+        "    import _thread\n"
+        "    _thread.interrupt_main()\n"
+        "threading.Thread(target=stop_later, daemon=True).start()\n"
+        "rc = app.run_local_ui(build_default_app())\n"
+        "sys.stderr.write('CALLS=' + str(len(calls)) + '\\n')\n"
+    ).format(repo=str(REPO))
+    env = dict(os.environ)
+    if env_value is None:
+        env.pop("DSH_NO_BROWSER", None)
+    else:
+        env["DSH_NO_BROWSER"] = env_value
+    r = subprocess.run(
+        [sys.executable, "-c", runner],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(REPO),
+        env=env,
+    )
+    for line in r.stderr.splitlines():
+        if line.startswith("CALLS="):
+            return int(line.split("=", 1)[1])
+    raise AssertionError(f"没拿到调用计数。stderr 尾：{r.stderr[-400:]}")
+
+
+def test_browser_opens_by_default() -> None:
+    """★ 默认行为回归：不设 `DSH_NO_BROWSER` 时【必须仍然打开】浏览器。
+
+    ★ 这是本组测试的锚：★ 若「加开关」顺手把默认改成不开，
+    ★ 「手动起服务就能看到界面」这个体验就没了。
+    """
+    assert _count_webbrowser_opens(None) == 1
+
+
+@pytest.mark.parametrize("value", ["1", "yes", "true"])
+def test_env_var_suppresses_browser(value: str) -> None:
+    """`DSH_NO_BROWSER=<非空且非 0>` → `webbrowser.open` 调用 0 次。"""
+    assert _count_webbrowser_opens(value) == 0
+
+
+@pytest.mark.parametrize("value", ["", "0"])
+def test_empty_or_zero_does_not_suppress(value: str) -> None:
+    """★ 空串与 "0" 视为【未设置】—— 避免 `DSH_NO_BROWSER=` 意外关掉浏览器。"""
+    assert _count_webbrowser_opens(value) == 1
+
+
+def test_browser_switch_does_not_add_a_cli_flag() -> None:
+    """★ 抑制浏览器【不得】靠新增 CLI 开关。
+
+    ★ `FILE-499-v1.md:160` §7 明文：「不提供 `--port` / `--host` /
+      `--no-browser` 等任何额外开关」（AGENTS.md 铁律 4 零噪声），
+      其 §8 判据把 `--no-browser` 写进 banned 集合。
+    ★ ★ 而「名字绕开 banned 就能过」是自欺：★ 判据是精确集合匹配，
+    ★ ★ `--no-open-browser` 不会被抓，★ 但它违反的是 §7 的意图。
+    """
+    tree = ast.parse(SERVE_UI.read_text(encoding="utf-8"))
+    opts: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "add_argument":
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    opts.append(arg.value)
+    assert sorted(opts) == ["--practice", "--reference"], opts
+    assert not any("browser" in o.lower() for o in opts), opts

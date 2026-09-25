@@ -50,6 +50,18 @@ OUTPUT
   ★ ★   `FILE-400-v1.md`）均未规定进程装配点的位置与启动命令。**
   ★ ★ 选它的理由是朴素的 —— 沿用本项目既有的 `python3 -m harmonica_eval.<模块>`
   ★ ★   形态（`__main__` 与 `cockpit.app` 都如此），不引入新范式。
+
+★ **★ 不弹系统浏览器：★ 用环境变量，不加 CLI 开关 ★★**
+  `DSH_NO_BROWSER=1 python3 -m harmonica_eval.serve_ui --reference … --practice …`
+
+  ★ ★ 为什么不用 `--no-open-browser` 之类的开关：★ §7 明文禁止 ——
+  · §7 边界：「不提供 `--port` / `--host` / `--no-browser` 等任何额外开关」
+    （AGENTS.md 铁律 4「零噪声」）
+  · §8 判据把 `--no-browser` 写进 `banned` 集合，`--help` 里出现即红
+  ★ ★ ★ 而环境变量不新增命令行配置面，★ 是进程级约定而非「开关」
+
+  ★ 默认行为不变：不设该变量时仍自动打开浏览器
+  （`FILE-401-v1.md:185` §4.4 第 8 步明文要求「随后 `webbrowser.open(该 URL)`」）。
 """
 
 from __future__ import annotations
