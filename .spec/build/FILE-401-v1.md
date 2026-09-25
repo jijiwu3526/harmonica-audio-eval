@@ -77,8 +77,8 @@
 
 ★ `app.py` 的 import 集合因此是 **15 个标准库模块名 + `contract`**，再无第 16 个；§8 命令 (3) 的 `mods <=` 断言按这个集合判定。命令 (2) 的自查脚本另外 import `xml.etree.ElementTree`，那是**脚本**的依赖，不是 `app.py` 的依赖。
 - 第三方：**无**。本文件不 import 任何第三方包，尤其不 import `numpy`。
-- 本包内：**恰好 7 个符号，全部来自 `..contract`**（★ 2026-09-25 由 6 增至 7：新增 `HarmonicaError`，★ 用于把内核对用户输入的明确拒绝【`ContractViolation`/`CoreBuildError`/`AlgorithmError`】与真正的内部故障分开——前者回 400 且带原因，★ 后者才回 500；契约面 `__all__` 仍是 14 项），写成目标文件里那一行原样：
-  `from ..contract import UiCommand, UiCommandKind, UiProjectionPort, UiScalar, UiSeries, UiView`
+- 本包内：**恰好 10 个符号，全部来自 `..contract`**（★ 2026-09-25 由 6 增至 7：新增 `HarmonicaError`，★ 用于把内核对用户输入的明确拒绝【`ContractViolation`/`CoreBuildError`/`AlgorithmError`】与真正的内部故障分开——前者回 400 且带原因，★ 后者才回 500；★ 同日再增至 10：新增 `COMMAND_LEGALITY`（按钮可用态按冻结的合法性表现算，★ 界面不另写一份）、`SessionState`（`_command_availability` 的入参与类型标注）、`ErrorCode`（`build_command` 对畸形载荷抛可读错误，★ 取代原先会穿透成 500 的三处 `assert`）；契约面 `__all__` 仍是 14 项——新增的 `_render_buttons` / `_command_availability` 是模块私有），写成目标文件里那一行原样：
+  `from ..contract import COMMAND_LEGALITY, ErrorCode, HarmonicaError, SessionState, UiCommand, UiCommandKind, UiProjectionPort, UiScalar, UiSeries, UiView`
   （`harmonica_eval/cockpit/__init__.py` 允许 `from .app import ...` 与 `from ..contract import UiProjectionPort`，它不属于本文件的依赖。）
 
 **禁止 import**（逐条列全，任一违反即 §10 第 3 条的 `MOLD BREAK`）：
