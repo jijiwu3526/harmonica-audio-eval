@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  ★ 主题为什么要换：★ 2026-09-26 真机实测（a83b8ad / API 36）uiautomator dump：
+  ★     android:id/action_bar bounds = [0,160][1440,384]
+  ★ Theme.Material.Light 带一个【不透明】的 ActionBar，★ 而系统把它直接压在
+  ★ 内容之上。★ 于是即使 MainActivity 里给 root 加足了状态栏 padding，
+  ★ 第一个控件仍会藏在 ActionBar 底下 ——★ 只修 insets 是治了上面漏了下面。
+  ★ NoActionBar 去掉这第二层盖子，★ 而栏的避让统一交给 insets 处理。
+
+  ★ 不选 AppCompat 的原因（★ 刻意记下来，★ 免得后来人以为是漏的）：
+  ★ 本工程【零 androidx 依赖】，★ MainActivity 直接继承 android.app.Activity，
+  ★ 而 gradle 缓存里没有 androidx.core。★ 平台自带的
+  ★ WindowInsets.getInsets(Type.systemBars()) 在 API 30+ 就够了，★
+  ★ minSdk 24 的老设备走 getSystemWindowInset*() 分支（见 MainActivity）。
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
         android:allowBackup="false"
         android:label="口琴探针"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
             android:name=".MainActivity"

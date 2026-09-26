@@ -4,11 +4,13 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -70,8 +72,78 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(24, 32, 24, 24);
+        // ★ ★ ★ 【设计留白】★ 与【系统栏留白】★ 必须分开记，★ 否则
+        // ★ onApplyWindowInsets 一来就把设计值覆盖掉，★ 而那正是
+        // ★ 「改大一点凑合一下」那种临时糊法的形态。★
         root.setBackgroundColor(Color.WHITE);
+        final int padL = dp(24), padT = dp(32), padR = dp(24), padB = dp(24);
+        root.setPadding(padL, padT, padR, padB);
+        // ★ ★ ★★★ 这就是本 bug 的修法所在 ★★★ ★★
+        // ★ 2026-09-26 真机实测（a83b8ad / PJD110 / API 36 / 1440x3168）：
+        // ★   状态栏      frame=[0,0][1440,160]
+        // ★   标题 TextView bounds=[24,32][1416,141]   ← 整条都在状态栏底下
+        // ★   按钮       bounds=[24,141][1416,333]    ← 顶 141 < 160，★ 被盖 19px
+        // ★ 而 taps 实测：★ 按钮正中 (720,237) 敲下去，★ logcat 里
+        // ★   「★ onClick 被调用」零命中 ——★ 点击被系统栏吃掉了。
+        // ★
+        // ★ ★ 模拟器（emulator-5554 / Pixel_7 / API 34）为什么看不出问题：
+        // ★   那台状态栏只有 136px，★ 而按钮顶 141 > 136，★ 刚好躲过去了。
+        // ★   差 5 个像素 ——★ 这就是「模拟器全绿、真机全废」的全部原因。
+        // ★
+        // ★ 为什么用「加 padding」而不是别的方式：
+        // ★   ① 声明式固定值（32px）只对【一种设备】成立，★ 换个状态栏
+        // ★      高度、换个刘海、换台平板就又盖住了。★ 而 padding 是
+        // ★      【问系统要真值】，★ 任何设备都对。
+        // ★   ② 将来正式界面必然有列表/详情/全屏播放/横屏，★ 那时
+        // ★      每个页面都要避让系统栏；★ 把它做成【一处装好、整棵树生效】
+        // ★      的根容器，★ 正式界面才能直接复用。
+        // ★   ③ 它保留「内容画到栏下」的现代观感（栏底还能有底色/毛玻璃），
+        // ★      而不是退回「系统先垫一层」的旧模型。
+        // ★
+        // ★ 为什么必须配 (c) 换主题 ——★ 这是本轮实测新发现的第二层盖子：
+        // ★   上面 dump 里还有一行，★ 它比状态栏更致命：
+        // ★     android:id/action_bar bounds=[0,160][1440,384]
+        // ★   Theme.Material.Light 带 ActionBar，★ 而它【不透明】且被系统
+        // ★   直接压在内容之上。★ 所以哪怕我把 padding 加足，★ 按钮仍会
+        // ★   藏在 ActionBar 底下 ——★ 只加 padding 是【治了上面、漏了下面】。
+        // ★   所以主题一并换成无 ActionBar 的（见 AndroidManifest.xml）。
+        // ★
+        // ★ 还有一个平台级的坑（实测 dumpsys window）：
+        // ★   mAttrs pfl=... EDGE_TO_EDGE_ENFORCED
+        // ★ targetSdk 35 起，★ 系统【强制】edge-to-edge，★
+        // ★   而 decorFitsSystemWindows(true) 在这个 flag 下【不生效】
+        // ★   ——★ 所以「(a) 让系统不 overlay」这条路在 targetSdk≥35 上
+        // ★   本来就是死的。★ 这是实测读出来的，★ 不是推测。
+        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override
+            public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+                int top, bottom, left, right;
+                if (Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets bars = insets.getInsets(
+                            WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    top = bars.top; bottom = bars.bottom;
+                    left = bars.left; right = bars.right;
+                } else {
+                    // ★ 老分支：★ minSdk 24，★ 正式界面若要覆盖老设备就靠它。
+                    top = insets.getSystemWindowInsetTop();
+                    bottom = insets.getSystemWindowInsetBottom();
+                    left = insets.getSystemWindowInsetLeft();
+                    right = insets.getSystemWindowInsetRight();
+                }
+                // ★ 系统栏是【叠在】内容上的，★ 所以 padding 取 max(设计值, 系统给的)，
+                // ★ 而不是相加 ——★ 相加会让「本来就不盖」的设备凭空多出一块空白。
+                root.setPadding(
+                        Math.max(padL, left),
+                        Math.max(padT, top),
+                        Math.max(padR, right),
+                        Math.max(padB, bottom));
+                L("★ onApplyWindowInsets  系统栏=" + top + "/" + right
+                        + "/" + bottom + "/" + left + "  →  root padding="
+                        + Math.max(padL, left) + "/" + Math.max(padT, top)
+                        + "/" + Math.max(padR, right) + "/" + Math.max(padB, bottom));
+                return insets;
+            }
+        });
 
         TextView title = new TextView(this);
         title.setText("口琴内核 · 手机探针");
@@ -120,6 +192,19 @@ public class MainActivity extends Activity {
 
     private void L(String s) {
         Log.i(TAG, s);
+    }
+
+    /**
+     * dp → px。
+     *
+     * ★ 为什么现在才加：★ 改之前 root 的 padding 是【写死的 px】（24/32/24/24），
+     * ★ 而那在 640dpi（density=2.0）的真机上只有 12dp/16dp ——★ 视觉上几乎
+     * ★ 等于没有留白，★ 换台 density 不同的设备还会再变一次。
+     * ★ 这正属于「只对一台机器成立」的那类写法，★ 而 insets 修好之后
+     * ★ 留白就要真的承担排版责任了，★ 所以一并换成 dp。
+     */
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     /**
