@@ -192,7 +192,7 @@ MAX_PROJECTION_POINTS: int = 2000
 create_session(profile_version)          → 调 C2 建会话，把 id 记在 C1 里
 set_reference(session_id, uri) / set_practice(session_id, uri) → ★ **带** session_id
 build_surface(session_id)               → 同样【带】session_id
-run_algorithms(session_id)              → ★ **带** session_id（与空壳签名一致）
+run_algorithms(session_id, only=None)      → ★ **带** session_id；★ `only` 为可选的算法 id 序列（2026-09-25 负责人授权「这契约允许改动」，承载懒加载：缺省=全部，不列出者不跑且不进入投影）
 destroy_session(session_id)             → ★ **带** session_id
 
 ★★ **本轮更正（2026-09-24，裁定依据：契约 + 实测）★★
@@ -238,7 +238,13 @@ C2 是通用核心，"uri" 允许未来扩展成非文件来源；C1 是本产�
 - **单向检查**：只判断"有没有"。缺失 → 返回 `False`。
 - **绝不**因为缺端口就去让 C2 生成数据（**核心禁令**）。
 
-#### `run_algorithms(session_id: str) -> Sequence[AlgorithmResultEnvelope]`
+#### `run_algorithms(session_id: str, only: Sequence[str] | None = None) -> Sequence[AlgorithmResultEnvelope]`
+
+- ★ **`only` 的授权与语义（2026-09-25）**：负责人裁定「这契约允许改动」，用于**懒加载**——
+  `only` 列出本次要跑的 `algorithm_id`；**缺省 = 全部**，不列出的插件**不运行**，
+  其标量与曲线**不进入投影**。判据必须是「`/view` 里没有它」，★ 而非「界面没显示」。
+  ★ 空序列不是「跑零个」：分母 N=0 属装配/状态错误，★ 仍按契约抛错。
+  ★ 未注册的 id **报出真名**而**不静默忽略**——★ 静默会让调用方以为「跑过了」。
 
 - **前置**：状态 == `DATA_READY`，否则抛 `ContractViolation`。
 - **兼容检查边界**：这里只核对 `PluginSpec.required_inputs` 与 manifest 的存在性；runtime 的

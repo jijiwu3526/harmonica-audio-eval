@@ -264,6 +264,16 @@
 - `UiCommand`（frozen）：`kind: UiCommandKind`；`payload: dict = field(default_factory=dict)`。载荷键名冻结（G7，唯一权威即下表）：SET_REFERENCE `{"path": str}`（绝对路径，音频文件）；SET_PRACTICE `{"path": str}`；BUILD_SURFACE `{}`；RUN_ALGORITHMS `{}`；CANCEL `{}`；RESET `{}`。规则：键名不得增删（需要新载荷时改契约并升 CONTRACT-UI-v2 版本）；C1 **必须**校验——未知键、缺必需键、值类型不符 → **拒绝命令**（拒绝而非忽略：忽略会让 C4 以为命令生效了）；非法命令被拒绝且不改变状态，不许「尽力而为」。
 - `UI_PAYLOAD_KEYS: Mapping[UiCommandKind, tuple[str, ...]]`（逐项）：SET_REFERENCE → `("path",)`；SET_PRACTICE → `("path",)`；BUILD_SURFACE → `()`；RUN_ALGORITHMS → `()`；CANCEL → `()`；RESET → `()`。教训同 `FIELD_LAYOUTS`：`dict` 类型不携带键名信息，产出方与消费方必须有共同事实来源，否则静默错位。
 
+- ★ **`UI_PAYLOAD_KEYS[RUN_ALGORITHMS]` 的 `only`（2026-09-25 负责人授权新增）**
+  - 值是 algorithm_id 序列；**缺省 = 全部**。它承载**懒加载**：不列出的插件不运行，
+    其指标与曲线不进入投影。
+  - ★ **不属 §4.14 末尾「扩面冻结」的范围**：★ 那条冻结的是 **`UiView` 字段的增删**，
+    而 `UiView` 九个字段一个没动；★ 此次改的是**命令载荷的键**。
+  - 两条被实测抓过的约束：
+    - **执行次序恒为会话快照顺序**，不因 `only` 的书写次序而改变；
+    - `N = 0` 有两个互不相同的成因，**诊断消息必须能区分**：会话快照真空（查装配）
+      与 `only` 筛空（查请求）。★ 二者共用同一句「注册表快照为空」会让调用方查错方向。
+
 ### 4.15 UiProjectionPort（Protocol，C1 ↔ C4，2 操作）
 
 - `snapshot() -> UiView`：取当前投影快照；**纯读取，无副作用**；返回 §4.13 的完整只读投影。

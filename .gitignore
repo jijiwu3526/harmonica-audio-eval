@@ -51,3 +51,7 @@ vendor/VCSL/
 # 生成的数据集产物（可通过 build_dataset.py 复现，不入库）
 harmonica_mvp_dataset/*/
 !harmonica_mvp_dataset/README.md
+
+# React 前端（harmonica_eval_web/）的构建产物与依赖
+node_modules/
+harmonica_eval_web/dist/
