@@ -43,8 +43,15 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m harmonica_eval.serve_ui \
 
 不想自动开浏览器：`DSH_NO_BROWSER=1` 前缀即可。
 
-> **麦克风录制不可用**：浏览器录音格式（webm/opus/m4a）当前数据面读不了，
-> 而引入转换工具会违反零依赖铁律。**用「选样本」代替「吹奏」**，这也是刻意的取舍。
+> **麦克风录制不可用**：浏览器录音格式（webm/opus/m4a）当前数据面读不了
+> （`libsndfile` 的 `available_formats()` 里没有这些容器），而转换需要引入
+> ffmpeg 之类的外部二进制。**用「选样本」代替「吹奏」**，这是刻意的取舍。
+>
+> ★ **★ 2026-09-26 更正：★ 上文原写「违反零依赖铁律」，★ 那是不准确的表述。★★**
+> ★ 「零依赖」是 `FILE-002-v1.md:45` 的一条**真实规格**，★ 但它约束的是
+> ★ **`__main__.py` 与 `cockpit` 互不 import**，★ 不是「项目不许用外部库」。
+> ★ 前端用 Vite + React **不违反**它——★ 那约束的是两个 Python 文件。
+> ★ 而该不变量当前**仍然成立**（实测：两者互不 import）。
 
 ---
 
@@ -97,9 +104,9 @@ harmonica-eval/
 │   ├── core/                  C1 数据面：ingest / align / features / surface
 │   ├── algorithms/            插件：pitch / timing / dynamics / bootstrap
 │   ├── host/                  HostApp 编排
-│   └── cockpit/               契约可视图（HTTP + 内联 SVG，零依赖）
+│   └── cockpit/               界面层：HTTP + React 前端（+ 内联 SVG 兜底）
 ├── tools/                     门禁
-├── tests/                     165 个测试
+├── tests/                     182 个测试（★ 逐文件串行跑，★ 一次全量会 OOM）
 └── data/{ref,in,out}/         参考音频 / 待测音频 / 结果
 ```
 
