@@ -1,141 +1,221 @@
-> **本文是索引，不是权威。** 权威在 `.spec/` 与源码铭牌。
-> 本文任何内容与它们冲突时以它们为准，并把冲突报给负责人。
+# cockpit — 界面层（可弃）
 
-# C4 Developer Cockpit 索引
+> **一句话**：C4 是口琴双音频对比的**界面投影层**。它把 C1 发布的快照画成人能读的东西，
+> 并把人的动作翻译成命令交回 C1。它**不碰音频、不做 DSP、不认识任何具体算法**。
 
-## 这个组件负责什么
+★ **本文档是全项目对「多端移植」影响最大的一份。** 下面 §4 回答那个大问题：
+**换手机前端时，这些代码能全扔吗？**
 
-C4 是仅运行在 Mac、面向开发者的只读调试视图：把 C1 的投影显示出来，并通过 C1 提交受契约约束的意图；它不进入音频计算路径、不直接访问 C2/C3，也必须可以整体删除而不影响内核。（`SPEC.md:9-22`；`COMPONENTS.md:269-296`）
+★ **本文是索引，不是权威。** 权威在 `.spec/` 与源码铭牌。
+★ 本文任何内容与它们冲突时以它们为准，并把冲突报给负责人。
 
-## 正式无头入口
+---
 
-C4 缺席时，正式无头入口仍是 `harmonica_eval/__main__.py`：接收参考与练习两段音频，驱动“建数据面 → 跑算法”的完整流程，并落盘 `metrics.json` 与同目录的 `report.md`。未指定 `--out` 时，`metrics.json` 的缺省落点是 `data/out/metrics.json`；指定 `--out` 时，`report.md` 与其同目录。入口只消费 C1 发布的 `UiView` 投影，不做 DSP、不导入 cockpit；★ 入口已于本次注入周期完成，五个缺陷样本均 rc=0 并落盘 `metrics.json`（16 scalars + 2 series）。（`harmonica_eval/__main__.py`）
-
-## 文件索引
-
-| 文件 | 职责 | 现场依据 |
-| --- | --- | --- |
-| `__init__.py` | C4 包出口；唯一公开入口 `launch_cockpit(port)`，并声明不 import core/algorithms/host。 | `harmonica_eval/cockpit/__init__.py:6-22`、`:34-64` |
-| `app.py` | 本机 UI 入口、投影渲染、命令构造与提交；只依赖契约和标准库。 | `harmonica_eval/cockpit/app.py:6-35`、`:77-281` |
-| `preview.py` + `preview.html` | **契约结构预览视图**（非产品界面、非本包正式入口）：把已冻结的契约层可视化为一张结构预览页。存在意义是回答「如果现在接真数据，契约够不够画界面」——画不出的字段即暴露契约缺口，在注入前发现比注入后返工便宜。 | `harmonica_eval/cockpit/preview.py:6-27`；`.spec/build/FILE-401-P-v1.md` |
-
-### ★★ preview 与 app 的职责分界（不重复）★★
-
-| | `preview.py`（已完成） | `app.py`（本文件注入） |
-| --- | --- | --- |
-| 画什么 | **契约定义**：字段结构、`PortDescriptor` 声明、类型与词表 | **运行结果**：真实 `UiView` 的值 —— 状态、四态标签、标量、端口就绪表、曲线、进度、错误 |
-| 数据来源 | 读 `contract` / `profile` 的**静态声明** | 读注入的 `UiProjectionPort.snapshot()` 的**运行时投影** |
-| 回答的问题 | 「契约够不够画界面」 | 「现在数据面处于什么状态」 |
-
-★ **`app.py` 只画值，不画结构** —— 结构归 `preview.py`。两者不重复，也不互相替代。
-
-## 产出与消费
-
-| 方向 | 内容 | 出处 |
-| --- | --- | --- |
-| 消费 | 调用方注入的 `UiProjectionPort`：只读 `snapshot()`，唯一写路径 `submit()`。 | `harmonica_eval/cockpit/__init__.py:43-59`；`harmonica_eval/cockpit/app.py:77-92` |
-| 显示 | `UiView` 的状态、标量、曲线、进度和错误；渲染不得重算 DSP。 | `harmonica_eval/cockpit/app.py:99-206`；`.spec/build/FILE-401-v1.md:284-323` |
-| 产出 | 仅 `UiCommandKind` 已有的六种意图；文件选择只返回路径，不解码音频。 | `harmonica_eval/cockpit/app.py:58-70`、`:213-263`；`harmonica_eval/contract.py:1074-1101`、`:1154-1202` |
-| 网络边界 | 绑定 `LOCAL_BIND_HOST`（默认 `0.0.0.0`，含局域网以便手机等设备访问；本机开发工具、非生产服务，进程退出即消失）。真实访问地址由启动横幅打印（`0.0.0.0` 本身不可用于浏览器）；退出码为 `EXIT_OK` / `EXIT_START_FAILED`。 | `harmonica_eval/cockpit/app.py:61`、`:155-165`；`.spec/build/FILE-401-v1.md:142-155` |
-
-## 关键约束与不变量
-
-- **纯视图**：不读取数据面、音频或算法内部，不做 DSP，不持有持久状态；C4 崩溃/退出不应影响已 Seal 的数据面。（`harmonica_eval/cockpit/__init__.py:13-22`；`harmonica_eval/cockpit/app.py:13-26`）
-- **零内核耦合**：包导入期不加载 `app` 子模块，且禁止任何 core/algorithms/host import；调用方必须注入端口。（`harmonica_eval/cockpit/__init__.py:13-22`；`.spec/build/FILE-400-v1.md:40-58`）
-- **只显示，不改算**：曲线按 `UiSeries.timeline_basis` 标出轴含义，不重采样、不插值、不平滑，不解释算法来源。（`harmonica_eval/cockpit/app.py:130-155`；`.spec/build/FILE-401-v1.md:232-282`）
-- **只陈述数值**：状态、标量与错误按投影原文显示，不生成合格判定、教学建议或错误原因猜测。（`harmonica_eval/cockpit/app.py:99-187`；`.spec/build/FILE-401-v1.md:284-323`、`:349-365`）
-- **六种意图穷举**：不得新增按钮、自由格式命令或“重新对齐/换算法”等能力；所有操作交给 C1 校验。（`harmonica_eval/cockpit/app.py:58-70`、`:213-263`）
-- **★ 四态判别（★ 防假绿的唯一手段）★**：`app.py` 把投影判为互斥四态，判据全部来自 `UiView` 字段，不做推断：
-
-  | 态 | 条件 | 界面显示 |
-  | --- | --- | --- |
-  | `A_UNBUILT` | `state` 非 `DATA_READY` | 数据面未就绪 |
-  | `D_BLOCKED` | 无标量 **且** 有 `error_code`/`error_detail` | **管线中断** + 诊断原文 |
-  | `B_NO_SOURCE` | 无标量 **且** 两个错误字段皆 `None` | 已通但无数据 |
-  | `C_HAS_DATA` | 有标量 | 有指标 |
-
-  ★ 单独的 D 态来自一次真实假绿：三个算法全部 `INCOMPATIBLE`、`state` 仍是 `DATA_READY`、`scalars=[]` 而 `error_detail` 里有明确诊断。★ 若按「无标量 ⇒ B」画，就把「算法全挂」画成了「正常但没数据」；若按「有诊断 ⇒ C」画，就是假绿。★ 三条互斥判据由 `_verify_view_consistency` 每次渲染前自证，判据变了当场炸。
-- **零依赖铁律**：页面为原生 HTML/CSS/JS，无 npm、无 CDN、无外部字体、无图表库、无 `<script src>`、无 `<link>`。★ 「让手机能用」指的是**网络可达**（监听地址 + viewport + 响应式 + 44px 触控目标），**不是**引入依赖。
-- **监听边界**：恒绑 `LOCAL_BIND_HOST`。★ 负责人裁定「直接支持局域网访问，这只是测试，没有安全问题」，故值为 `0.0.0.0`；但**不加认证、不做 CORS、不设 Cookie、不做 HTTPS、不做端口转发、不做开机自启**。★ `0.0.0.0` 是监听地址、不可直接访问，故启动时另探真实 IP 并打印两个可点击 URL。界面进程退出即消失。
-
-## 选曲 → 自动跑完整轮（★ 主流程）
-
-启动横幅已自动跑过一轮，所以页面首次呈现就是 `DATA_READY` + 有指标。此时 `SET_REFERENCE` / `SET_PRACTICE` **在当前状态下非法**，那两个按钮随之置灰——这是正确的，不是故障。
-
-要换曲子，**用下拉框**：任一 `<select>` 的 `change` 事件触发 `runSelection(ref, pra)`，它**串行**下发五条命令：
+## 1 · 我是谁
 
 ```
-RESET → SET_REFERENCE → SET_PRACTICE → BUILD_SURFACE → RUN_ALGORITHMS
+位置：C1（host，算法与数据面） ←→ C4（cockpit，本目录） ←→ 人
+      C4 只通过 UiProjectionPort 与 C1 说话
 ```
 
-- **为什么先 RESET**：`SET_*` 只在 `{CREATED, INPUT_READY}` 合法；不重置就发，会被内核 400 拒绝。跳过 RESET 的反证见 `tests/test_cockpit_flow.py::test_skipping_reset_is_rejected_by_kernel`。
-- **为什么串行**：服务端是 `ThreadingHTTPServer`，并发 POST 落不同线程、到达顺序不保证。顺序是承重的。
-- **换曲即作废上一次结果**：新曲名下挂旧数字是本项目最防的假绿。整轮成功后 reload，页面只呈现新曲的指标。
-- **`settle()` 轮询到「真有指标」才 reload**：服务端有 0.5s 轮询线程会在 `build_surface` 途中刷出 `BUILDING` 帧；跑完立刻 reload 可能把用户丢到一个「进度 0%、无指标」的页面。
-- **只改一个下拉**：每次 change 重读**两个**下拉的现值，各发一次，所以换一个不必重选另一个。选择记忆在 `localStorage`（纯客户端，不动冻结契约）。
-- **`path-input` 保留**：下拉之外的任意路径仍可手打，走原有按钮路径。清单来自 `/dataset` 与首屏内嵌（`scan_dataset()` 的真实返回），不写死任何曲名。
+| 文件 | 行数 | 是什么 |
+|---|---|---|
+| `cockpit/app.py` | 1892 | HTTP 服务 + 静态资源 + JSON 端点 |
+| `cockpit/__init__.py` | 89 | 公开面：`__all__` 与 `launch_cockpit` |
+| `cockpit/preview.py` | — | 契约**结构**预览页（非产品界面、非本包入口） |
+| `serve_ui.py` | 276 | 进程装配点：建会话 → 装两端音频 → 建数据面 → 起服务 |
+| `__main__.py` | 520 | 无头 CLI 入口 |
 
-## 相关规格
+★ **三个可弃文件合计 2688 行**，★ 而核心（`contract` + `profile` + `core` + `algorithms` + `host/app`）
+★ 是 7301 行，★ 合计 9989。
+★ **即「界面 27% / 核心 73%」**（2688/9989 = 27%）——★ 这正是负责人「大部分代码不用换」的依据。
 
-- 产品边界与 Mac/开发者例外：[`SPEC.md` §1](../../SPEC.md)（`SPEC.md:9-24`）。
-- C4 职责与保证：[`COMPONENTS.md` COMP-C4](../../COMPONENTS.md) §3、§4、§5、§6、§7（`COMPONENTS.md:269-296`、`:324-357`、`:433-442`）。
-- C4 Build Instruction：
-  - [`FILE-400-v1.md` §4 包出口](../../.spec/build/FILE-400-v1.md)（`.spec/build/FILE-400-v1.md:62-117`）
-  - [`FILE-401-v1.md` §4.0–§4.16 本机界面](../../.spec/build/FILE-401-v1.md)（`.spec/build/FILE-401-v1.md:105-477`）
-  - [`FILE-401-P-v1.md` 契约结构预览](../../.spec/build/FILE-401-P-v1.md)（`preview.py` / `preview.html`）
-- UI 类型、命令与状态：[`contract.py` UiView / UiCommand / UiProjectionPort](../../harmonica_eval/contract.py)（`harmonica_eval/contract.py:975-1217`）。
+★ 前端源码不在本包内，在 `harmonica_eval_web/`（React + Vite，6 个源文件 730 行）。
+★ **本包不 import 它**，★ 只在运行时从磁盘取它的构建产物（`app.py:246`）。
 
-## 已知缺口与未决项
+### 无头入口
 
-- **已注入并实测**（★ 2026-09-25 更新，★ 原写「当前未注入」已过期）：
-  `launch_cockpit`、本机 UI 入口及全部渲染/命令函数均已实现，
-  端到端实测 `python3 -m harmonica_eval.serve_ui --reference 原曲.wav --practice 练习曲.wav`
-  起服务，12 个端口逐个可见、六个按钮按状态机顺序全部 200。
-  （`harmonica_eval/cockpit/__init__.py`；`harmonica_eval/cockpit/app.py`）
-- **命令的拒绝要可读**（★ 2026-09-25 修）：内核对用户输入的明确拒绝
-  （`ContractViolation` / `CoreBuildError` / `AlgorithmError`）回 **400 + 原因原文**，
-  只有真正的未预料异常才回 500。原先一律 `500 internal error` 五个字，
-  会让「状态不对」被误读成「服务端坏了」。（`harmonica_eval/cockpit/app.py:840-880`）
-- **测试时可用 `DSH_NO_BROWSER` 抑制弹窗**（★ 2026-09-25 修，治「反复跑测试导致浏览器标签越塞越多」）：
-  ```bash
-  DSH_NO_BROWSER=1 python3 -m harmonica_eval.serve_ui --reference 原曲.wav --practice 练习曲.wav
-  ```
-  ★ **默认行为不变**：不设该变量时**仍自动打开浏览器**
-  （`FILE-401-v1.md:185` §4.4 第 8 步明文要求「随后 `webbrowser.open(该 URL)`」）。
-  ★ **为什么用环境变量而不是 `--no-open-browser` 开关**：
-  `FILE-499-v1.md:160` §7 明文「不提供 `--port` / `--host` / `--no-browser` 等任何额外开关」
-  （AGENTS.md 铁律 4 零噪声），其 §8 判据把 `--no-browser` 列进 banned 集合。
-  ★ 名字绕开 banned 虽能过判据，★ 但违反 §7 意图 —— **判据是精确匹配，意图不是**。
-  ★ URL 仍照常打印到 stderr，**抑制的只是开浏览器**。（`harmonica_eval/cockpit/app.py:147-160`）
-- **时间轴展示依赖正确轴标注**：REFERENCE 与 WARPED 的物理含义不同；若实现漏标轴，界面会把归一化位置误读为抢拍/拖拍，这是当前必须现场验证的风险。（`harmonica_eval/cockpit/app.py:130-143`；`harmonica_eval/contract.py:1000-1012`）
-- **构建进度是粗粒度/可能为 None**：C4 不得自行从状态推断百分比；平滑进度需要 C1/契约层另行裁定，C4 不得补造。（`harmonica_eval/cockpit/app.py:159-171`；`harmonica_eval/contract.py:1022-1066`）
-- **端口已闭合**（★ 2026-09-25 更新，★ 原写「未闭合」已过期）：`HostApp.snapshot/submit` 已实现并被 `serve_ui` 注入，12 端口端到端可见。（`harmonica_eval/host/app.py:618-648`）
-- **“可整体删除”仍需真实测试证据**：BI 给出非破坏性删除等价检验，而不是在本 README 中伪造通过结果。（`.spec/build/FILE-400-v1.md:166-172`、`:231-246`）
-- **【规格内部冲突 · 仍未裁定】C4 “不得加入 HTTP”与 FILE-401 冻结的本机 HTTP 方案冲突。** `COMPONENTS.md:271-279` 明确警告不要为界面添加 HTTP 服务；`.spec/build/FILE-401-v1.md:107-138` 则冻结零第三方依赖的 `http.server.ThreadingHTTPServer` + 系统浏览器方案，并规定只绑 `127.0.0.1`（绑定细则见 `.spec/build/FILE-401-v1.md:142-179`）。两处都是规格材料且未给出冲突裁定；**本文不裁定哪一方为准**。★ **实测状态**：`app.py` 已实现 27 个函数并按 FILE-401 方案起 `ThreadingHTTPServer`（端到端实测 HTTP 200、12 端口可见、六个按钮全通），即**实现侧已选 FILE-401 方案**，但规格冲突本身仍未裁定——若日后裁定以 `COMPONENTS.md` 为准，需回退这部分实现。（`harmonica_eval/cockpit/app.py:77-92`、`:300-340`）
-- **陈旧的下游提示不能作为端口或注册清单**：`.spec/prompts/COMP-C3/downstream.md` 仍写旧注册/端口/时间轴口径；当前 C3 入口应看 FILE-200/205 与源码，历史提示仅作追溯。（`.spec/prompts/COMP-C3/downstream.md:42-92`；`.spec/build/FILE-200-v1.md:112-127`、`:163-172`；`.spec/build/FILE-205-v1.md:82-194`）
-- **🔴 GC-204-01：C1 session API 尚未统一。** 这不由 C4 实现解决，但当前 HostApp 快照所依赖的会话句柄/状态投影仍受显式 `session_id` 与隐式当前会话的未决冲突影响。★ **实测补充**：`UiProjectionPort` 只有 `snapshot` / `submit` 两个操作且 `submit` 无 `session_id` —— 这与「一个前台看一个会话」一致（`session_id` 在 `UiView` 快照里），**但 HostApp 本身持有完整 HostContract（含显式 `session_id` 的 `set_reference(uri)` 等）**，两者是宽窄不同的两个接口。多会话能力属于 HostApp，界面侧只见到窄口。**未裁定是否满足「统一」，阻塞 Cast Freeze。**（`harmonica_eval/contract.py:759-838`；`harmonica_eval/host/app.py:89-110`、`:127-168`；`.spec/GATE-CHALLENGES-C3.md:12-86`、`:449-464`）
-- **✅ GC-204-08 已关闭（原「🔴 未裁定，阻塞插件迁移」）**：这项裁定不改变 C4 的边界——C4 仍只消费 C1 发布的投影与命令，不 import 具体算法、也不持有注册表。裁定内容是「物理装配根为 `harmonica_eval/algorithms/bootstrap.py`，Host 只接收它产出的已装配 `Registry`」（`.spec/GATE-CHALLENGES-C3.md:544`、`:543`；`harmonica_eval/host/app.py:113-124`）。★ **装配链已接通**（★ 2026-09-25 实测，原写「尚未接通、bootstrap 无模块 import」已过期）：`build_default_registry()` 返回 `['pitch', 'timing', 'dynamics']` 三个已注册插件，五个缺陷样本端到端全 `rc=0`。
+C4 缺席时，正式无头入口仍是 `harmonica_eval/__main__.py`：接收参考与练习两段音频，
+驱动「建数据面 → 跑算法」的完整流程，并落盘 `metrics.json` 与同目录的 `report.md`。
+未指定 `--out` 时缺省落点是 `data/out/metrics.json`。入口只消费 C1 发布的 `UiView` 投影，
+**不做 DSP、不导入 cockpit**。五个缺陷样本均 rc=0 并落盘 `metrics.json`（16 scalars + series）。
 
-## 对比图（参考 / 练习 叠放）
+---
 
-页面的「对比图」区把成对的两条曲线画进**同一坐标系**，差异一眼可见，
-而不必让人心算两个数字的差。
+## 2 · 我吃什么
 
-| 图 | X 轴 | Y 轴 | 数据源 |
-| --- | --- | --- | --- |
-| 音高轨迹 | 音序（第几个音，**非秒**） | 音分（0=准，100=一个半音） | `*.per_note_f0_reference` / `_practice` |
-| 能量包络 | 时间（秒） | dB | `*.envelope_db_reference` / `_practice` |
+| 输入 | 来自 | 说明 |
+|---|---|---|
+| `UiProjectionPort` | `serve_ui` 注入的 `HostApp` | ★ **只有两个方法，见 §4** |
+| `/dataset` | 本目录扫数据集 | 10 首曲子 / 70 个 wav / `plugins` 清单 |
+| 浏览器请求 | 人 | `GET /`、`GET /view`、`GET /dataset`、`POST /command` |
 
-- 配对靠 key 的 `_reference` / `_practice` 后缀**现算**，界面不按算法名写死：
-  新插件若产出同样成对后缀的曲线，对比图自动出现。
-- **音高图画音分而非 hz**：绝对频率在低频区会放大差异
-  （`03_气息不匀` 只差约 48 Hz，在 200 Hz 基频上是巨大垂直距离，
-  读者会误以为音高差很多）。换算用 `1200*log2(f_practice/f_reference)`，
-  与 `pitch.per_note_cents` 同算法同语义。
-- 两侧点数不等时**各画各的，不拉伸、不补零**，并在图上留注释说明
-  （`05_漏音断句` 的能量侧是 34/21）。
-- 元素只用 `<text>` / `<polyline>` / 注释（FILE-401 §4.7 冻结四类），
-  零外部请求。
+★ **不读音频、不解析 WAV、不 import 具体算法、不持有注册表。**
 
-**warp_path 可视化留待后续**：它在 C2 侧，不属于任一算法，
-要投影得动 `UiView`，而 `FILE-003:254` 已冻结 UiView 的扩面先例。
+---
+
+## 3 · 我吐出什么
+
+| 出 | 格式 | 消费方 |
+|---|---|---|
+| `GET /view` | `UiView` 的 JSON（**9 个字段**） | React 前端 |
+| `GET /dataset` | 曲名分组 + 路径 + `plugins` | React 前端 |
+| `POST /command` | 收 `UiCommand`，执行后返回页面 | 人 / 前端 |
+
+★ `UiView` 九字段（`dataclasses.fields(UiView)` 实测）：
+```
+session_id · state · series · scalars · progress
+port_summary · error_code · error_detail · note
+```
+
+### 插件懒加载（2026-09-25 负责人裁定后新增）
+
+```bash
+POST /command {"kind":"RUN_ALGORITHMS","only":["pitch"]}
+→ /view 里 scalars 分组 ['pitch']、series 分组 ['pitch']
+```
+
+★ **判据是「`/view` 里没有」，不是「界面没显示」。** 后者是伪懒加载。
+★ `only=[]` 报「未指定任何算法 id：…与注册表 [...] 无交集」，
+★ **不会**谎称「注册表快照为空」（那曾是一个真缺陷，已修）。
+★ 传不存在的 id 报「未注册的算法 id：['…']」——**不静默忽略**。
+
+---
+
+## 4 · ★ 我不做什么 ★
+
+### 4.1 换手机前端时，这些能全扔吗？
+
+★★★ **能扔界面，不能扔契约。★★★
+
+```
+可弃（2688 行）                  不可弃
+────────────────────────────    ──────────────────────────
+cockpit/app.py     1892 行      UiProjectionPort 的两个方法
+serve_ui.py         276 行      UiView 的九个字段
+__main__.py         520 行      UiCommand 的六个 kind
+                                  COMMAND_LEGALITY 的状态约束
+```
+
+★ **实测证据**（`inspect` 跑出来的，非转述）：
+```python
+UiProjectionPort 公开方法 = ['snapshot', 'submit']   → 2 个
+  snapshot (self) -> UiView
+  submit   (self, command: UiCommand) -> None
+app.__all__ = 14 项
+```
+
+★★ **★ 换前端时唯一要守住的是这两个签名与语义 ★★**
+```
+★ ★ 改了它们，C4 就得直连 C2，★ 那违背 G14：
+★ ★ 「C1 不得为补全信息而让 C4 直连 C2」
+★ ★ ★ 而那正是「深组件 / 降低信息熵」这个决定【兑现的地方】
+★ ★ ★ ★ 手机前端（Swift / Kotlin / React Native）只要能表达
+★★ ★★      snapshot() → 九字段 JSON
+★★ ★★      submit(command) → 无返回值
+★★ ★★ 那核心 7301 行【一行不用改】
+★★ ★★ 而 2688 行界面 + 730 行 React【全部可以重写】
+```
+
+★ **注意 `submit` 没有 `session_id` 参数**——★ session_id 在 `UiView` 快照里。
+★ 端口是「一个前台看一个会话」的刻意窄化，★ 而那正是「深接口」的样子。
+
+### 4.2 本层的其他边界
+
+```
+❌ 不 import 任何具体算法（pitch / timing / dynamics 一律不认识）
+❌ 不持有 Registry 或注册表快照
+❌ 不做 DSP、不读 WAV、不碰采样点
+❌ 不发明第 7 种命令（六个 kind 是冻结的）
+❌ 不用 HTML disabled 属性（它不可聚焦，读屏拿不到原因）→ 用 aria-disabled
+❌ 不给某个具体算法写特例（分组按 key 前缀现算，★ 不写死三段）
+❌ 不引入图表库（会自己重采样，★ 让图上的数与 metrics.json 对不上）
+```
+
+★ **监听边界**：恒绑 `LOCAL_BIND_HOST = "0.0.0.0"`。
+★ 负责人裁定「直接支持局域网访问，这只是测试，没有安全问题」，
+★ 故不加认证、不做 CORS、不设 Cookie。
+
+---
+
+## 5 · ★ 两条实测教训（★ 别再踩）★
+
+### 5.1 MIME 给错 → 页面白，而门禁全绿
+
+```
+改前：/assets/index-*.js  →  Content-Type: text/html
+改后：/assets/index-*.js  →  Content-Type: text/javascript; charset=utf-8
+       /assets/index-*.css →  Content-Type: text/css; charset=utf-8
+```
+
+★ 浏览器对 `<script type="module">` 的 MIME 校验极严，★ 收到 `text/html`
+★ **直接拒绝执行** → `<div id="root">` 永远是空的。
+
+★★ 而当时的表现是：**端点全通、HTTP 200、`/view` 正常，而页面全白。★★
+★★ 那正是「门禁全绿而功能全坏」的一个实例。★★
+★★ **所以「端点 200」不是证据，「浏览器里渲染出内容」才是。**
+
+★ **实测：首屏 HTML 约 12 KB，★ 但里面【没有】`<select>` / `<optgroup>` / `<table>`**
+★（各 0 个）。★ 那些由浏览器执行 JS 后从 `/view` 与 `/dataset` 拉取。
+★ **所以「首屏没有下拉框」是 React 的正常形态，★ 不是「选曲面板没实现」。**
+
+### 5.2 三个死按钮曾被删（能力没丢）
+
+```
+曾有 6 个按钮：选择参考演奏 / 选择练习演奏 / 构建数据面 / 运行算法 / 取消 / 重置会话
+★ 前三个在 DATA_READY 下永远置灰（COMMAND_LEGALITY 不含该状态）
+★ ★ 负责人明令删除（★ 原话「你这个自己都报错，★ 你让我怎么搞啊」）
+★ ★ 而那五条命令仍由下拉框的 change 事件串行下发 ——★ 能力没丢，★ 只是不由按钮呈现
+```
+
+★ **教训**：界面元素可以删，★ **但删之前先确认能力有别的入口。**
+
+---
+
+## 6 · 旧文与代码的冲突（★ 本轮实测，★ 已按代码/裁定为准修正 ★）
+
+| # | 旧文写的 | 代码/裁定实际是 |
+|---|---|---|
+| 1 | 「**零依赖铁律**：无 npm、无 CDN、无外部字体、无图表库、无 `<script src>`、无 `<link>`」（旧 :58） | ★ **2026-09-25 负责人裁定：前端允许依赖。** 现为 Vite + React，`index.html` 确有 `<script type="module">` 与 `<link>` |
+| 2 | 「【规格内部冲突 · 仍未裁定】C4『不得加入 HTTP』与 FILE-401 冲突」（旧 :114） | ★ **已裁定**（同上）。HTTP 是现状，★ 且 FILE-401 冻结的正是本机 HTTP 方案 |
+| 3 | 讲 `runSelection(ref, pra)` 在 Python 侧（旧 :65） | ★ 现在在 `harmonica_eval_web/src/api.js:24`；Python 侧只发 `POST /command` |
+| 4 | `app.py` 1605 行 | ★ **实测 1892 行**（React 改造后增长） |
+| 5 | 「🔴 GC-204-01：C1 session API 尚未统一」 | ★ 已统一：`submit(self, command)` **无 session_id**（session_id 在 `UiView` 快照里） |
+| 6 | 「✅ GC-204-08 已关闭」 | ★ 仍成立：C4 不 import 具体算法、不持有注册表 |
+
+★ **第 1、2 条是「已废止的阶段态」**——★ 写在这里是为了让后来者知道
+★ **它们曾经存在，且已被裁定推翻。**
+
+---
+
+## 7 · 怎么验证这一层
+
+```bash
+# 起服务（不自动开浏览器）
+DSH_NO_BROWSER=1 python3 -m harmonica_eval.serve_ui \
+  --reference harmonica_mvp_dataset/01_奇异恩典/标准旋律版.wav \
+  --practice  harmonica_mvp_dataset/01_奇异恩典/练习曲/05_漏音断句.wav
+```
+
+★ 端口从 8721 起顺延，★ **不要只探测 8721**（★ 历史上栽过四次）。
+
+```bash
+curl -s http://127.0.0.1:<端口>/view | python3 -m json.tool | head -20
+curl -s -X POST http://127.0.0.1:<端口>/command \
+  -H 'Content-Type: application/json' \
+  -d '{"kind":"RUN_ALGORITHMS","only":["pitch"]}'
+```
+
+★ 前端改动后要重建：`cd harmonica_eval_web && npm run build`。
+★ **`dist/` 不入库**，★ 所以 clone 下来必须先构建，★ 否则界面回落到旧字符串页
+★（★ 那个回落是刻意留的降级路径，★ 而它会掩盖「React 版根本没跑」这件事）。
+
+---
+
+## 8 · 相关规格
+
+- [`FILE-400-v1.md`](../../.spec/build/FILE-400-v1.md) — C4 公开面（`__all__` 与 `launch_cockpit`）
+- [`FILE-401-v1.md`](../../.spec/build/FILE-401-v1.md) — 本层实现骨架
+- [`FILE-499-v1.md`](../../.spec/build/FILE-499-v1.md) — 进程装配（`serve_ui`）
+- [`FILE-003-v1.md`](../../.spec/build/FILE-003-v1.md) — 契约（含 `UI_PAYLOAD_KEYS[RUN_ALGORITHMS]` 的 `only`）
+- [`docs/多端开发与可复用路线.md`](../../docs/多端开发与可复用路线.md) — 负责人对多端方向的裁定

@@ -1,100 +1,354 @@
-> **本文是索引，不是权威。** 权威在 `.spec/` 与源码铭牌。
-> 本文任何内容与它们冲突时以它们为准，并把冲突报给负责人。
+# `harmonica_eval/core/` — C2 数据面
 
-# C2 Audio Core 索引
+> **本文档于 2026-09-26 依据源码重写。** 旧版是一份索引，其中「关键入口仍抛
+> `NotImplementedError`」的陈述已被证伪（全目录 `NotImplementedError` **零命中**）。
+> 冲突逐条记录在 §6。
+> **权威仍在 `.spec/` 与源码铭牌。** 本文与它们冲突时以它们为准。
 
-## 这个组件负责什么
+---
 
-C2 把两段输入音频编译成一份完整、不可变、与算法无关的标准分析数据面；它内部隐藏标准化、对齐、物化和端口存储，只向 C1 暴露 Host 门面、算法只读数据面契约。（`COMPONENTS.md:136-176`；`harmonica_eval/core/__init__.py:6-20`）
+## 1 · 我是谁
 
-按 `.spec/OWNER-DIRECTIVES.md` 指令 2（未授权前禁止注入），当前工作区的实体函数仍是待注入壳件；在负责人同意前不得写入实现。（`.spec/OWNER-DIRECTIVES.md:50-87`；例如 `harmonica_eval/core/ingest.py:96-105`、`harmonica_eval/core/align.py:122-132`、`harmonica_eval/core/surface.py:147-160`、`harmonica_eval/core/api.py:114-120`）
+`core/` 是 **C2 数据面**：把两段音频变成 **12 个端口**，而端口是算法的**唯一输入**。
 
-## 正式无头入口
+```
+两个 .wav 路径
+   │
+   ├─ ingest.py    220 行  解码 → 单声道 → 重采样 → 规格校验
+   ├─ align.py     367 行  低分辨率 chroma → DTW → warp_path
+   ├─ features.py  337 行  pitch / rms / chroma / notes
+   ├─ surface.py   756 行  组装 Surface，seal 后只读
+   └─ api.py       321 行  HostCore 协议
+   │
+   ▼
+Surface（12 端口）→ C3 算法 → 16 个标量
+```
 
-`harmonica_eval/__main__.py` 是 C4 缺席时的正式无头入口：接收参考与练习两段音频，驱动“建数据面 → 跑算法”的完整流程，并落盘 `metrics.json` 与同目录的 `report.md`。未指定 `--out` 时，`metrics.json` 的缺省落点是 `data/out/metrics.json`；指定 `--out` 时，`report.md` 与其同目录。入口本身不做 DSP、不导入 cockpit；相关入口当前仍为 SHELL，注入前不得把它写成已交付行为。（`harmonica_eval/__main__.py:6-24`、`:49-56`）
+**位置**：在 `contract.py`（冻结契约）之下、`algorithms/` 之上。
+`core.__all__` 恰 **5** 项：`ingest` `align` `features` `surface` `api`。
 
-## 文件索引
+---
 
-| 文件 | 职责 | 现场依据 |
-| --- | --- | --- |
-| `__init__.py` | C2 包出口；公开子模块，并把 C1 的调用入口收敛到 `core.api`。 | `harmonica_eval/core/__init__.py:6-20`、`:35-52` |
-| `ingest.py` | 音频解码、下混、重采样、时长与静音校验，产出标准 PCM。 | `harmonica_eval/core/ingest.py:6-31`、`:50-105` |
-| `align.py` | 低分辨率 chroma、DTW、warp path 的单调性与覆盖校验。 | `harmonica_eval/core/align.py:6-43`、`:49-61`、`:65-132` |
-| `features.py` | 预生成音高、RMS、chroma 与逐音摘要端口。 | `harmonica_eval/core/features.py:6-42`、`:63-118` |
-| `surface.py` | 端口描述、预算检查、Seal，以及 `Surface.manifest/read`。 | `harmonica_eval/core/surface.py:6-39`、`:57-160` |
-| `api.py` | `HostContract` 的会话状态机、生命周期和 C2 资源边界。 | `harmonica_eval/core/api.py:6-40`、`:50-120` |
+## 2 · 我吃什么
 
-## 产出端口
+| 入口 | 输入 | 约束 |
+|---|---|---|
+| `ingest.ingest` | 两个**仓库相对**路径 | 44.1 kHz / mono / **45–120 s** |
+| `align.align` | ingest 产物 | — |
+| `features.materialize_*` | align 产物 | — |
+| `surface.build_surface` | 上述全部 | — |
+| `api.HostCore` | 协议 | `acquire_surface` / `read` / `manifest` |
 
-端口的唯一配置来源是 `profile.PORTS`；它要求 Core 预生成封闭清单，算法适配 Core 而不是让 Core 按插件需求扩展。（`harmonica_eval/profile.py:13-32`、`:243-445`）`core/__init__.py` 的门面说明把 `warp_path` 归给 `core.align`、特征端口归给 `core.features`、`pcm.*` 归给 `core.surface`；C1 只应通过 `core.api` 对话。（`harmonica_eval/core/__init__.py:42-52`）
+**★ 路径必须是仓库相对路径。** 绝对路径会被拒——实测报
+`输入路径不存在或不是普通文件`。
 
-### 生成表（不要手改）
+**★ 规格校验在 `ingest.validate_duration`**，短于 45 s 或长于 120 s 都拒，
+错误码 `INPUT_TOO_SHORT` / `INPUT_TOO_LONG`，**不是崩溃**。
 
-> 本表由 `harmonica_eval/profile.py` 的 `PORTS` 生成。
-> **改端口请改 `profile.py`，不要改本表。**
+---
 
-生成命令（实际运行）：
+## 3 · 我吐出什么
+
+### 12 个端口（实测 `profile.PORTS`）
+
+| port_id | dimensions | element_type | produced_by |
+|---|---|---|---|
+| `warp_path` | warp_point×axis | int32 | `core.align` |
+| `pcm.mapped.reference` | sample | float32 | `core.surface` |
+| `pcm.mapped.practice` | sample | float32 | `core.surface` |
+| `pcm.warped.practice` | sample | float32 | `core.surface` |
+| `pitch.reference` | frame×field | float32 | `core.features` |
+| `pitch.practice` | frame×field | float32 | `core.features` |
+| `rms.reference` | frame | float32 | `core.features` |
+| `rms.practice` | frame | float32 | `core.features` |
+| `chroma.lowres.reference` | frame×bin | float32 | `core.features` |
+| `chroma.lowres.practice` | frame×bin | float32 | `core.features` |
+| `notes.reference` | note×field | float32 | `core.features` |
+| `notes.practice` | note×field | float32 | `core.features` |
+
+**★ `PortSpec` 的九个字段（本节上一版只列了四个，★ 漏了 `hop_length` 与 `rationale`）★★**
+
+```
+port_id · units · dimensions · element_type · timeline_basis
+produced_by · rationale · field_names · hop_length
+```
+
+**★ 两个不能省的字段 ★**
+
+```
+hop_length   帧移。★ 0 = 逐样本（非帧对齐），非 0 = 该端口每 hop_length 样本一帧
+rationale    ★ 为什么【存在】。★ 它不是装饰——★ 读它才知道这个端口能不能删
+             ★ 例：pcm.warped.practice 的 rationale 写着
+             ★ 「它当前【无算法消费】。★ 保留的真实理由是数据面保证：
+             ★   算法永远能拿到时间归一化后的 PCM 自行做特有预处理」
+```
+
+**★ `rationale` 里藏着两条防误改的记录（★ 2026-09-26 实测）★★**
+```
+★ warp_path：「相对 DTW 代价矩阵是 1/5300」——★ 有人会想「DTW 都不用了还留它」
+★ pcm.mapped.practice：「逃生口甲」——★ practice 保留源时间，★ 节奏类指标
+  只能在它上面算，★ 「用 warped 轴报抢拍拖拍是构造性错误（SPEC §5.5）」
+★ ★ ★ 而这两条一旦被「优化」掉，★ 指标会安静地算错
+```
+
+### `timeline_basis` 决定那条轴能不能用（★ 最易错的一处）
+
+```
+REFERENCE  源时间网格。★ 抢拍拖拍在这一轴上可见
+WARPED     归一化网格。★ ★ 抢拍拖拍已被抹掉
+
+★ ★ ★ 而 profile 有一份 `SAMPLE_RATE_FREE_PREFIXES = {"chroma","notes","warp_path"}`
+★ ★ ★ 意思是：这三个前缀【不受 sample_rate 换算影响】，★ 两侧都按 44100 取
+★ ★ ★ ★ pcm.* 不在其中——★ 它是采样点序列，★ 必须换算
+```
+
+### 谁消费哪个端口（实测 `ALGORITHM_INPUTS`，非注释）
+
+| 算法 | 实际消费 |
+|---|---|
+| `pitch` | `pitch.reference` `pitch.practice` `notes.reference` `notes.practice` |
+| `timing` | `pcm.mapped.reference` `pcm.mapped.practice` `notes.reference` |
+| `dynamics` | `rms.reference` `rms.practice` `notes.reference` `notes.practice` |
+
+**★ 这张表决定插件作者能否拿到数据。** 加插件时在
+`PluginSpec.required_inputs` 声明所需端口，装配根负责校验它是否被生产。
+
+**★ 三个必须知道的事实**：
+
+- `pcm.warped.practice` **当前无任何算法消费**。保留是「逃生口」——
+  让算法永远能拿到时间归一化后的 PCM 自行做特有预处理，**不是缺陷**。
+- `timing` 消费 `pcm.mapped.*`（**源时间**）而非 warped 轴。
+  **用 warped 轴报抢拍拖拍是构造性错误**（SPEC §5.5）。
+- `notes.practice` **确实被生产且被两个算法消费**——旧版「分工不完整」已不成立。
+
+### Surface 的三个成员
+
+```python
+surface.manifest()     # 端口清单
+surface.read(port_id)  # 读一个端口
+surface.resolution     # 状态（当前为 None，见 §5 ②）
+```
+
+---
+
+## 4 · ★ 我不做什么 ★
+
+**这一节是全项目最缺的，而它最有价值。**
+
+| 我不做 | 因为 | 依据 |
+|---|---|---|
+| **不算指标** | 16 个标量由 C3 算；core 只产端口 | `core/*.py` 无 `UiScalar` 构造 |
+| **不装配插件** | Registry 与装配根在 C3 | `algorithms/bootstrap.py:326` |
+| **不提供 HTTP** | 那是 C4 | `cockpit/app.py` |
+| **不生成自然语言反馈** | SPEC 铁律 2 明令禁止 | `SPEC.md` |
+| **不判定合格与否** | 端口只陈述数值，不下评语 | `SPEC.md` §3 |
+| **不按算法要求改精度** | 精度由 `profile` 冻结，core 不图精度 | `align.py:124-126` |
+| **不因平台而改写** | 换手机前端时**本目录一行不动** | 见下 |
+
+**★ 核心边界一句话**：
+
+> **core 是端口的生产者，端口是算法的唯一输入。**
+> 界面层与数据面之间隔着一个无平台依赖的窄接口（`UiProjectionPort`），
+> **core 与 `contract.py` / `profile.py` 都不需要改。**
+
+**依赖面实测**（各文件顶层 `import`，★ 2026-09-26 重新逐文件核对）：
+
+```
+ingest   → numpy · scipy.signal.resample_poly · soundfile
+align    → numpy · scipy.signal.stft · scipy.spatial.distance.cdist
+features → numpy · librosa          ← ★ 旧文此处写「numpy」，★ 漏了 librosa
+surface  → numpy（本包内，无第三方）
+api      → （无第三方 import）        ← ★ 旧文写「仅 typing」，★ 实为无
+★ ★ torch 全目录零引用
+```
+
+**★ 逐个调用点（★ 换平台时按这张表定位，★ 不用通读）★★**
+
+| 依赖 | file:line | 用途 | 换手机要换吗 |
+|---|---|---|---|
+| `soundfile` | `ingest.py:52` import · **`:89-94`** 唯一使用点 | `SoundFile(uri)` 读、`sf.samplerate`、`sf.read(always_2d=True)` | ★ **要换** |
+| `scipy.signal.resample_poly` | `ingest.py:53` import · **`:137`** | 多相滤波重采样到 44100 | ★ **可能要换** |
+| `scipy.signal.stft` | `align.py:72` import · **`:159`** | 对齐特征，nperseg=4096 | ★ **可能要换** |
+| `scipy.spatial.distance.cdist` | `align.py:73` import | DTW 代价矩阵 | ★ **可能要换** |
+| `librosa.pyin` | `features.py:57` import · **`:155`** | 逐帧基频 | ★ **可能要换** |
+| `librosa.feature.chroma_stft` | `features.py:57` import · **`:227`** | 12 音级能量 | ★ **可能要换** |
+| `numpy` | 全部五文件 | 数组运算 | ★ 移动端有成熟轮子 |
+
+> ★ **换手机时 `core` 只有两处要改**：
+> ★ **`ingest.py:89-94`（读音频）** 与 **`ingest.py:137`（重采样）**。
+> ★ 其余全是 numpy 运算。
+> ★ 而 `librosa` 那两处（`pyin` / `chroma_stft`）**都能用 numpy 手写替换**，
+> ★ 但**换完要与现实现对拍数值**——那是「换了之后还对不对」，不是「能不能跑」。
+
+---
+
+## 4.5 · ★ 边界守卫（★ 全部实测，★ 2026-09-26）★
+
+**这一节回答「我喂它什么会得到什么、什么会报错」——★ 别人接手时最先踩的东西。**
+
+### ★ `ingest` 阶段（★ 抛 `CoreBuildError`）
+
+| 输入 | 实测结果 |
+|---|---|
+| 路径不存在 | `CoreBuildError: [INPUT_UNREADABLE] 路径不存在或不是普通文件：<path>` |
+| 零字节文件 | `CoreBuildError: [INPUT_UNREADABLE] 解码失败：<path>（Error opening …）` |
+| 10 秒音频（下限 45s） | `CoreBuildError: [INPUT_TOO_SHORT] 时长 10.000s 短于下限 45.0s（441000 样本 @ 44100 Hz）` |
+| 全零音频 | `CoreBuildError: [INPUT_SILENT] 整段 RMS 0.000e+00 低于阈值 1.000e-04（线性幅度，非 dBFS）` |
+| **60 秒正常** | ★ **OK，n=2646000** |
+
+**★ 两条「不报错」的情形（★ 容易被误以为该拒绝）★★**
+```
+★ 双声道 60 秒 → ★ OK。★ ingest.py:75-76 用算术平均【下混单声道】，
+  而非「只取第 0 声道」——★ 后者会静默丢弃另一声道
+★ 48 kHz 60 秒 → ★ OK。★ resample_poly 重采样到 44100（ingest.py:137）
+★ ★ ★ 而那条注释写明了原因：「FFT 法假设信号周期延拓」，★ 多相滤波无此假设
+```
+
+### 守卫清单（★ 精确位置）
+
+| 守卫 | file:line | 作用 |
+|---|---|---|
+| `validate_duration` | `ingest.py:141` | 45–120 s 上下限 |
+| `assert_not_silent` | `ingest.py:175` | RMS 低于 1e-4 |
+| `assert_monotonic` | `align.py:299` | warp_path 必须单调 |
+| `assert_budget` | `surface.py:420` | 端口总字节上限 |
+| `_reject_nonfinite` | `features.py:79` | NaN / inf 拒绝 |
+| `_check_rate` | `features.py:88` | 采样率须等于 profile |
+| `_as_mono_float32` | `features.py:96` | dtype 与形状 |
+| `_frame_count` | `features.py:108` | 帧数与 hop 一致 |
+| `seal` | `surface.py:301` | 数组只读封装 |
+
+### ★ 两条「静默出错」的高风险点（★ 改代码时最容易踩）★★
+
+```
+★ ingest.py:137  resample_poly(samples, 44100, native_sr)
+★ ★ 若漏传 native_sr（写成两个 44100），★ 会静默产出原采样率的数组，★ 不报错
+★
+★ features.py:227  librosa.feature.chroma_stft(..., sr=sample_rate)
+★ ★ 源码注释原话：「sr 必传：漏传会用 librosa 默认的 22050，
+★ ★ 频率轴整体错一倍且不报错」
+★ ★ ★ 而那种错【不抛异常】，★ 指标会安静地全错 —— ★ 本项目最防的那类假绿
+```
+
+---
+
+## 5 · 遗留项（★ 已核实，★ 非阶段态残留）
+
+**① `pcm.warped.practice` 无算法消费** —— 见 §3。保留是为数据面通用性。
+
+**② `Surface.resolution` 返回 `None`** —— `contract.py:654-678` 声明它为只读状态，
+而 `core/surface.py:112-145` 的 `Surface` 继承 `AlgorithmDataContract`，
+因此该属性是 `None` 而非「不提供」。
+**「谁负责把 C2 Surface 包装成含 `resolution` 的完整契约」仍未裁定。**
+
+**③ `timing` 走 `pcm.mapped.*` 而非 warped 轴** —— 这是**正确设计**（SPEC §5.5），
+记在此处以防后来者「修正」成 warped 轴。
+
+---
+
+## 6 · 冲突清单（★ 旧文档 vs 代码，★ 2026-09-26 实测）
+
+| 旧文档陈述 | 实测结论 | 依据 |
+|---|---|---|
+| 「关键入口仍抛 `NotImplementedError("SHELL: …")`」 | **★ 已证伪。** 全目录 `NotImplementedError` **零命中**、`SHELL` **零命中**；实为 `CoreBuildError`（44 处） | `core/*.py` 全文 grep |
+| 引 `ingest.py:96-105` 为抛 `NotImplementedError` | 该处现为 `raise CoreBuildError(INPUT_UNREADABLE, …)` | `ingest.py:96-105` |
+| 引 `align.py:122-132` 同上 | 该处现为 `compute_alignment_features` 的 docstring | `align.py:122-132` |
+| 「`notes.practice` 的现场分工不完整」 | **★ 已证伪。** 由 `core.features` 生产，`pitch`/`dynamics` 均消费 | `ALGORITHM_INPUTS` 实测 |
+| 「`as_view()` / `manifest()` / `read()` 为 SHELL」 | **★ 已证伪。** 三者均已实现 | `surface.py:112-145` |
+| 「`runtime.py:65-131` 为 SHELL」 | **★ 已证伪。** 该文件 `NotImplementedError` 零命中 | `algorithms/runtime.py` |
+
+★ **六条里五条是「已废止的阶段态」** —— 它们**曾经为真**，所以读起来像事实。
+
+### ★★ 本次（2026-09-26 第二次核对）新发现的三条
+
+| # | 旧文档陈述 | 实测结论 | 依据 |
+|---|---|---|---|
+| ⑦ | §4 依赖表写 `features → numpy` | **★ 错，漏了 librosa。** `features.py:57` `import librosa`，`pyin`(:155) 与 `chroma_stft`(:227) 两处调用 | `grep -E "^import librosa"` |
+| ⑧ | §4 依赖表写 `api → 仅 typing` | **★ 含糊。** `api.py` **无任何第三方 import**，连 `typing` 都不在顶层 | `grep -E "^(import\|from)" api.py` |
+| ⑨ | §3 端口表只列 4 个字段 | **★ 不完整。** `PortSpec` 有 9 个字段，漏了 `hop_length` / `rationale` / `field_names` / `units` / `timeline_basis` | `dataclasses.fields(PortSpec)` |
+
+★ **★ 而 ⑦ 那条最要紧：★ 若照旧表去「精简依赖」，会以为 librosa 没人用 ★★**
+```bash
+grep -n "librosa\." harmonica_eval/core/features.py
+#   :155  librosa.pyin(...)
+#   :227  librosa.feature.chroma_stft(...)
+```
+
+### ★ 本次新补的三节（旧文没有，★ 而它们是「掌控感」的一半）
+
+```
+§3 增补  PortSpec 九字段 + hop_length / rationale 的含义 + timeline_basis 陷阱
+§4.5 新增 边界守卫（★ 9 个守卫的 file:line + 5 种非法输入的【实测异常】）
+§4 改写  依赖调用点表（★ 7 个依赖逐个给 file:line + 换手机要换哪些）
+★ ★ ★ 而「缺」比「错」更隐蔽 —— ★ 旧文的冲突清单里【没有一条是关于「缺」的】
+```
+
+---
+
+## 7 · 规格对照
+
+| 文件 | Build Instruction |
+|---|---|
+| `ingest.py` | [`FILE-101-v1.md`](../../.spec/build/FILE-101-v1.md) |
+| `align.py` | [`FILE-102-v1.md`](../../.spec/build/FILE-102-v1.md) |
+| `features.py` | [`FILE-103-v1.md`](../../.spec/build/FILE-103-v1.md) |
+| `surface.py` | [`FILE-104-v1.md`](../../.spec/build/FILE-104-v1.md) |
+| `api.py` | [`FILE-105-v1.md`](../../.spec/build/FILE-105-v1.md) |
+| `__init__.py` | [`FILE-100-v1.md`](../../.spec/build/FILE-100-v1.md) |
+| 端口声明 | [`FILE-004-v1.md`](../../.spec/build/FILE-004-v1.md)（`profile.py`） |
+| 契约 | [`FILE-003-v1.md`](../../.spec/build/FILE-003-v1.md) |
+
+---
+
+## 8 · 复现
 
 ```bash
-python3 -c 'from harmonica_eval.profile import PORTS
-print("| port_id | units | dimensions | field_names | element_type | timeline_basis | hop_length | produced_by |")
-print("| --- | --- | --- | --- | --- | --- | ---: | --- |")
-for p in PORTS:
-    fields = ", ".join(p.field_names) if p.field_names else "—"
-    print(f"| `{p.port_id}` | `{p.units}` | `{tuple(p.dimensions)}` | {fields} | `{p.element_type}` | `{p.timeline_basis.value}` | `{p.hop_length}` | `{p.produced_by}` |")'
+cd <仓库根>          # ★ clone 之后你的实际目录，★ 不是某个人的机器路径
+
+# 一条命令跑通全链路
+PYTHONDONTWRITEBYTECODE=1 python3 -m harmonica_eval \
+  --reference harmonica_mvp_dataset/01_奇异恩典/标准旋律版.wav \
+  --practice  harmonica_mvp_dataset/01_奇异恩典/练习曲/01_音准走调.wav
+
+# §3 两张表的来源
+PYTHONDONTWRITEBYTECODE=1 python3 -c "
+import sys; sys.path.insert(0,'.')
+from harmonica_eval import profile
+for p in profile.PORTS: print(f'{p.port_id:26s} {p.produced_by}')"
+
+PYTHONDONTWRITEBYTECODE=1 python3 -c "
+import sys; sys.path.insert(0,'.')
+from harmonica_eval.algorithms.bootstrap import ALGORITHM_INPUTS
+for k, v in ALGORITHM_INPUTS.items(): print(k, list(v))"
+
+# §3 PortSpec 九字段（★ 上一版只列了四个，★ 漏了两个）
+PYTHONDONTWRITEBYTECODE=1 python3 -c "
+import sys, dataclasses; sys.path.insert(0,'.')
+from harmonica_eval import profile
+print([f.name for f in dataclasses.fields(profile.PortSpec)])"
+
+# §4 依赖调用点（★ 逐文件，★ 不靠印象）
+for f in ingest align features surface api; do
+  printf '%-9s ' "$f.py"
+  grep -E "^(import|from) (numpy|scipy|soundfile|librosa)" \
+    harmonica_eval/core/$f.py | grep -oE "(numpy|scipy|soundfile|librosa)" | sort -u | tr '\n' ' '
+  echo
+done
+
+# §4.5 边界守卫（★ 实测，★ 不许写「应该会报错」）
+PYTHONDONTWRITEBYTECODE=1 python3 -c "
+import sys, numpy as np, soundfile as sf; sys.path.insert(0,'.')
+t = np.arange(int(44100*10))/44100.0            # 10 秒 → 短于下限
+sf.write('/tmp/_short.wav', (0.5*np.sin(2*np.pi*440*t)).astype('float32'), 44100, subtype='FLOAT')
+sf.write('/tmp/_silent.wav', np.zeros(int(44100*60), dtype='float32'), 44100, subtype='FLOAT')
+from harmonica_eval.core.ingest import ingest
+for name in ('_short', '_silent'):
+    try:
+        ingest(f'/tmp/{name}.wav')
+        print(name, '→ OK  ★ 但那说明守卫没生效')
+    except Exception as e:
+        print(name, '→', type(e).__name__, str(e)[:70])"
+
+# 门禁
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_smoke_injection.py
 ```
-
-真实输出：
-
-```text
-| port_id | units | dimensions | field_names | element_type | timeline_basis | hop_length | produced_by |
-| --- | --- | --- | --- | --- | --- | ---: | --- |
-| `warp_path` | `index` | `('warp_point', 'axis')` | reference_frame, practice_frame | `int32` | `REFERENCE` | `0` | `core.align` |
-| `pcm.mapped.reference` | `amplitude` | `('sample',)` | — | `float32` | `REFERENCE` | `0` | `core.surface` |
-| `pcm.mapped.practice` | `amplitude` | `('sample',)` | — | `float32` | `REFERENCE` | `0` | `core.surface` |
-| `pcm.warped.practice` | `amplitude` | `('sample',)` | — | `float32` | `WARPED` | `0` | `core.surface` |
-| `pitch.reference` | `hz` | `('frame', 'field')` | f0_hz, voiced, confidence | `float32` | `REFERENCE` | `2048` | `core.features` |
-| `pitch.practice` | `hz` | `('frame', 'field')` | f0_hz, voiced, confidence | `float32` | `REFERENCE` | `2048` | `core.features` |
-| `rms.reference` | `rms` | `('frame',)` | — | `float32` | `REFERENCE` | `256` | `core.features` |
-| `rms.practice` | `rms` | `('frame',)` | — | `float32` | `REFERENCE` | `256` | `core.features` |
-| `chroma.lowres.reference` | `chroma` | `('frame', 'bin')` | C, C#, D, D#, E, F, F#, G, G#, A, A#, B | `float32` | `REFERENCE` | `2048` | `core.features` |
-| `chroma.lowres.practice` | `chroma` | `('frame', 'bin')` | C, C#, D, D#, E, F, F#, G, G#, A, A#, B | `float32` | `REFERENCE` | `2048` | `core.features` |
-| `notes.reference` | `index` | `('note', 'field')` | onset_sec, f0_hz, rms | `float32` | `REFERENCE` | `0` | `core.features` |
-| `notes.practice` | `index` | `('note', 'field')` | onset_sec, f0_hz, rms | `float32` | `REFERENCE` | `0` | `core.features` |
-```
-
-表中 `PORTS` 的生成位置与封闭性检查见 `harmonica_eval/profile.py:243-245`、`:451-571`；字段布局、单位词表与时间轴的契约出处见 `harmonica_eval/contract.py:87-141`、`:181-240`。
-
-## 关键约束与不变量
-
-- **封闭端口清单**：Seal 时必须穷举 `profile.PORTS`，不得因算法缺端口而动态追加；`read()` 是纯查表，不在读取时计算。（`harmonica_eval/profile.py:13-32`；`harmonica_eval/core/surface.py:15-27`）
-- **两轴分离**：`REFERENCE` 是源时间网格，`WARPED` 是时间归一化网格；节奏计算不能偷换到 `WARPED`。（`harmonica_eval/contract.py:87-141`；`harmonica_eval/algorithms/timing.py:10-18`）
-- **绝对音高与采样率**：音高端口必须保留 Hz、voiced、confidence；采样率是结果成因，必须随结果记录。（`harmonica_eval/core/features.py:21-31`、`:63-76`；`SPEC.md:134-147`）
-- **只读与故障隔离**：数据面 Seal 后不可写；C2 失败不部分发布；`status()` 只返回六个 `SessionState`，内部阶段不得外泄。（`harmonica_eval/core/api.py:18-30`、`:87-120`；`harmonica_eval/core/surface.py:15-27`）
-- **依赖方向**：`core/` 不导入 host、algorithms 或 cockpit，且不能通过“顺便”计算特征。（`harmonica_eval/core/__init__.py:18-21`；`harmonica_eval/core/ingest.py:21-25`）
-
-## 相关规格
-
-- C2 职责、保证与不变量：[`COMPONENTS.md` COMP-C2](../../COMPONENTS.md)，重点看 §3、§4.2、§5、§7（`COMPONENTS.md:136-197`、`:324-341`、`:377-387`、`:433-442`）。
-- 行为边界：[`SPEC.md` §5 时间对齐与 §7 音高](../../SPEC.md)（`SPEC.md:95-119`、`:134-153`）。
-- C2 内部 Build Instruction：
-  - [`FILE-100-v1.md` §4 包公开面](../../.spec/build/FILE-100-v1.md)（`.spec/build/FILE-100-v1.md:59-190`）
-  - [`FILE-101-v1.md` §4.1–§4.5 ingest](../../.spec/build/FILE-101-v1.md)（`.spec/build/FILE-101-v1.md:92-300`）
-  - [`FILE-102-v1.md` §4 align](../../.spec/build/FILE-102-v1.md)（`.spec/build/FILE-102-v1.md:73-245`）
-  - [`FILE-103-v1.md` §4 features](../../.spec/build/FILE-103-v1.md)（`.spec/build/FILE-103-v1.md:64-210`；引擎对照实验见 `:386-450`）
-  - [`FILE-104-v1.md` §4.2–§4.7 surface](../../.spec/build/FILE-104-v1.md)（`.spec/build/FILE-104-v1.md:244-922`）
-  - [`FILE-105-v1.md` §4.0–§4.10 HostCore](../../.spec/build/FILE-105-v1.md)（`.spec/build/FILE-105-v1.md:107-375`）
-
-## 已知缺口与未决项
-
-- **当前壳件未实现**：`ingest`、`align`、`features`、`surface` 与 `api` 的关键入口仍抛 `NotImplementedError("SHELL: ...")`，不能把本索引的实现意图当作已交付行为。（`.spec/OWNER-DIRECTIVES.md:50-87`；`harmonica_eval/core/ingest.py:96-105`；`harmonica_eval/core/align.py:122-132`；`harmonica_eval/core/surface.py:147-160`；`harmonica_eval/core/api.py:114-120`）
-- **`notes.practice` 的现场分工不完整**：`profile.PORTS` 已同时声明 `notes.reference` 与 `notes.practice`，并写明按音配对需要练习侧索引；但 `features.materialize_notes` 当前 docstring 只写“参考侧逐音摘要”，函数签名也没有说明两侧分别如何产出。（`harmonica_eval/profile.py:399-445`；`harmonica_eval/core/features.py:104-118`）这是源码现场与索引之间的缺口，不能假装已闭合。
-- **【未裁定】`core/surface.py` 的 `Surface` 继承了 `AlgorithmDataContract`，因此暴露了一个返回 `None` 的 `resolution`，而不是不提供该属性。** 契约 Protocol 当前声明 `AlgorithmDataContract.resolution` 为只读状态（`harmonica_eval/contract.py:654-678`），C2 `Surface` 继承该 Protocol；因此 `Surface().resolution` 为 `None`（`harmonica_eval/core/surface.py:112-145`）。`ResolvedSurface` 拟组合 C2 数据面与解析视图，但 `as_view()` 与它的 `manifest()` / `read()` / `resolution` 当前为 SHELL；按 `.spec/OWNER-DIRECTIVES.md` 指令 2（未授权前禁止注入），不得注入实现（`harmonica_eval/algorithms/runtime.py:65-131`；`.spec/OWNER-DIRECTIVES.md:50-87`）。因此“谁负责把 C2 Surface 包装成完整 `AlgorithmDataContract`（含 `resolution`）”仍未裁定；README 不把适配方案写成已解决。（`.spec/build/FILE-003-v1.md:173-191`；`.spec/build/FILE-205-v1.md:99-113`）
-- **⚠ `COMPONENTS.md` 对频谱物化时点内部冲突**：旧文字仍写“只冻结定义、按需实体化”（`COMPONENTS.md:343-369`、`:427-429`），但负责人更正已明确否决惰性计算并要求 Core 全量预生成封闭 profile（`COMPONENTS.md:409-420`；`.spec/build/FILE-004-v1.md:13-20`；`CONTRACTS.md:19-33`）。本索引采用后者作为现行裁定，同时保留冲突位置供负责人回看。
-- **`pcm.warped.practice` 当前无算法消费**：profile 现场已记录相关插件均走 `notes.*` / `rms.*`，该端口保留是为通用 PCM 底座，而不是现行插件必需项。（`harmonica_eval/profile.py:288-305`）
-- **音高引擎仍需对照实验**：实现者不能把候选引擎直接当最终选择；FILE-103 登记了实验与结果要求。（`SPEC.md:146-151`；`.spec/build/FILE-103-v1.md:386-450`）
-- **跨组件契约仍有未决挑战**：见 [`GATE-CHALLENGES-C3.md`](../../.spec/GATE-CHALLENGES-C3.md)；GC-204-08 已关闭，但 GC-204-01 仍 OPEN。（`.spec/GATE-CHALLENGES-C3.md:544`、`:12-87`、`:449-464`）
-- **🔴 GC-204-01：C1 `session_id` 契约矛盾。** `HostContract` 的会话级操作要求显式 `session_id`，而 C1/HostApp 的注释主张用隐式当前会话；该挑战会波及 C1→C2 调用边界。（`harmonica_eval/contract.py:759-838`；`harmonica_eval/host/app.py:89-110`；`.spec/GATE-CHALLENGES-C3.md:12-86`、`:449-464`）**未裁定，阻塞 Cast Freeze。**
-- **✅ GC-204-08 已关闭（原「🔴 未裁定，阻塞插件迁移」）。** 原冲突是「Host 禁具体算法 import」与「C1 显式注册」物理上不能同时成立。**裁定方案甲**：唯一物理装配根为 `harmonica_eval/algorithms/bootstrap.py`，它产出已装配 `Registry`；`HostApp` 只接收该 Registry，自身不 import 具体算法。（`.spec/GATE-CHALLENGES-C3.md:544`、`:549`；`.spec/build/FILE-206-v1.md`）
-  - ★ **这不改变 C2 Core 的边界**：「core 不得知道具体算法存在」这条不变量**仍然有效**——`bootstrap` 位于 C3 侧，不违反它。
-  - ★ **本组件的注册与装配一律不经 Core**；若实现中发现需要 Core 侧改动 → 按 §MOLD BREAK 上报。
