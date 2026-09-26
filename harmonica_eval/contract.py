@@ -1367,7 +1367,7 @@ UI_PAYLOAD_KEYS: Mapping[UiCommandKind, tuple[str, ...]] = {
     UiCommandKind.SET_REFERENCE: ("path",),
     UiCommandKind.SET_PRACTICE: ("path",),
     UiCommandKind.BUILD_SURFACE: (),
-    UiCommandKind.RUN_ALGORITHMS: (),
+    UiCommandKind.RUN_ALGORITHMS: ("only",),
     UiCommandKind.CANCEL: (),
     UiCommandKind.RESET: (),
 }
@@ -1377,7 +1377,13 @@ UI_PAYLOAD_KEYS: Mapping[UiCommandKind, tuple[str, ...]] = {
 产出方与消费方之间必须有**共同事实来源**，否则静默错位。
 
     - C4 构造命令时**必须**用这里的键名
-    - C1 校验命令时**必须**比对本表（缺失/多余/类型不符 → 拒绝）"""
+    - C1 校验命令时**必须**比对本表（缺失/多余/类型不符 → 拒绝）
+
+★ `RUN_ALGORITHMS` 的 `only`（2026-09-25 授权新增）：
+    - 值是 algorithm_id 序列；**缺省 = 全部**
+    - 它承载【懒加载】：不列出的插件不运行，★ 其指标与曲线不进入投影
+    - ★ 不许把「界面藏起来」当懒加载 ——★ 那要能被「/view 里没有」证伪
+"""
 
 
 class UiProjectionPort(Protocol):

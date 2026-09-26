@@ -349,3 +349,39 @@ def test_exit_ok_never_coexists_with_error_code() -> None:
         (REPO / "data" / "out" / "metrics.json").read_text(encoding="utf-8")
     )
     assert doc.get("error_code") is None and doc.get("error_detail") is None
+
+
+# ★★★ 缺陷 1（盲审 A 审出）：★ only=[] 的诊断【不得】指向注册表 ★★★
+def test_empty_only_does_not_blame_the_registry() -> None:
+    """`only=[]` 的报错必须指对方向。
+
+    ★ 「N=0」有两个互不相同的成因：
+      · 会话快照里一个算法都没有 → 装配坏了，该查 bootstrap
+      · 快照有算法但 only 筛没了   → 调用方传了空集合，该查请求
+    ★ ★ 两者共用同一句「注册表快照为空」时，★ 后者会让调用方去查注册表，
+    ★ ★ 而那里根本没问题 ——★ 那是最该避免的一类误导。
+    """
+    sys.path.insert(0, str(REPO))
+    from harmonica_eval.contract import (
+        ContractViolation, UiCommand, UiCommandKind,
+    )
+    from harmonica_eval.host.app import build_default_app
+
+    app = build_default_app()
+    sid = app.create_session("v1")
+    app.set_reference(sid, str(REFERENCE))
+    app.set_practice(sid, str(PRACTICE))
+    app.build_surface(sid)
+
+    with pytest.raises(ContractViolation) as excinfo:
+        app.run_algorithms(sid, only=[])
+    message = str(excinfo.value)
+
+    # ★ 注册表里明明有三个算法，★ 所以「注册表快照为空」这句【与事实相反】
+    assert "注册表快照为空" not in message, (
+        f"only=[] 误报成注册表为空：{message}"
+    )
+    # ★ 而消息要能指对方向：说清是「没指定 id」以及注册表实际有什么
+    assert "未指定任何算法 id" in message, f"消息未指对方向：{message}"
+    for name in ("pitch", "timing", "dynamics"):
+        assert name in message, f"消息没报出注册表实有的 {name}：{message}"

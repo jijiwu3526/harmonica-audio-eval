@@ -223,3 +223,48 @@ def test_unregister_does_not_exist_by_design():
         "★ Registry 出现了 unregister —— 请更新 docs/验收计划.md 的 A2 定义"
     )
     assert public == {"register", "list", "get"}, f"★ Registry 公开面变了：{public}"
+
+
+# ★★★ 缺陷 2（盲审 A 审出）：★ 「顺序恒为快照顺序」【此前无判据】 ★★★
+def test_only_order_does_not_change_execution_order() -> None:
+    """`only` 的书写次序不得改变执行次序。
+
+    ★ docstring 承诺「顺序恒为会话快照顺序，★ 不因 only 的次序而改变」，
+    ★ ★ 而那条承诺此前【没有任何判据守着】——★ 实现正确 + 判据缺失
+    ★ ★ 是本项目最常见的形态：★ 改坏了也不会红。
+    ★ ★ ★ 判据必须针对【结果顺序】，★ 而不是「代码里有没有那句注释」。
+    """
+    from harmonica_eval.host.app import build_default_app
+
+    def _run(only):
+        app = build_default_app()
+        sid = app.create_session("v1")
+        app.set_reference(sid, REF)
+        app.set_practice(sid, PRAC)
+        app.build_surface(sid)
+        envelopes = app.run_algorithms(sid, only=only)
+        return [env.algorithm_id for env in envelopes]
+
+    forward = _run(["pitch", "timing"])
+    reverse = _run(["timing", "pitch"])
+    full = _run(None)
+
+    # ★★★ 关键：★ 必须与【完整快照】逐字相等，★ 而不只是 forward == reverse ★★★
+    # ★★★ 而「forward == reverse」是【不够】的：★★★ ★★★
+    # ★★★ 若实现改成「按 only 首元素排」，★ 正序反序【都会】变成
+    # ★★★ 同一个次序，★ 那个断言照样通过 ——★ 判据恒真。★★★ ★★★
+    # ★★★ 所以锚点是 full：★ 它是唯一与 only 次序无关的量。★★★ ★★★
+    assert full == ["pitch", "timing", "dynamics"], (
+        f"会话快照顺序变了：{full}"
+    )
+    # ★ 筛选后不可能等于 full（少跑了 dynamics），★ 所以比的是【子序列】
+    def _subseq(small, big):
+        it = iter(big)
+        return all(item in it for item in small)
+
+    assert _subseq(forward, full), (
+        f"筛选后次序不是快照顺序的子序列：{forward} vs {full}"
+    )
+    assert forward == reverse, (
+        f"only 次序改变了执行次序：{forward} vs {reverse}"
+    )

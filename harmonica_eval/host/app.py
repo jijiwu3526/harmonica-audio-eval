@@ -278,22 +278,67 @@ class HostApp(UiProjectionPort):
         available = surface.manifest().ports
         return all(item.port_id in available for item in spec.required_inputs)
 
-    def run_algorithms(self, session_id: str) -> Sequence[AlgorithmResultEnvelope]:
-        """按会话快照顺序运行全部算法，并隔离每个算法的故障。"""
+    def run_algorithms(
+        self,
+        session_id: str,
+        only: Sequence[str] | None = None,
+    ) -> Sequence[AlgorithmResultEnvelope]:
+        """按会话快照顺序运行算法，并隔离每个算法的故障。
+
+        参数：
+            session_id —— 当前会话。
+            only —— ★ 要跑的 algorithm_id 序列；None 表示全部。
+                ★ 这是【懒加载】：不勾选的插件不跑，
+                  其指标与曲线都不会进入投影结果。
+                ★ 空序列不是「跑全部」也不是「跑零个」——
+                  它会让分母 N=0，而 N=0 是装配/状态错误，
+                  故按契约抛错，与注册表为空同一处置。
+
+        不变量：
+            - FILE-301 冻结的调用形态 `run_algorithms(session_id)` 仍完全有效
+              （only 有默认值，位置参数未变）
+            - 顺序恒为会话快照顺序，★ 不因 only 的次序而改变
+            - 分母 N = 本次实际要跑的算法数，★ 而不是注册表总数
+              —— 否则勾一个插件时进度会永远显示 1/3
+        """
         sid = self._require_current_session(session_id)
         if self._state is not SessionState.DATA_READY:
             raise self._violation(
                 f"算法只能在 DATA_READY 触发，当前 {self._state.value}", sid
             )
-        total = self._algorithm_count
+        if only is None:
+            specs = self._session_specs
+        else:
+            wanted = tuple(only)
+            known = {spec.algorithm_id for spec in self._session_specs}
+            unknown = [name for name in wanted if name not in known]
+            if unknown:
+                # 报出真名而不是静默忽略：静默会让调用方以为「跑过了」
+                raise self._violation(f"未注册的算法 id：{unknown}", sid)
+            chosen = set(wanted)
+            specs = tuple(s for s in self._session_specs if s.algorithm_id in chosen)
+        total = len(specs)
         if total == 0:
             # 契约要求 N=0 时不得计算 k/N；这是装配/状态错误而非正常空结果。
-            raise self._violation("注册表快照为空，不能运行算法", sid)
+            # ★ 「N=0」有【两个互不相同】的成因，★ 消息必须能指对方向：
+            #   · 会话快照里一个算法都没有 → 装配坏了，★ 该查 bootstrap
+            #   · 快照有算法但 only 筛没了   → 调用方传了空集合或全不匹配，★ 该查请求
+            # ★ 而此前两者共用同一句「注册表快照为空」——★ 后者会让调用方
+            # ★ 去查注册表，★ 而那里根本没问题。★ 那是最该避免的一类误导。
+            if not self._session_specs:
+                raise self._violation(
+                    "注册表快照为空，不能运行算法（会话建立时未装配任何算法）", sid
+                )
+            raise self._violation(
+                f"未指定任何算法 id：only={list(only or ())!r} 与注册表 "
+                f"{[s.algorithm_id for s in self._session_specs]} 无交集",
+                sid,
+            )
         surface = self._core.acquire_surface(sid)
         manifest = surface.manifest()
         results: list[AlgorithmResultEnvelope] = []
         self._progress = 0.0
-        for index, spec in enumerate(self._session_specs, start=1):
+        for index, spec in enumerate(specs, start=1):
             results.append(self._run_one(spec, surface, manifest))
             self._progress = index / total
         self._results = tuple(results)
@@ -637,11 +682,26 @@ class HostApp(UiProjectionPort):
                 f"命令 {getattr(kind, 'value', kind)} 在当前状态 {self._state.value} 非法"
             )
         payload = command.payload
-        expected_keys = UI_PAYLOAD_KEYS[kind]
-        if not isinstance(payload, dict) or set(payload) != set(expected_keys):
+        expected_keys = set(UI_PAYLOAD_KEYS[kind])
+        # ★ `only` 是【可选键】：缺省 = 跑全部。
+        # ★ 若强制它必填，★ 那些不带它的老调用方（含 serve_ui 装配处）
+        #   会在校验这一步被拒 ——★ 那就把「可选」做成了「必填」。
+        optional_keys = {"only"}
+        required_keys = expected_keys - optional_keys
+        if not isinstance(payload, dict) or not set(payload) <= expected_keys:
             raise self._violation("命令载荷键名或数量不符合契约")
+        if not required_keys <= set(payload):
+            raise self._violation("命令载荷缺必需键")
         if "path" in expected_keys and not isinstance(payload["path"], str):
             raise self._violation("路径载荷必须是字符串")
+        if "only" in payload:
+            # ★ 值必须是 algorithm_id 的字符串序列。★ 类型错要拒绝，
+            #   不能让它流到 run_algorithms 变成别的异常。
+            value = payload["only"]
+            if not isinstance(value, (list, tuple)) or not all(
+                isinstance(x, str) for x in value
+            ):
+                raise self._violation("算法 id 列表必须是字符串序列")
 
         if kind is UiCommandKind.SET_REFERENCE:
             self.set_reference(self._require_session(), payload["path"])
@@ -650,7 +710,9 @@ class HostApp(UiProjectionPort):
         elif kind is UiCommandKind.BUILD_SURFACE:
             self.build_surface(self._require_session())
         elif kind is UiCommandKind.RUN_ALGORITHMS:
-            self.run_algorithms(self._require_session())
+            # ★ `only` 缺省即「全部」，★ 所以不带该键的老调用方不受影响。
+            # ★ 传了它就是真懒加载：★ 不列出的插件不跑，★ 投影里也没有它们。
+            self.run_algorithms(self._require_session(), payload.get("only"))
         elif kind is UiCommandKind.CANCEL:
             if self._state is SessionState.BUILDING:
                 # 同步 C2 没有取消检查点；只记录，不打断构建。
