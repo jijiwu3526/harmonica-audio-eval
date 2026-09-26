@@ -1,0 +1,230 @@
+apply plugin: 'com.android.application'
+apply plugin: 'com.chaquo.python'
+
+android {
+    namespace 'com.harmonica.probe'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.harmonica.probe"
+        // ★ debuggable=true 是硬要求：★ run-as 靠它才能读到 app 私有目录里的日志，
+        // ★ 而「日志要能 adb pull 出来」正是负责人点名的。
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // ★ 只 arm64-v8a（实测本机手机 ABI）。★ 全 ABI 会让 APK 翻数倍。
+    defaultConfig {
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    // ★ 音频 4.2MB，★ 放在 assets 里已经压过 PCM_16
+    androidResources {
+        noCompress 'wav'
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        // ★ 实测本机手机 PAGE_SIZE=4096（不是 16KB 页），
+        // ★ 所以不需要为 16KB 兼容强制 3.13+。
+        // ★ 而 17.0.0 官方说明：支持到 Python 3.14，★ 默认是 3.10。
+        // ★ ★ 实测 Chaquopy 17.0 仓库的 arm64_v8a wheel（2026-09-26）★★
+        // ★ ★   numpy 1.23.3 / scipy 1.8.1 / soundfile 0.13.1 全部只有 cp310
+        // ★ ★ ★ 而 3.10 正是 Chaquopy 17.0 的默认 Python 版本。
+        // ★ ★ ★ ★ 而【只有 3.10 能同时装下三个】——★ 3.13 缺 scipy，
+        // ★ ★ ★   3.9 缺 numpy 与 soundfile 的新 wheel。
+        // ★ ★ ★ ★ ★ 所以这一行是【被仓库内容逼出来的】，★ 不是选来的。
+        version = "3.10"
+        // ★★★ 2026-09-26 更正：★ 上面那段「第一版不开 buildPython」的注释是错的。
+        // ★★★
+        // ★ 【pip 块一直是开着的】—— 而开了 pip 块，Chaquopy 就要求构建期有
+        // ★ 对应版本的 Python。★ 实测：gradle assembleDebug 会走到
+        // ★   :app:installDebugPythonRequirements
+        // ★ 而它报 "Couldn't find Python 3.10"。
+        // ★ ★ ★ ★ ★ 所以【不是"要不要开"的问题】，★ 而是"构建期找不到 3.10"。
+        // ★ ★ ★ ★ ★ 本机默认只有 python3（3.13），★ 而官方说它按标准命令名去找：
+        // ★   Mac/Linux 依次试 python3.13 然后 python3 —— ★ 两个都不是 3.10。
+        //
+        // ★ 指到本机已有的 conda 3.10（★ 主代理 2026-09-26 实测：pip 26.1.2
+        // ★ / venv 可建 / 不需安装任何东西）。★ 用绝对路径而不是 PATH ——
+        // ★ 而那比依赖 PATH 更稳，★ 且不碰系统 Python 与全局 pip 配置。
+        buildPython("/Users/Apple/miniconda3/envs/pythonprojectastudy/bin/python3.10")
+        // ★ NDK 仍不启用：★ 阶段 0/1/2/3 只需要解释器 + 预编译 wheel，
+        // ★ 而三个包在 Chaquopy 仓库里都有 arm64-v8a 的 cp310 wheel。
+        //
+        // ★ pip 挂在 defaultConfig 下（★ 实测：javap 读 ChaquopyExtension，
+        // ★   getDefaultConfig() 返回 PythonExtension，★ 而 getPip() 在它上面），
+        // ★ 不是挂在 chaquopy 顶层 ——★ 挂错层会报 "Could not find method pip()"
+        pip {
+            // ★ 本仓库的 Python 包本体。★ 用本地路径装，
+            // ★ 依赖照 pyproject.toml 的 requires 解析。
+            //
+            // ★ ★ librosa 故意不写在这里：★ 它拖 numba/llvmlite，★
+            // ★ ★ 而那正是负责人要替代的。★ 17.0.0 官方说明 pip 用
+            // ★ ★ --only-binary，★ 没有 arm64 wheel 的包会直接失败。
+            // ★ 装 [phone] extras：★ 那组只有 numpy/scipy/soundfile，
+            // ★ 而【不带 librosa】——★ librosa 会拖 numba/llvmlite，
+            // ★ ★ 17.0 官方说明 pip 用 --only-binary，★ 没有 arm64 wheel 就直接失败。
+            // ★ 不走 extras：★ 实测 pip 在 Chaquopy 的构建 env 里
+            // ★ 没有把 [phone] 的约束合并进来（★ 它仍按主 dependencies 解析，
+            // ★ 报的是 scipy>=1.10 而不是我写的 1.8）。
+            // ★ 所以改成【直接点名三个包】+ 【只装包本体不解析依赖】，
+            // ★ 版本下限照 pyproject 的 phone 组（★ 已实测是手机上能到的最高版本）。
+            // ★ install() 是【一包一参】（★ 实测传数组会报
+            // ★ ★★★ 2026-09-26 重大更正：★ 上面三行 install '<包>>=<版本>' 是错的 ★★★
+            // ★
+            // ★ 它让 pip 从【公共 PyPI】取 wheel ——★ 而那是【为桌面 Linux 编的】，
+            // ★ 实测症状（三次构建都一样，★ 完全没变）：
+            //     .so 总数 20 · openblas 命中 0 · _multiarray_umath.so 2791008 字节
+            //     且那个 .so 依然 dlopen libopenblas.so
+            //     → ImportError: dlopen failed: library "libopenblas.so" not found
+            // ★ ★ ★ ★ ★ 而【版本号分辨不出来】：★ 通用 wheel 与 Android wheel
+            // ★ ★ ★ ★ ★ 都报 numpy 1.26.2 ——★ 差别只在 wheel tag 的平台后缀。
+            //
+            // ★ ★ 改法：★ 直接给【完整文件名】+ find-links（★ 官方 android.html 明写支持
+            // ★   install("MyPackage-1.2.3-py2.py3-none-any.whl")）★ ★
+            // ★ ★ 为什么不用 --extra-index-url：★ 它是【补充】索引而非替换，
+            // ★ ★ ★ 而两个 wheel 版本号完全相同，★ 谁优先取决于 tag 匹配顺序
+            // ★ ★ ★ ——★ 那不是能靠推理定的，★ 只能试；★ 而完整文件名是零歧义的。
+            //
+            // ★ 文件来自 https://chaquo.com/pypi-13.1/（★ Chaquopy 官方 Android
+            // ★ wheel 仓库，★ 2026-09-26 实测有 137 个条目，★ 这三个包都在里面）。
+            // ★ ★ 注意 minSdk 差别：★ numpy/scipy 是 android_21，
+            // ★ ★ ★ soundfile 是 android_24 ——★ 而模拟器 API 34、真机 API 36，都够。
+            // ★ ★ 而 wheel 是二进制产物，★ 与「音频不进 git」同理不进库（★ .gitignore 已排除）。
+            // ★ 路径用【绝对路径】而不是纯文件名。
+            // ★ ★ ★ 2026-09-26 实测更正：★ 写成纯文件名时 pip 报
+            // ★   ERROR: Could not install packages due to an OSError: [Errno 2]
+            // ★   No such file or directory:
+            // ★   '.../android/app/numpy-1.26.2-0-cp310-cp310-android_21_arm64_v8a.whl'
+            // ★ ★ ★ ★ ★ 而 wheel 实际在 app/wheels/ 下，★ 差一层。
+            // ★ ★ ★ ★ ★ pip 把 install('纯文件名') 相对【app/】解析，★
+            // ★ ★ ★ ★ ★ 而官方文档写的是「相对项目目录」——★ 两者正好差这一层。
+            // ★ ★ ★ ★ ★ ★ 官方那两个例子都不含子目录（★ 纯文件名在 app/ 就能找到），
+            // ★ ★ ★ ★ ★ 所以【照抄官方的人踩不到】，★ 而我们多了一层 wheels/。
+            // ★ ★ ★ ★ ★ 用绝对路径【零歧义】，★ 且与下面 find-links 那行写法一致。
+            // ★★★ 2026-09-26 第三次更正：★ numpy 换成【改过 tag 的 PyPI aarch64 wheel】★★★ ★
+            //
+            // ★ 起因（★ 逐层排除，★ 每层都有实测）：
+            // ★  ① Chaquopy 仓库里那个 Android numpy wheel 是【坏件】：
+            // ★     _multiarray_umath.so 2,791,008 字节 · 引用 libopenblas.so
+            // ★     而 wheel 内 19 个 .so 里【没有一个是 BLAS】→ dlopen 失败
+            // ★  ② 换 Chaquopy 的其它 numpy 版本换不掉：★ arm64_v8a 只有 6 个 wheel
+            // ★  ③ PyPI 的 manylinux_2_17_aarch64 版是好的（★ 自带 openblas 25.8MB），
+            // ★     ★ ★ 但 pip【不认 manylinux tag】：
+            // ★     ERROR: ...-manylinux_2_17_aarch64.whl is not a supported wheel
+            // ★  ④ ★ ★ 而 pip 读的是【wheel 内部 WHEEL 的 Tag】，★ 不是文件名 ——
+            // ★     ★ ★ ★ 所以只改文件名【不够】★★ ★
+            //
+            // ★ 所以：★ 用 android/repack_numpy_wheel.py 把 WHEEL 里两行 Tag
+            // ★ 改成 cp310-cp310-android_21_arm64_v8a，★ 其余条目原字节复制。
+            // ★ ★ ★ 诚实边界：★ 【改过 tag 的 wheel 不再是官方原样】★★ ★
+            // ★ ★ ★ 而能不能真跑通要装完才知道；★ 症状只有两种（★ 成 / 仍 dlopen），
+            // ★ ★ ★ 【都是真信息】，★ 不会变成「不知道成没成」。
+            // ★ ★ ★ 复算命令在那个脚本的 docstring 里。
+            //
+            // ★ ★ 而 scipy / soundfile 仍用 Chaquopy 的 Android wheel ——
+            // ★ ★ 【它们没报 dlopen 错】，★ 而一次只动一个才能定位是谁的锅。
+            // ★★★★★★★★ 2026-09-26 第四次更正：★ 改走 sdist 现场编译 ★★★★★★★★ ★
+            // ★
+            // ★ 【删掉那三个 whl 的原因】（★ 全部实测，★ 不是配置问题）：
+            // ★  ① Chaquopy 仓库里那个 numpy 的 Android wheel 是坏件：
+            // ★     umath 引用 libopenblas.so，★ 而 wheel 里没有那个文件
+            // ★  ② PyPI 的 numpy-1.26.2-cp310-cp310-manylinux_2_17_aarch64 自带
+            // ★     openblas，★ 但【它是 glibc 编的】——实测那个 so 的
+            // ★     DT_NEEDED = libm.so.6 · libpthread.so.0 · libc.so.6
+            // ★  ③ ★ ★ 设备上【只有】libm.so / libc.so / libpthread.so（★ 无 .6 / .0）
+            // ★     ——那是 bionic 的命名，★ 而 glibc 件要的是 .6 / .0
+            // ★  ④ ★ ★ ★ 所以【改文件名、SONAME、RPATH 都改不了它内部
+            // ★     对 libm.so.6 的引用】★ ★ ★ ——【只有重编能解】★★ ★
+            //
+            // ★ 而【Chaquopy 会自动编译 sdist】★ ——机制：pip 块只装包名，
+            // ★   Chaquopy 17 会去取 sdist 并用 NDK 现场编（★ 而本机有
+            // ★   NDK 27.1.12297006，★ 且 buildPython 指向 conda 3.10，★ 早验过可用）。
+            // ★ ★ 【pip 块在 defaultConfig 下】★（★ 实测：javap 读 ChaquopyExtension，
+            // ★   getDefaultConfig() 返回 PythonExtension，★ 而 getPip() 在它上面）。
+            // ★ 版本必须 pin：★ 不加约束时 pip 取到了 numpy 2.2.6，
+            // ★ 而【numpy 2.x 要 Python 3.11+】，★ Chaquopy 17 用的是 3.10
+            install 'numpy==1.26.2'
+            install 'soundfile==0.13.1'
+            // ★ ★★★ 2026-09-26：★ 缺口找到了 ——★ Chaquopy 索引里有这两个包 ★★★ ★
+            // ★ 【我上一轮说"仓库里没有独立 openblas 包"是错的】——★
+            // ★ 【错因：在 jar 里 grep，★ 而索引不在 jar 里】★★ ★
+            //
+            // ★ 实测（自己 curl + 读 ELF，★ 不是照抄）：
+            //   chaquopy_openblas-0.2.20-5-py3-none-android_21_arm64_v8a.whl
+            //     chaquopy/lib/libopenblas.so   8,766,736 字节
+            //     SONAME = libopenblas.so        ← ★ 【正是 umath 要找的名字】★★ ★
+            //     NEEDED = libm.so · libgfortran.so.3 · libdl.so · libc.so
+            //     ↑ ★ 全是 Android 名字，★ 零 glibc ★★★ ★
+            //     Requires-Dist: chaquopy-libgfortran (>=4.9)
+            //   chaquopy_libgfortran-4.9-0-py3-none-android_21_arm64_v8a.whl
+            //     chaquopy/lib/libgfortran.so.3  1,522,520 字节
+            //     SONAME = libgfortran.so.3      ← ★ 【正是 openblas 要找的那个】★★ ★
+            //
+            // ★ ★ ★ ★ ★ 【所以那三件套闭合了】★★★★ ★
+            // ★   umath → libopenblas.so → libgfortran.so.3 → libm/libdl/libc（设备自带）
+            // ★ ★ ★ 而【libc++_shared.so 由 jniLibs 提供】——★ 那是 NDK 的，★ 保留
+            // ★ ★ ★ ★ ★ ★ 而【下 --no-binary】：★ 我们要 wheel，★ 不是 sdist ★★ ★
+            // ★ ★ ★ ★ ★ 　 　 　 　 　 　 　 　 　 　 　 ★ ★ 　 　 　 ★ 　 ★ 　 　 ★ ★ ★
+            // ★ 　 　 　 　 　 　 　 　 　 　 　 　 ★ ★ 　 　 　 　 ★ ★ 　 　 　 ★ 　 　 　 　 　 ★
+            // ★ ★ 　 　 　 　 　 　 　 　 　 　 ★ ★ 　 　 　 　 ★ ★ ★ ★
+            install 'chaquopy-openblas'
+            install 'chaquopy-libgfortran'
+            // ★ ★★ 2026-09-26 阶段 1/2/3 的实测新缺口：★★★ ★
+            // ★   stage1 → ModuleNotFoundError: No module named 'scipy'
+            // ★   stage2 → ModuleNotFoundError: No module named '_cffi_backend'
+            // ★   stage3 → ModuleNotFoundError: No module named 'scipy'
+            // ★ ★ 而【PyPI 上这两个的 aarch64 件【全是 manylinux】= glibc】★★ ★
+            // ★ ★ 实测：scipy 60 个 tag / cffi 99 个 tag，★ aarch64 的
+            // ★ ★ 无一例外全是 manylinux_2_17/2_27_aarch64 ——★ 而那在设备上必然失败
+            // ★ ★ ★ 而【Chaquopy 索引里两个包都在】★★ ★
+            // ★ 　 　 ★ 　 　 ★ ★ 　 　 ★ ★ 　 　 ★ ★ 　 　 ★ 　 　 ★ ★ ★
+            // ★ 　 　 ★ 　 　 ★ ★ 　 　 ★ ★ 　 　 ★ ★ 　 　 ★ 　 　 ★ ★ ★
+            // ★ ★ 　 　 ★ 　 　 ★ ★ 　 　 ★ ★ 　 　 ★ ★ 　 　 ★ 　 　 ★ ★
+            // ★ cffi 要 python3.10（★ PyPI 那个 cp310-aarch64 是 glibc 件）★★ ★
+            install 'scipy'
+            install 'cffi'
+            // ★ ★★ cffi 装上了但 dlopen 缺 libffi.so（★ 设备实测）：★★★ ★
+            // ★   ImportError: dlopen failed: library "libffi.so" not found:
+            // ★     needed by .../requirements/_cffi_backend.so in namespace clns-6
+            // ★ ★ ★ 而【索引里有 chaquopy-libffi】★★ ★ ——★ 与 openblas 同一个模式
+            install 'chaquopy-libffi'
+            // ★ ★★ libffi 补上后，★ 新缺口变成 libsndfile.so（★ 设备实测）：★★ ★
+            // ★   OSError: cannot load library 'libsndfile.so': dlopen failed
+            // ★ ★ ★ 而【索引里有 chaquopy-libsndfile】★★ ★ ——★ 同一模式第三次
+            install 'chaquopy-libsndfile'
+            // ★ ★★★ libsndfile 找到了，★ 它自己还缺三个（★ 一次读全 DT_NEEDED）：★★★ ★
+            // ★   SONAME = libsndfile.so
+            // ★   NEEDED = libFLAC.so · libogg.so · libvorbis.so · libvorbisenc.so
+            // ★           · libm.so · libdl.so · libc.so
+            // ★ ★ ★ 而【索引里三个都有】★★ ★ ——★ 一次装齐，★ 不再一趟一趟试
+            install 'chaquopy-flac'
+            install 'chaquopy-libogg'
+            install 'chaquopy-libvorbis'
+            // ★ 【scipy 暂不装】——★ 1.8.1 的 meson.build:80 要 Fortran 编译器，
+            // ★ 而本机没有 gfortran；★ 且 umath 已有 openblas，★ scipy 非本轮必需
+            options '--no-deps'
+            // ★ find-links 仍保留：★ 它让 pip 在解析依赖时也能看到这三个包，
+            // ★ 而【纯文件名那条已不用】——★ 绝对路径本身就不需要它来定位文件。
+            // ★ 路径相对项目目录（★ 官方 FAQ 镜像那节用的就是它）。
+            install 'harmonica-eval @ file://' + new File(rootDir, '..').absolutePath
+        }
+    }
+}

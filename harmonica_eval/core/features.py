@@ -34,6 +34,12 @@ MUST:
     - ★ core 各文件依赖面不同：align 只用 numpy+scipy（FILE-102 §3）、
       ingest 用 soundfile 解码（FILE-101 定其为独有职责）。
       ★ ★ 不可把某一文件的禁令推广到全层。
+    - ★★ 2026-09-26 追加：librosa 拖 numba/llvmlite，Android 上没有 wheel，
+      一条 `import librosa` 就能让整条阶段 3 停摆。故本文件改为**后端分派**
+      （见下方 ACTIVE_BACKEND）：有 librosa 走 librosa，没有走
+      `core.backend` 的 numpy/scipy 自写实现。两条路径的函数签名与返回值
+      形状完全一致 ⇒「电脑上跑」与「手机上跑」是同一份代码的不同后端。
+      ★ 两个调用点（pyin / chroma_stft）的参数值与语义一字未动。
 
 MUST NOT:
     - 硬编码端口名列表（必须由 profile.PORTS 驱动）
@@ -54,12 +60,69 @@ BUILD-INSTRUCTION:
 
 from __future__ import annotations
 
-import librosa
 import numpy as np
 import numpy.typing as npt
 
 from ..contract import FIELD_LAYOUTS, CoreBuildError, ErrorCode
 from ..profile import ALIGN, AUDIO, MATERIALIZE
+from .backend import chroma_stft as _native_chroma_stft
+from .backend import pyin as _native_pyin
+
+# ★★ 后端分派（★ 2026-09-26，★ 为了让 features 能在没有 librosa 的机器上跑）★★
+#
+# 目标平台是 Android：librosa 拖 numba/llvmlite，设备上没有 wheel，
+# 探针跑阶段 3 时就倒在下面这个 `import librosa` 上 —— 一个模块拖垮整条阶段 3。
+#
+# 做法：**有 librosa 用 librosa，没有用自写实现。**
+#   - `core.backend.chroma.chroma_stft` —— numpy/scipy 复刻 librosa 的
+#     功率谱 → 12 音级高斯滤波器组 → norm=inf 归一化。
+#   - `core.backend.pyin.pyin` —— numpy/scipy 复刻 pYIN：
+#     差分函数 → 累积均值归一 → 抛物线插值 → 阈值下降候选 → Viterbi。
+#
+# ★ 两条路径的函数签名、参数语义、返回值形状**完全一致**：
+#   chroma_stft → (n_chroma, n_frames) float32
+#   pyin         → (f0, voiced_flag, voiced_prob)，三个 1-D、每帧一个值
+#   故换机器换的是后端，不是语义。
+#
+# ★ 显式环境变量覆盖：设 DSH_FEATURE_BACKEND=native 强制走自写、
+#   =librosa 强制走 librosa（用于对拍；缺 librosa 时设 librosa 会显式失败，
+#   ★ 而不是悄悄退回自写 —— 静默退会把「没验证过」伪装成「跑通了」）。
+import os as _os
+
+_BACKEND_ENV = "DSH_FEATURE_BACKEND"
+_backend_request = _os.environ.get(_BACKEND_ENV, "").strip().lower()
+
+_librosa = None
+if _backend_request != "native":
+    try:
+        import librosa as _librosa  # type: ignore[no-redef]
+    except Exception:  # ★ ImportError 之外也兜住（librosa 的 import 链很重）
+        if _backend_request == "librosa":
+            raise
+        _librosa = None
+
+if _librosa is not None:
+    ACTIVE_BACKEND: str = "librosa"
+
+    def _pyin(**kwargs):
+        """逐帧基频（librosa 后端）。签名与 core.backend.pyin.pyin 一致。"""
+        return _librosa.pyin(**kwargs)
+
+    def _chroma_stft(**kwargs):
+        """12 音级能量（librosa 后端）。签名与 core.backend.chroma.chroma_stft 一致。"""
+        return _librosa.feature.chroma_stft(**kwargs)
+
+else:
+    ACTIVE_BACKEND: str = "native"
+    _pyin = _native_pyin
+    _chroma_stft = _native_chroma_stft
+
+ACTIVE_BACKEND_REASON: str = (
+    f"DSH_FEATURE_BACKEND={_backend_request}" if _backend_request
+    else ("import librosa 成功" if _librosa is not None
+          else "import librosa 失败（Android/无 librosa 环境）→ 自写后端")
+)
+"""当前生效的后端与判定理由。**只用于诊断与对拍，不参与任何数值决策。**"""
 
 MIN_STABLE_NOTE_SEC: float = 0.150
 """参与音准统计的最短音长（秒）。
@@ -152,7 +215,9 @@ def materialize_pitch(samples: npt.NDArray, sample_rate: int) -> npt.NDArray:
     try:
         # ★ 帧长须 ≥ 2×hop，否则 librosa 内部会告警；此处按 profile 声明，
         #   而非自选参数（§7「不引入未被 MATERIALIZE 声明的参数」）。
-        f0, voiced_flag, voiced_prob = librosa.pyin(
+        # ★★ 调用点语义未动：只把 `librosa.pyin` 换成后端分派出的 `_pyin`，
+        #   参数值、center、阈值口径全部保持原样（见 ACTIVE_BACKEND 说明）。
+        f0, voiced_flag, voiced_prob = _pyin(
             y=x,
             sr=sample_rate,
             fmin=MATERIALIZE.fmin_hz,
@@ -224,7 +289,9 @@ def materialize_chroma(samples: npt.NDArray, sample_rate: int) -> npt.NDArray:
     try:
         # ★ sr 必传：漏传会用 librosa 默认的 22050，频率轴整体错一倍且不报错。
         #   帧移取 ALIGN.hop_length（与 chroma.lowres.* 声明的 hop_length 一致）。
-        out = librosa.feature.chroma_stft(
+        # ★★ 调用点语义未动：只把 `librosa.feature.chroma_stft` 换成后端分派
+        #   出的 `_chroma_stft`，参数值与返回形状口径保持原样。
+        out = _chroma_stft(
             y=x,
             sr=sample_rate,
             n_fft=MATERIALIZE.frame_length,

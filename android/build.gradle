@@ -1,0 +1,23 @@
+// ★ 顶层构建文件。★ 版本号实测自 Maven 元数据（2026-09-26）：
+//   com.chaquo.python.target 与 com.chaquo.python.gradle 最新均为 17.0.0
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.3'
+        classpath 'com.chaquo.python:gradle:17.0.0'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

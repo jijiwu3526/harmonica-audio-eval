@@ -1,0 +1,67 @@
+# ★ ★ ★ 本文件是手机打包的硬前提，★ 此前仓库三样（pyproject / setup.py / setup.cfg）都没有。★★ ★★
+# ★ 手机侧（Chaquopy）靠它把本包装进 APK；★ 而电脑侧 `pip install -e .` 也靠它。
+# ★ 版本号沿用 harmonica_eval.__version__ = "0.1.0"（实测，未编造）。
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harmonica-eval"
+version = "0.1.0"
+description = "双音频对比 → 客观数值指标的口琴分析内核（C1 数据面 / C3 插件 / C1 宿主）"
+readme = "README.md"
+# ★ 下限定到 3.9 的原因（★ 2026-09-26 探针实测）：
+# ★ Chaquopy 17.0 的仓库里 scipy 只有 1.4.1 / 1.6.3，★ 且只出 cp38 / cp39。
+# ★ ★ 也就是【手机侧最高只能到 Python 3.9】，★ 而 3.11 会让手机装不上任何 scipy。
+# ★ ★ 电脑侧不受影响：★ 本机跑 3.13，★ 而代码未用任何 3.10+ 语法。
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+# ★ 依赖不是「本机装了什么就抄什么」，★ 而是【逐个 import 追出来的真面】。
+# ★ 实测：import 五个算法模块 + host.app 之后，
+# ★ 第三方只剩 lazy_loader / librosa / numpy / scipy / soundfile 五个。
+# ★ ★ lazy_loader 是 librosa 自己拖进来的，★ 不单独声明。
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+]
+
+[project.optional-dependencies]
+# ★ ★ 手机侧实际安装的这一组（★ 2026-09-26 探针实测得出）★★
+# ★ ★ 而 librosa【故意不在这组里】：★ 它拖 numba/llvmlite，
+# ★ ★ 而 Chaquopy 17.0 官方说明 pip 用 --only-binary，
+# ★ ★ 没有 arm64 wheel 的包会直接失败。
+# ★ ★ 替代实现（core/backend/）计划只用 numpy/scipy。
+# ★ ★ 电脑上仍用上面的 dependencies 走 librosa，★ 口径不变。
+phone = [
+    # ★ ★ 下限按【手机在 Python 3.10 上能装到的最高版本】写，★ 不按电脑侧。★★
+    # ★ ★ ★ 2026-09-26 实测 Chaquopy 17.0 仓库的 arm64_v8a wheel：★★
+    # ★ ★ ★   numpy      1.23.3  cp310  android_21
+    # ★ ★ ★   scipy      1.8.1   cp310  android_21
+    # ★ ★ ★   soundfile  0.13.1  cp310  android_24
+    # ★ ★ ★ ★ 而 3.10 正是 Chaquopy 17.0 的默认 Python 版本。
+    # ★ ★ ★ ★ 而 android_21/24 是【wheel 的 minSdk】，★ 手机 API 36 高于它。
+    # ★ ★ ★ ★ ★ 而【版本号写高会指错方向】：
+    # ★ ★ ★ ★   写 numpy>=1.24 → 报「找不到满足 numpy>=1.24 的发行版」
+    # ★ ★ ★ ★   而真因是【手机上最高只有 1.23.3】，★ 不是网络或镜像坏了
+    "numpy>=1.23",
+    "scipy>=1.8",
+    "soundfile>=0.13",
+]
+
+[project.scripts]
+harmonica-eval = "harmonica_eval.__main__:main"
+
+[tool.setuptools]
+# ★ 数据集与前端不随包分发：★ 音频是负责人的素材（不入库，见 .gitignore），
+# ★ 前端是 React 产物（npm 构建，不属于 Python 包）。
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["harmonica_eval*"]
+exclude = ["harmonica_eval_web*", "data*", "tests*", "tools*"]
+
+[tool.setuptools.package-data]
+harmonica_eval = ["*.md"]

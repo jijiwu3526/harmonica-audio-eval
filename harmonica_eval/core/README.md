@@ -156,11 +156,110 @@ surface.resolution     # 状态（当前为 None，见 §5 ②）
 ```
 ingest   → numpy · scipy.signal.resample_poly · soundfile
 align    → numpy · scipy.signal.stft · scipy.spatial.distance.cdist
-features → numpy · librosa          ← ★ 旧文此处写「numpy」，★ 漏了 librosa
+features → numpy · ★ librosa（有则用）· ★ core.backend（numpy/scipy 自写后端）
 surface  → numpy（本包内，无第三方）
 api      → （无第三方 import）        ← ★ 旧文写「仅 typing」，★ 实为无
 ★ ★ torch 全目录零引用
 ```
+
+### ★★ `features` 的两后端（★ 2026-09-26 新增，★ 换手机的直接依据）★★
+
+**为什么会有两后端**：目标平台是 Android（arm64-v8a / API 34）。librosa 拖
+numba/llvmlite，**设备上没有 wheel**，探针跑阶段 3 时就倒在裸
+`import librosa` 上 —— **一个模块把整条阶段 3 拖垮**。
+故 `core/backend/`（本目录新建）用 numpy+scipy 自写了那两个唯一的调用点。
+
+| 后端 | chroma_stft | pyin | 依赖 | 何时生效 |
+|---|---|---|---|---|
+| `librosa` | `librosa.feature.chroma_stft` | `librosa.pyin` | librosa 0.11.0 | `import librosa` 成功（电脑） |
+| `native` | `core/backend/chroma.py` | `core/backend/pyin.py` | numpy + scipy | librosa 装不上（手机） |
+
+**两条路径的签名与返回值形状完全一致**，故「电脑上跑」与「手机上跑」是
+**同一份代码的不同后端**：
+
+```
+chroma_stft → (n_chroma, n_frames) float32
+pyin         → (f0, voiced_flag, voiced_prob)，三个 1-D、每帧一个值
+```
+
+**冻结的东西一个没动**：两个调用点的参数值、参数语义、
+`VOICED_CONFIDENCE_FLOOR` 与 `confidence >= floor ⇒ voiced` 的**等号口径**，
+全部原样。`features.py` 只加了一层**分派**。
+
+强制指定后端（对拍用）：
+
+```bash
+DSH_FEATURE_BACKEND=native    python3 ...   # 强制自写
+DSH_FEATURE_BACKEND=librosa   python3 ...   # 强制 librosa（缺它则显式失败，不静默退回）
+```
+
+`features.ACTIVE_BACKEND` / `ACTIVE_BACKEND_REASON` 暴露当前走的是哪条实现
+（**只用于诊断与对拍，不参与任何数值决策**）。
+
+**★ 对拍实测（电脑，4 段输入，判据未因结果而放宽）★★**
+
+| 输入 | chroma Pearson r | chroma max\|Δ\| | pyin median\|Δcents\| | pyin max\|Δcents\| | 帧数 |
+|---|---|---|---|---|---|
+| 合成 12 s（seed=0） | **1.000000000** | 1.25e-06 | **0.0000** | 0.0000 | 相同 |
+| 合成 8 s（seed=7） | **1.000000000** | 2.44e-06 | **0.0000** | 0.0000 | 相同 |
+| 真实录音 `01_奇异恩典/原曲_完整版.wav`（前 12 s） | **1.000000000** | 1.43e-06 | **0.0000** | 0.0000 | 相同 |
+| 真实录音 `01_奇异恩典/练习曲/02_节奏抢拖.wav`（前 12 s） | **1.000000000** | 1.43e-06 | **0.0000** | 0.0000 | 相同 |
+
+附带：`voiced_flag` 一致率 **100.000%**；`voiced_prob` max\|Δ\| = **0.0**。
+
+**★ 差异来源（★ 不是「差不多」，是可指认的浮点口径差）★★
+- **chroma 残差 1e-6 量级**：librosa 内部用 float32 做 `einsum` 累加，
+  自写用 float64 累加后再 cast float32 ⇒ 只有最后一位的舍入不同。
+- **pyin 逐位一致**：两边调的是**同一个** `scipy.fft.rfft/irfft`、
+  同一个 `next_fast_len`、同一个 `scipy.signal.get_window("hann", ..., fftbins=True)`。
+  连 librosa 的两处 off-by-one 都刻意复刻了：
+  `bin_index` 的 clip 上界是 `n_pitch_bins`（不是 `n_pitch_bins-1`）、
+  `localmin` 首元素恒为 False。
+
+复现：`python3 tools/verify_backend_equivalence.py`
+
+**★ 对抗判据（★ 防「两边根本没各自算」——全对而无反证手段，与没测到同义）★★**
+
+| 判据 | 内容 | 实测 |
+|---|---|---|
+| 判据4 | **屏蔽 librosa**，强制自写后端跑 `build_surface` 全部 **12 个端口** | **PASS** 12/12 端口非空、形状正确 |
+| 判据5 | `sys.modules['librosa']=None` 后 `import features` | **PASS** → `ACTIVE_BACKEND = native` |
+
+判据4 逐端口（20 s 切片，reference=原曲、practice=练习曲）：
+
+| port_id | shape | 非空 | 全零 | NaN | hash librosa | hash native | 同? |
+|---|---|---|---|---|---|---|---|
+| `warp_path` | (443, 2) | OK | 否 | 无 | `dd6d5ac6…` | `dd6d5ac6…` | ✓ |
+| `pcm.mapped.reference` | (882000,) | OK | 否 | 无 | `9835e424…` | `9835e424…` | ✓ |
+| `pcm.mapped.practice` | (882000,) | OK | 否 | 无 | `351fbe4b…` | `351fbe4b…` | ✓ |
+| `pcm.warped.practice` | (882000,) | OK | 否 | 无 | `ea824b24…` | `ea824b24…` | ✓ |
+| `pitch.reference` | (430, 3) | OK | 否 | 无 | `d834fe4a…` | `d834fe4a…` | ✓ |
+| `pitch.practice` | (430, 3) | OK | 否 | 无 | `e4da1409…` | `e4da1409…` | ✓ |
+| `rms.reference` | (3442,) | OK | 否 | 无 | `9b0cd028…` | `9b0cd028…` | ✓ |
+| `rms.practice` | (3442,) | OK | 否 | 无 | `b79236d5…` | `b79236d5…` | ✓ |
+| `chroma.lowres.reference` | (431, 12) | OK | 否 | 无 | `e9a729a7…` | `d86ee64c…` | **✗** |
+| `chroma.lowres.practice` | (431, 12) | OK | 否 | 无 | `e3f12e5d…` | `a19047d2…` | **✗** |
+| `notes.reference` | (10, 3) | OK | 否 | 无 | `43aeae7d…` | `43aeae7d…` | ✓ |
+| `notes.practice` | (11, 3) | OK | 否 | 无 | `5933eafa…` | `5933eafa…` | ✓ |
+
+**★ 12 个端口里 10 个 content_hash 逐字节相同**——包括
+`pitch.*`（pyin 的产物）与 `notes.*`（由 pitch 派生的逐音摘要），
+这说明**自写 pyin 的输出与 librosa 逐位相同**，不是「差不多」。
+
+**★ 只有 2 个 `chroma.lowres.*` 不同，差异可完整解释 ★**：
+`max|Δ| = 1.431e-06`、`mean|Δ| = 7.57e-08`、
+**Pearson r = 1.000000000000**。
+来源单一：librosa 内部用 **float32** 做 `einsum` 累加，
+自写用 **float64** 累加后再 cast float32 ⇒ 只有最后一位的舍入不同
+（逐 bit 相同比例 15%，但相关系数是 1.000000000000）。
+
+> ★ **判据是「12 端口全部非空 + 形状正确」，不是「hash 必须相同」。**
+> ★ chroma 的 hash 不同**如实报告**，没有为了对上而调整任何判据或实现。
+
+无 librosa 环境的端到端跑通：`python3 tools/verify_no_librosa_env.py`
+（它在 import 前把 `librosa` 从 `__import__` 里挡掉，模拟设备）
+⇒ 实测 `pitch`/`notes` 端口两后端 **max|Δ| = 0.0**，`chroma` 1.43e-06。
+全 12 端口对拍：`python3 tools/verify_full_surface_backends.py`
 
 **★ 逐个调用点（★ 换平台时按这张表定位，★ 不用通读）★★**
 
@@ -170,15 +269,17 @@ api      → （无第三方 import）        ← ★ 旧文写「仅 typing」�
 | `scipy.signal.resample_poly` | `ingest.py:53` import · **`:137`** | 多相滤波重采样到 44100 | ★ **可能要换** |
 | `scipy.signal.stft` | `align.py:72` import · **`:159`** | 对齐特征，nperseg=4096 | ★ **可能要换** |
 | `scipy.spatial.distance.cdist` | `align.py:73` import | DTW 代价矩阵 | ★ **可能要换** |
-| `librosa.pyin` | `features.py:57` import · **`:155`** | 逐帧基频 | ★ **可能要换** |
-| `librosa.feature.chroma_stft` | `features.py:57` import · **`:227`** | 12 音级能量 | ★ **可能要换** |
-| `numpy` | 全部五文件 | 数组运算 | ★ 移动端有成熟轮子 |
+| `pyin` | `features.py` 顶层分派 · 调用点 `materialize_pitch` | 逐帧基频 | ★ **不用换**（已有 native 后端） |
+| `chroma_stft` | `features.py` 顶层分派 · 调用点 `materialize_chroma` | 12 音级能量 | ★ **不用换**（已有 native 后端） |
+| `numpy` | 全部五文件 + `core/backend/*` | 数组运算 | ★ 移动端有成熟轮子 |
 
 > ★ **换手机时 `core` 只有两处要改**：
 > ★ **`ingest.py:89-94`（读音频）** 与 **`ingest.py:137`（重采样）**。
 > ★ 其余全是 numpy 运算。
-> ★ 而 `librosa` 那两处（`pyin` / `chroma_stft`）**都能用 numpy 手写替换**，
-> ★ 但**换完要与现实现对拍数值**——那是「换了之后还对不对」，不是「能不能跑」。
+> ★ ★ 而 librosa 那两处（`pyin` / `chroma_stft`）**已经不需要换了** ——
+> ★ ★ `core/backend/` 的 numpy/scipy 自写实现已与 librosa **逐位对上**
+> ★ ★ （pyin 逐位一致、chroma 差在 float32 舍入的 1e-6 量级），
+> ★ ★ 且**帧数完全相同**，故 `core/surface.py` 的帧对齐不受影响。
 
 ---
 

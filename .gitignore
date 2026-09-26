@@ -55,3 +55,17 @@ harmonica_mvp_dataset/*/
 # React 前端（harmonica_eval_web/）的构建产物与依赖
 node_modules/
 harmonica_eval_web/dist/
+local.properties
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+
+# ★ 二进制产物不进库（★ 与「音频不进 git」同理）。
+# ★ 三个 wheel 从 https://chaquo.com/pypi-13.1/ 下载，★ 复算命令见
+# ★ android/app/build.gradle 的 pip 块注释。
+android/app/wheels/*.whl
+
+# ★ 本地验收工具与打包产物，不进版本库（★ 2026-09-26 加）
+_acceptance/
+build/
