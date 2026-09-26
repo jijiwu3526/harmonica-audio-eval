@@ -1,0 +1,37 @@
+/* ★ 排版只服务于「让差异看得更清楚」——★ 不做动画/渐变/阴影。
+   ★ 颜色只用两条线的蓝红与中性灰，★ 避免让配色承担语义。 */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #222;
+  background: #fff;
+  line-height: 1.5;
+}
+.page { max-width: 900px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 0 0 8px; }
+h2 { font-size: 16px; margin: 24px 0 8px; }
+h3 { font-size: 14px; margin: 12px 0 4px; color: #444; }
+.session { color: #666; font-size: 13px; }
+.hint { color: #666; font-size: 13px; margin: 4px 0; }
+.state { font-size: 15px; margin: 4px 0; }
+label { display: block; margin: 8px 0 4px; font-size: 13px; }
+select {
+  width: 100%; padding: 8px; font-size: 14px;
+  border: 1px solid #bbb; border-radius: 4px; background: #fff;
+}
+select:disabled { background: #f4f4f4; color: #888; }
+.feedback { min-height: 20px; margin: 8px 0 0; font-size: 13px; color: #444; }
+.err { background: #fdf3f3; border-left: 3px solid #d93025; padding: 8px; font-size: 13px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 4px 0 10px; }
+th, td { border-bottom: 1px solid #e5e5e5; padding: 4px 6px; text-align: left; }
+th { color: #666; font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; }
+.group { margin-bottom: 10px; }
+.chart { margin: 8px 0 16px; }
+.chart figcaption { font-size: 13px; color: #444; margin-bottom: 2px; }
+.chart svg { border: 1px solid #eee; }
+.legend { font-size: 12px; color: #444; margin-top: 2px; }
+.legend .ref { color: #1f6feb; margin-right: 12px; }
+.legend .prac { color: #d93025; }
+pre { background: #f7f7f7; padding: 8px; font-size: 12px; overflow-x: auto; }

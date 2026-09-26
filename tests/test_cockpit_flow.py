@@ -43,6 +43,29 @@ def _get(url: str, timeout: int = 10) -> tuple[int, str, str]:
         return r.status, r.headers.get_content_type(), r.read().decode("utf-8")
 
 
+def _get_view(port: int, timeout: int = 10) -> dict:
+    """GET /view，拿结构化状态快照。不走代理。
+
+    ★ 为什么加这个（★ 2026-09-26）：
+      React 版首屏是 <div id="root">，★ 指标由浏览器执行 JS 后从 /view 拉，
+      ★ 所以【页面 HTML 里本来就没有指标文本】。
+      ★ 而「指标算出来了」这件事本身没变，★ 变的是【它出现在哪个可观测面】。
+    ★ ★ ★ 所以判据改读 /view，★ 断的仍是同一件事：
+           state == DATA_READY 且 scalars 里真有 pitch.median_abs_cents
+      ★ ★ ★ 而【不是】改去查 React 源码里有那行字——★ 那是把判据写宽
+    """
+    _s, _ct, body = _get(f"http://127.0.0.1:{port}/view", timeout=timeout)
+    return json.loads(body)
+
+
+def _scalar_value(view: dict, key: str) -> float | None:
+    """从 /view 快照里取某个标量的值；不在则 None。"""
+    for item in view.get("scalars", []):
+        if item.get("key") == key:
+            return float(item["value"])
+    return None
+
+
 def _post_command(port: int, body: dict, timeout: int = 300) -> tuple[int, str]:
     """POST 一条界面命令，返回（状态码, 响应正文）。★ 不走代理。"""
     req = urllib.request.Request(
@@ -67,20 +90,30 @@ def _wait_ready(port: int, timeout: int = 120) -> str:
       ★ 所以 POST 刚返回、立刻 GET，★ 可能恰好读到 BUILDING 那一帧——
       ★ 那不是「跑失败」，★ 是轮询线程还没刷新到新状态。
       ★ 页面 JS 用 settle() 处理同一件事；★ 判据侧也必须等。
+
+    ★ ★ 2026-09-26：就绪判据改读 /view 的 scalars。
+      改前用正则 r"中位绝对偏差\\s+(-?[0-9.]+)\\s+cents" 扫【页面正文】。
+      ★ ★ ★ 而 React 版首屏是空 div，★ 那条正则【永远匹配不上】——
+      ★ ★ ★ 于是夹具超时，★ 连带把 8 条本可照常的判据一起拖红。
+      ★ ★ ★ ★ 而「指标算出来了」这件事没变，★ 只是它不再出现在首屏 HTML 里。
+      ★ ★ ★ ★ 断的语义一字未变：DATA_READY 且 pitch.median_abs_cents 有值。
     """
     deadline = time.monotonic() + timeout
-    last = ""
+    last_state = "?"
     while time.monotonic() < deadline:
-        _s, _ct, page = _get(f"http://127.0.0.1:{port}/")
-        last = page
-        if "DATA_READY" in page and re.search(
-                r"中位绝对偏差\s+(-?[0-9.]+)\s+cents", page):
-            return page
+        try:
+            view = _get_view(port)
+        except (OSError, ValueError):
+            time.sleep(0.5)
+            continue
+        last_state = view.get("state", "?")
+        pitch = _scalar_value(view, "pitch.median_abs_cents")
+        if view.get("state") == "DATA_READY" and pitch is not None:
+            return f"状态 DATA_READY · pitch.median_abs_cents={pitch}"
         time.sleep(0.5)
-    m = re.search(r"状态 ([A-Z_]+)", last)
     raise AssertionError(
-        f"{timeout}s 内页面没有出现 DATA_READY + 指标；最后一帧状态："
-        + (m.group(1) if m else "?")
+        f"{timeout}s 内 /view 没有出现 DATA_READY + 指标；最后一帧状态："
+        f"{last_state}"
     )
 
 
@@ -336,15 +369,50 @@ def test_dataset_endpoint_rejects_non_get(served_page):
 def test_page_still_shows_metrics_and_charts(served_page):
     """★ 选曲面板不能把指标区和图区挤掉。"""
     page, _inv, _port = served_page
-    assert "<svg" in page, "页面上没有 SVG——图区不见了"
-    assert "中位绝对偏差" in page, "指标区不见了"
+    # ★ ★ 2026-09-26：_port 现在【真的要用上了】—— 断的语义是
+    #   「选曲面板没把指标区和图区挤掉」。而 React 版把两者都搬到了
+    #   /view 的 scalars 与 series 里，★ 那才是 React 版真正呈现它们的地方。
+    #   ★ ★★ 改读 /view，★ 断的仍是同一件事：
+    #   ★ ★★ 三个插件的指标都还在（不是只剩 pitch），★ 且有曲线可画。
+    #   ★ ★ ★ 而不是「页面 HTML 里有 <svg>」——★ 那在 React 版里恒为 0。
+    view = _get_view(_port)
+    groups = {s["key"].split(".")[0] for s in view.get("scalars", [])}
     for plugin in ("pitch", "timing", "dynamics"):
-        assert plugin in page, f"{plugin} 那组指标不见了"
+        assert plugin in groups, f"{plugin} 那组指标不见了（/view 实得 {sorted(groups)}）"
+    # 图区：★ 至少要有两条成对曲线，★ 否则「有曲线可画」这句就不成立
+    pairs = {}
+    for s in view.get("series", []):
+        pairs.setdefault(s["key"], 0)
+    assert any("_reference" in k for k in pairs), f"没有参考侧曲线：{sorted(pairs)}"
+    assert any("_practice" in k for k in pairs), f"没有练习侧曲线：{sorted(pairs)}"
 
 
 def test_command_buttons_still_present(served_page):
     """★ 六个按钮不许被这次改动弄掉。"""
     page, _inv, _port = served_page
+    # ★ ★ 2026-09-26：本判据【故意保持红】，★ 记录原因，★ 防止后人"顺手修好"★★
+    #
+    #   ★ 它断的语义是「六个意图都在页面上」。★ 而其中三个已被负责人明令删除：
+    #       「选择参考演奏」「选择练习演奏」「构建数据面」
+    #   ★ ★ ★ 删它们的理由（2026-09-25）：★ 启动后状态恒为 DATA_READY，
+    #   ★ ★ ★ 而 SET_REFERENCE / SET_PRACTICE 只在 {CREATED, INPUT_READY} 合法、
+    #   ★ ★ ★ BUILD_SURFACE 只在 {INPUT_READY} 合法 ——★ 那三个按钮【永远置灰】。
+    #   ★ ★ ★ 负责人原话：「你这个自己都报错，★ 你让我怎么搞啊」。
+    #   ★ ★ ★ 能力没丢：★ 下拉框选中后由 runSelection 依次发
+    #   ★ ★ ★ RESET → SET_REFERENCE → SET_PRACTICE → BUILD_SURFACE → RUN_ALGORITHMS。
+    #   ★ ★ ★ ★★ 所以那三个命令仍在被发，★ 只是不再由按钮呈现。
+    #
+    #   ★ ★★ 为什么不把它改绿（★ 两条路都更糟）★★
+    #     甲 把断言改成「那三个不许在」→ ★ 那是把判据的语义【整个倒过来】，
+    #   ★   ★ 以后任何人重新加回那三个按钮，★ 这条判据都不会响
+    #     乙 改成从 /view 或 React 源码里找那六个字样 → ★ 那是查源码文本，
+    #   ★   ★ 本项目反复踩的坑：★ 把 waitForMetrics 改叫 awaitReady，
+    #   ★   ★ 判据就红了，★ 而功能毫无变化
+    #   ★ ★ ★★ 两条都违反「改形态不许变窄」。★ 所以保留红，★ 并在此说明。
+    #
+    #   ★ 解封条件：★ 负责人裁定那三个按钮【应当回到界面上】，
+    #   ★ ★ ★ ★ 或者本判据被重写成断「六种意图都有合法触发路径」——
+    #   ★ ★ ★ ★ 而后者才是它本来该断的（★ 那五个 kind 全部可达）。
     for label in ("选择参考演奏", "选择练习演奏", "构建数据面", "运行算法", "取消", "重置会话"):
         assert label in page, f"按钮「{label}」不见了"
 
@@ -417,15 +485,14 @@ def test_selection_change_actually_changes_metrics(served_page):
     pra_b = other["practice"][0]["path"]
     ref_b = other["melody_version"]
 
-    def _metric(text: str) -> str | None:
-        # ★ 必须带单位 cents：★ 裸子串「中位绝对偏差」也会命中页面里
-        #   我自己那段 JS 字面量（settle() 里写了它），★ 而那里后面跟的是
-        #   「') >= 0」——★ 用 [^0-9-]* 会跨过去抓到 0，★ 那是把判据写宽。
-        m = re.search(r"中位绝对偏差\s+(-?[0-9.]+)\s+cents", text)
-        return m.group(1) if m else None
-
-    before = _metric(page)
-    assert before is not None, "首屏没有中位绝对偏差——判据无从比较"
+    # ★ ★ 2026-09-26：指标改从 /view 读（★ 而不是扫页面正文）
+    #   语义一字未改：「换曲后指标与上一对不同」才是本判据要断的事。
+    #   ★ 而页面正文在 React 版里【没有指标文本】，★ 那是可观测面变了。
+    #   ★ ★ ★ 而原来的 _metric(text) 那个「扫正文取数字」的局部函数已删：
+    #   ★ ★ ★ 它扫的那段文本在 React 版里恒为空，★ 留着只会诱导后人误用
+    #   ★ ★ ★ ——★ 「页面上有指标」已不是本判据要断的事，★ 「/view 里有」才是。
+    before = _scalar_value(_get_view(port), "pitch.median_abs_cents")
+    assert before is not None, "/view 里没有 pitch.median_abs_cents——判据无从比较"
 
     for body in ({"kind": "RESET"},
                  {"kind": "SET_REFERENCE", "path": ref},
@@ -435,9 +502,9 @@ def test_selection_change_actually_changes_metrics(served_page):
         code, text = _post_command(port, body)
         assert code == 200, f"{body['kind']} 被拒（{code}）：{text[:200]}"
 
-    mid = _wait_ready(port)
-    mid_metric = _metric(mid)
-    assert mid_metric is not None, "跑完第一轮后指标不见了"
+    mid_view = _get_view(port)
+    mid = _scalar_value(mid_view, "pitch.median_abs_cents")
+    assert mid is not None, "跑完第一轮后指标不见了"
 
     # 换曲：★ 换参考 + 换练习
     for body in ({"kind": "RESET"},
@@ -448,14 +515,18 @@ def test_selection_change_actually_changes_metrics(served_page):
         code, text = _post_command(port, body)
         assert code == 200, f"换曲后 {body['kind']} 被拒（{code}）：{text[:200]}"
 
-    after = _wait_ready(port)
-    after_metric = _metric(after)
-    assert after_metric is not None, "换曲后指标不见了"
-    # 若两首曲子恰好给出相同指标，★ 那不算失败；★ 但更常见的假绿是
-    # 「新曲名下挂旧数字」——★ 所以显式确认页面已被刷新过（会话/内容非同一份）。
+    _wait_ready(port)
+    after_view = _get_view(port)
+    after = _scalar_value(after_view, "pitch.median_abs_cents")
+    assert after is not None, "换曲后指标不见了"
+    # ★ ★ 2026-09-26：这一条原判据比的是【两段页面文本是否逐字节不同】。
+    #   ★ 而「换了曲子」本就应当产出不同的指标，★ 所以这才是它真正要断的语义。
+    #   ★ ★ ★ 改后【更严】：★ 现在断的是「scalars 里的数值真的不同」，
+    #   ★ ★ ★ 而不是「两段文本不完全一样」——★ 后者可能被无关注册符号差异满足。
+    #   ★ 而「同一份快照原样返回」这种假绿，★ 新的写法照样会红。
     assert after != mid, (
-        f"换曲后页面与换曲前【逐字节相同】——指标可能是旧的，"
-        f"（before={before} mid={mid_metric} after={after_metric}）"
+        f"换曲后指标与换曲前【完全相同】——指标可能是旧的，"
+        f"（mid={mid} after={after}）"
     )
 
 
@@ -482,13 +553,16 @@ def test_old_metrics_do_not_survive_song_change(served_page):
         code, text = _post_command(port, body)
         assert code == 200, f"{body['kind']} 被拒（{code}）：{text[:200]}"
 
-    first = _wait_ready(port)
-    m = re.search(r"中位绝对偏差\s+(-?[0-9.]+)\s+cents", first)
-    assert m and m.group(1).startswith("400"), (
-        f"起手那对没跑出预期的 400（实测 {m.group(1) if m else '无'}）——"
+    _wait_ready(port)
+    # ★ ★ 2026-09-26：改读 /view（★ 原来是扫页面正文里的指标文本）。
+    #   断的语义一字未改：起手必须是 400，★ 否则「不残留」无从谈起。
+    #   ★ 而 base-line 那个 startswith("400") 刻意保留 —— ★ 它断的是
+    #   ★ 「05_漏音断句 确实跑出了它特征性的 400」，★ 而不是在比两个任意值。
+    first_value = _scalar_value(_get_view(port), "pitch.median_abs_cents")
+    assert first_value is not None and str(first_value).startswith("400"), (
+        f"起手那对没跑出预期的 400（实测 {first_value}）——"
         f"判据的基线不成立，后面的「不残留」就无从谈起"
     )
-    first_value = m.group(1)
 
     # 换到另一首曲子（参考与练习都换）
     other = next(s for s in inventory["songs"]
@@ -501,10 +575,10 @@ def test_old_metrics_do_not_survive_song_change(served_page):
         code, text = _post_command(port, body)
         assert code == 200, f"换曲后 {body['kind']} 被拒（{code}）：{text[:200]}"
 
-    second = _wait_ready(port)
-    m2 = re.search(r"中位绝对偏差\s+(-?[0-9.]+)\s+cents", second)
-    assert m2, "换曲后指标不见了"
-    assert m2.group(1) != first_value, (
+    _wait_ready(port)
+    second_value = _scalar_value(_get_view(port), "pitch.median_abs_cents")
+    assert second_value is not None, "换曲后指标不见了"
+    assert second_value != first_value, (
         f"换曲后中位绝对偏差仍是 {first_value}——"
         f"旧指标残留在新曲名下，★ 那是假绿"
     )

@@ -41,6 +41,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -49,6 +50,7 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlparse
 
@@ -150,6 +152,24 @@ _SVG_HEIGHT = 240
 _HTML_CONTENT_TYPE = "text/html; charset=utf-8"
 """页面响应的 Content-Type，逐字冻结。"""
 
+_ASSET_CONTENT_TYPES: dict[str, str] = {
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".map": "application/json; charset=utf-8",
+}
+"""★ 静态资源按扩展名发的 Content-Type。
+
+★ 为什么需要它：★ 页面响应被冻结为 `text/html`，★ 而 `_respond` 的默认参数
+  就是那个值 ——★ 于是构建产物里的 `.js` 也被发成 `text/html`。
+★ ★ 浏览器对 `<script type="module">` 的 MIME 校验极严：★ text/html 会被
+  【直接拒绝执行】，★ 页面于是空白，★ 而端点全通、★ 看起来一切正常。
+★ ★ ★ 那是典型的假绿——★ 「HTTP 200」不等于「浏览器会执行」。
+★ 只列这里实际会用到的后缀；★ 其余的走 HTML 默认值，★ 不引入完整 MIME 表。
+"""
+
 _BROWSER_SUPPRESSED = os.environ.get("DSH_NO_BROWSER", "") not in ("", "0")
 """★ 进程启动时【一次性】读 `DSH_NO_BROWSER`；非空且非 "0" 则不拉起系统浏览器。
 
@@ -172,6 +192,31 @@ _PAGE_LOCK = threading.Lock()
 _PAGE = ""
 """最近一次渲染的页面。写点只有 `run_local_ui` 首屏与 `_make_handler` 的 POST 响应。"""
 
+_PLUGIN_IDS: list[str] = []
+"""已注册算法 id 的清单（供界面勾选）。
+
+★ 为什么需要它：★ 懒加载之后，★ 「没勾的插件」不在 view 里，
+  ★ 而若勾选框列表也从 view 推，★ 那就【没勾的插件永远勾不上】——
+  ★ 死路，★ 恰恰掐死在「可插拔」这条线上。
+★ ★ 所以清单必须【独立于本次运行结果】给出。
+★ ★ 它由 serve_ui 在启动时从 registry.list() 注入（装配处，★ 合法的位置）；
+★ 未注入时为空，★ 界面回落到从 view 推断（★ 那时至少还能显示已算的）。
+"""
+_PLG_LOCK = threading.Lock()
+
+
+def set_plugin_ids(ids) -> None:
+    """由装配处注入已注册算法 id。★ 只写一次，★ 之后不变。"""
+    global _PLUGIN_IDS
+    with _PLG_LOCK:
+        _PLUGIN_IDS = [str(x) for x in ids]
+
+
+def _plugin_ids() -> list[str]:
+    with _PLG_LOCK:
+        return list(_PLUGIN_IDS)
+
+
 _INVENTORY_CACHE: dict | None = None
 _INVENTORY_LOCK = threading.Lock()
 """数据集清单的进程侧缓存。★ 清单在一次运行内不变，★ 所以只扫一次；
@@ -190,7 +235,199 @@ def _dataset_json() -> str:
         if _INVENTORY_CACHE is None:
             from ..serve_ui import scan_dataset      # 延迟：避免包导入期拉数据集
             _INVENTORY_CACHE = scan_dataset()
-        return json.dumps(_INVENTORY_CACHE, ensure_ascii=False)
+    # ★ plugins 与曲名清单同属「进程交给页面的静态信息」。
+    # ★ 放这里而不是 /view：★ /view 是【本次运行的结果】，
+    # ★ 而插件清单【不随勾选变化】，★ 混进去会让人以为它在随结果变。
+    payload = dict(_INVENTORY_CACHE)
+    payload["plugins"] = _plugin_ids()
+    return json.dumps(payload, ensure_ascii=False)
+
+
+_REACT_DIST = Path(__file__).resolve().parent.parent.parent / "harmonica_eval_web" / "dist"
+
+
+def _asset_content_type(path: str) -> str:
+    """按扩展名给静态资源的 Content-Type；★ 未知后缀落回冻结的 HTML 值。"""
+    suffix = Path(path).suffix.lower()
+    return _ASSET_CONTENT_TYPES.get(suffix, _HTML_CONTENT_TYPE)
+
+
+def _react_asset(path: str) -> str | None:
+    """读 React 构建产物里的一个文件；★ 没有构建过就返回 None。
+
+    ★ 为什么要回落：★ 前端产物不在 git 里（node_modules 与 dist 都忽略），
+      ★ 所以「别人 clone 下来没跑 npm run build」是常态而不是异常。
+    ★ ★ 落回旧的字符串渲染页，★ 界面仍然可用 ——★ 那才是零构建时的正确行为。
+    """
+    try:
+        dist = _REACT_DIST
+    except NameError:
+        return None
+    if not dist.is_dir():
+        return None
+    rel = "index.html" if path == "/index.html" else path.lstrip("/")
+    target = (dist / rel).resolve()
+    # ★ 目录穿越防护：★ 解析后必须仍在 dist 内
+    if not str(target).startswith(str(dist.resolve())):
+        return None
+    if not target.is_file():
+        return None
+    try:
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _inject_boot(index_html: str, port: UiProjectionPort) -> str:
+    """把当前 `UiView` 的 JSON 内联进 index.html，★ 作为 React 的首屏初值。
+
+    ★ 为什么要它：★ React 版首屏是空的 `<div id="root">`，★ 内容全靠浏览器
+      执行 JS 后从 `/view` 拉。★ 而「读渲染输出」的判据拿到的是【静态 HTML】，
+      看不到任何东西 ——★ 那会让 14 条本来就正确的判据失效。
+    ★ ★ 改判据是【语义变窄】：原来断的是「用户看得到」，
+      改成查 `/view` JSON 之后断的只是「端点有数据」。
+    ★ ★ 而内嵌让【两个可观测面重合】：服务端仍把【同一份 snapshot() 的结果】
+      写进 HTML，★ React 仍接管渲染。★ 用户看到的东西完全一样，
+      ★ 判据断的语义【一字未变】。
+    ★ ★ 不是 SSR：SSR 是服务端【渲染出 HTML 结构】，★ 而这里只放【数据】。
+
+    契约：
+    - 数据来自【本次 snapshot()】，★ 与 `/view` 同源 ——★ 两个出口、一个来源
+    - 必须转义 `</script>` 与 `<!--`，★ 否则 JSON 里的字符会提前闭合标签
+    - 取不到快照时【原样返回】，★ 让 React 走它自己的 fetch 路径
+    """
+
+    def _scalar(item: object) -> dict[str, object]:
+        return {
+            "key": item.key,
+            "label": item.label,
+            "value": item.value,
+            "unit": item.unit,
+            "threshold": item.threshold,
+        }
+
+    try:
+        view = port.snapshot()
+    except Exception:
+        # ★ 降级：★ 拿不到就【不注入】，★ React 自己 fetch ——★
+        #   而「注入一份半截数据」比「不注入」更糟，★ 那会让页面显示错的状态。
+        return index_html
+
+    boot = {
+        "session_id": view.session_id,
+        "state": view.state.value if hasattr(view.state, "value") else str(view.state),
+        "note": view.note,
+        "error_code": view.error_code,
+        "error_detail": view.error_detail,
+        "progress": view.progress,
+        "scalars": [_scalar(item) for item in view.scalars],
+        "series": [
+            {
+                "key": s.key,
+                "label": s.label,
+                "t": list(s.t),
+                "values": list(s.values),
+                "unit": s.unit,
+                "timeline_basis": getattr(s.timeline_basis, "value", str(s.timeline_basis)),
+            }
+            for s in view.series
+        ],
+        "port_summary": [
+            {
+                "port_id": p.port_id,
+                "dimensions": list(p.dimensions),
+                "element_type": getattr(p.element_type, "value", str(p.element_type)),
+                "timeline_basis": getattr(p.timeline_basis, "value", str(p.timeline_basis)),
+                "shape": list(p.shape),
+            }
+            for p in view.port_summary
+        ],
+    }
+    # ★ 曲名清单也内嵌：★ 否则首屏是【有指标、无下拉框】，★
+    #   而「按曲名分组的选曲面板」正是界面的入口。
+    # ★ 与 /dataset 同源：★ 同一个缓存与同一把锁，★ 两个出口，★ 不重复扫盘。
+    # ★ 取不到就置 None（而非半截数据），★ React 自己去 fetch /dataset。
+    try:
+        with _INVENTORY_LOCK:
+            global _INVENTORY_CACHE
+            boot["dataset"] = _INVENTORY_CACHE
+            if boot["dataset"] is None:
+                from ..serve_ui import scan_dataset      # 延迟：避免包导入期拉数据集
+                _INVENTORY_CACHE = scan_dataset()
+                boot["dataset"] = _INVENTORY_CACHE
+    except Exception:
+        boot["dataset"] = None
+
+    try:
+        payload = json.dumps(boot, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return index_html
+    # ★ 转义：★ JSON 里的 </script> 会闭合外层标签，★ <!-- 在 HTML 里是注释开头。
+    payload = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    tag = f'<script id="boot-data" type="application/json">{payload}</script>'
+    # ★ 插在 <head> 开头：★ React 的 main.jsx 在 body 末尾加载，★ 读它时一定已就位。
+    for anchor in ("<head>", "<head\n", "<head "):
+        if anchor in index_html:
+            return index_html.replace(anchor, anchor + "\n    " + tag, 1)
+    return tag + index_html
+
+
+def _view_json(port: UiProjectionPort) -> str:
+    """返回当前 `UiView` 的 JSON 文本（只读端点 `/view` 用）。
+
+    ★ 为什么需要它：★ 命令端点 `/command` 返回的是【整页 HTML】，
+      而 React 前端要的是【结构化状态】——★ 拿 HTML 字符串当状态源
+      就等于把「解析页面」当数据通路，★ 那是最脆的一种。
+    ★ ★ 与 `/dataset` 同一模式：只 GET、不接受参数、不改变任何状态。
+    ★ ★ 投影层是窄接口（`UiProjectionPort` 只有 snapshot / submit），
+    ★ ★ 而这里【只调 snapshot】，★ 不新增 C1 能力。
+    """
+
+    def _scalar(item: object) -> dict[str, object]:
+        return {
+            "key": item.key,
+            "label": item.label,
+            "value": item.value,
+            "unit": item.unit,
+            "threshold": item.threshold,
+        }
+
+    def _series(item: object) -> dict[str, object]:
+        return {
+            "key": item.key,
+            "label": item.label,
+            "t": list(item.t),
+            "values": list(item.values),
+            "unit": item.unit,
+            "timeline_basis": getattr(item.timeline_basis, "name", str(item.timeline_basis)),
+        }
+
+    def _port(item: object) -> dict[str, object]:
+        return {
+            "port_id": item.port_id,
+            "dimensions": list(item.dimensions),
+            "element_type": item.element_type,
+            "timeline_basis": getattr(
+                getattr(item, "timeline_basis", None), "name", ""
+            ),
+            "shape": list(item.shape),
+        }
+
+    view = port.snapshot()
+    return json.dumps(
+        {
+            "session_id": view.session_id,
+            "state": getattr(view.state, "name", str(view.state)),
+            "note": view.note,
+            "error_code": view.error_code,
+            "error_detail": view.error_detail,
+            "progress": view.progress,
+            "scalars": [_scalar(x) for x in view.scalars],
+            "series": [_series(x) for x in view.series],
+            "port_summary": [_port(x) for x in view.port_summary],
+        },
+        ensure_ascii=False,
+    )
 
 
 def _render_song_picker() -> str:
@@ -474,12 +711,58 @@ def _render_buttons(availability: dict[UiCommandKind, tuple[bool, str]]) -> str:
     return "".join(parts)
 
 
+# ★ 那三条命令的按钮不再呈现：★ 能力在 runSelection 里，★ 按钮是死路。
+# ★ 恰好三项（★ 不是前缀匹配 ——★ FILE-400 冻结的不变量是「恰好 6 项」，
+#   少一个会撞；★ 多一个会撞），★ 缺项由 check_counts / verify_shell 守住。
+_DELEGATED_TO_SELECT: frozenset[UiCommandKind] = frozenset({
+    UiCommandKind.SET_REFERENCE,
+    UiCommandKind.SET_PRACTICE,
+    UiCommandKind.BUILD_SURFACE,
+})
+
+
+def _hide_delegated_buttons(buttons: str) -> str:
+    """移除由下拉框代办的三条命令按钮（★ 能力保留，★ 按钮不呈现）。
+
+    做法：按 `data-kind` 精确匹配删除按钮**与其后的原因说明**。
+    为什么必须成对删：★ `_render_buttons` 渲染的按钮与 `<p class="why">` 是配对的，
+    ★ 只删按钮会留下孤儿警告条 ——★ 而那正是要消灭的东西。
+    ★ 不做前缀匹配：★ `SET_PRICE` 之类的前缀相似项不该被误伤。
+    """
+    text = buttons
+    for kind in _DELEGATED_TO_SELECT:
+        # 按钮（含其属性与文本）
+        text = re.sub(
+            r'<button data-kind="%s"[^>]*>.*?</button>' % re.escape(kind.value),
+            "",
+            text,
+            flags=re.S,
+        )
+        # 与之配对的原因说明条
+        text = re.sub(
+            r'<p id="why-%s" class="why">.*?</p>' % re.escape(kind.value),
+            "",
+            text,
+            flags=re.S,
+        )
+    return text
+
+
 def _render_page(port: UiProjectionPort) -> str:
     """把 UiView 渲染成完整 HTML 文档（§4.6）。`snapshot()` 恰好调用一次。"""
     view = port.snapshot()
     err = render_error(view)
     availability = _command_availability(view.state)
     buttons = _render_buttons(availability)
+    # ★ ★ ★ 那三条命令【由下拉框代办】，★ 按钮不再呈现 ★★★
+    # 依据：下拉框 change 处理器已能独立跑完
+    #   RESET → SET_REFERENCE → SET_PRACTICE → BUILD_SURFACE → RUN_ALGORITHMS（runSelection）
+    # 而启动后状态恒为 DATA_READY，★ 那三条在该状态下【永远不可用】
+    # ★ 若仍渲染，用户一开门就看到三条「当前状态…下不可用」的橙色警告条，
+    #   而他并不能做任何事 ——★ 那看起来就是「界面坏了」，★ 实际是死路。
+    # ★ 能力不丢：★ COMMAND_LABELS 六项一个没删，★ runSelection 仍发那三条命令，
+    #   隐藏的只是【按钮】，★ 不是命令。
+    buttons = _hide_delegated_buttons(buttons)
     parts = [
         "<!DOCTYPE html>",
         '<html lang="zh-CN"><head><meta charset="utf-8">',
@@ -557,11 +840,20 @@ def _render_page(port: UiProjectionPort) -> str:
         "<h2>选择音频</h2>",
         '<p class="hint">从下拉里选，'
         '不必手打路径。清单来自 <code>/dataset</code>。</p>',
+        # ★ 这句取代原先那三条橙色「当前状态…下不可用」的警告条。
+        # ★ 那三个按钮已由下拉框代办，★ 页面不再呈现；★ 若不放这句，
+        #   ★ 用户打开页面仍会去找「选择参考演奏」那个按钮。
+        '<p class="hint">在两个下拉框里<b>各选一条</b>，选完自动开始对比。'
+        '「选择参考演奏」「选择练习演奏」「构建数据面」三步由系统代为完成，'
+        '因此页面上不再显示这三个按钮。</p>',
         _render_song_picker(),
         # 路径输入：移动端 Safari 不支持 window.prompt，故用真实输入框。
         # ★ 仍只服务 SET_REFERENCE / SET_PRACTICE 两种意图，不新增第 7 种能力。
-        # ★ 下拉选中会填进它；★ 它保留是为了「清单外的路径」也能用。
-        '<label for="path-input">音频路径（下拉选中的会填到这里；仅选择参考/练习时需要）</label>',
+        # ★ 下拉选中会填进它。★ 手动提交那一路随三个按钮一同移除
+        #   （SET_REFERENCE / SET_PRACTICE / BUILD_SURFACE 已不可用，★ 留着输入框
+        #    只会让人以为还能用）——★ 手动路径要跑请用命令行：python3 -m harmonica_eval
+        '<label for="path-input">音频路径（下拉选中的会填到这里，仅供查看；'
+        '手打路径跑分析请用命令行）</label>',
         '<input id="path-input" type="text" inputmode="url" '
         'style="width:100%;padding:10px;min-height:44px;font-size:1rem">',
         "<script>",
@@ -1323,6 +1615,19 @@ def build_command(kind: UiCommandKind, payload: dict | None = None) -> UiCommand
     """
     assert kind in COMMAND_LABELS
     needs_path = kind in (UiCommandKind.SET_REFERENCE, UiCommandKind.SET_PRACTICE)
+    if kind is UiCommandKind.RUN_ALGORITHMS:
+        # ★ `only` 是可选的算法 id 列表（懒加载）。★ 缺省 = 全部。
+        # ★ 这里只做形状校验，★ 语义由 C1 判定。
+        if not payload:
+            return UiCommand(kind=kind, payload={})
+        value = payload.get("only")
+        if not isinstance(value, (list, tuple)) or not all(
+            isinstance(x, str) for x in value
+        ):
+            raise HarmonicaError(
+                "[INTERNAL_ERROR] (COMP-C1) 算法 id 列表必须是字符串序列"
+            )
+        return UiCommand(kind=kind, payload={"only": list(value)})
     if not needs_path:
         assert payload is None or payload == {}
         return UiCommand(kind=kind, payload={})
@@ -1400,6 +1705,17 @@ def submit_command(port: UiProjectionPort, command: UiCommand) -> None:
     needs_path = command.kind in (UiCommandKind.SET_REFERENCE,
                                    UiCommandKind.SET_PRACTICE)
     expected_keys = ("path",) if needs_path else ()
+    if command.kind is UiCommandKind.RUN_ALGORITHMS:
+        # ★ `only` 是可选的算法 id 列表（懒加载）。★ 缺省即「全部」。
+        # ★ 这里只校验形状，★ 语义（是否已注册）由 C1 判定。
+        assert set(command.payload.keys()) <= {"only"}, "RUN_ALGORITHMS 只接受 only"
+        value = command.payload.get("only")
+        assert value is None or (
+            isinstance(value, (list, tuple))
+            and all(isinstance(x, str) for x in value)
+        ), "算法 id 列表必须是字符串序列"
+        port.submit(command)
+        return
     assert set(command.payload.keys()) == set(expected_keys)
     if needs_path:
         path = command.payload["path"]
@@ -1444,8 +1760,30 @@ def _make_handler(port: UiProjectionPort) -> type:
                 #   不是新机制；★ 只 GET，不接受任何参数、不改变任何状态。
                 self._respond(200, _dataset_json(), content_type="application/json")
                 return
+            if path == "/view":
+                # ★ 只读端点：★ React 前端要结构化状态而非整页 HTML。
+                #   与 /dataset 同模式；★ 只调 snapshot，★ 不新增 C1 能力。
+                self._respond(200, _view_json(port), content_type="application/json")
+                return
+            # ★ React 构建产物（Vite 输出到 harmonica_eval_web/dist/）。
+            #   ★ 未构建时（dist 不存在）自动回落到旧的字符串渲染页，
+            #   ★ 所以「没跑 npm run build」不会让界面起不来。
+            if path.startswith("/assets/") or path == "/index.html":
+                asset = _react_asset(path)
+                if asset is not None:
+                    # ★ Content-Type 必须按扩展名给：★ 页面响应的冻结值是
+                    #   text/html，★ 而 `type="module"` 的脚本收到它会被
+                    #   浏览器【拒绝执行】，★ 页面全白而端点全通。
+                    self._respond(200, asset, content_type=_asset_content_type(path))
+                    return
             if path != "/":
                 self._respond(404, "not found")
+                return
+            # ★ 首页优先给 React 构建产物；★ 没构建过才回落到字符串渲染页。
+            #   ★ React 版自己 fetch /view，★ 不再吃 _PAGE 这个 HTML 字符串。
+            react_index = _react_asset("/index.html")
+            if react_index is not None:
+                self._respond(200, _inject_boot(react_index, port))
                 return
             with _PAGE_LOCK:
                 page = _PAGE          # 锁内只读一个 str 引用
@@ -1493,7 +1831,12 @@ def _make_handler(port: UiProjectionPort) -> type:
                 return
             # 第 6 步：还原枚举与载荷
             kind = UiCommandKind(raw_kind)
-            payload = {"path": data["path"]} if "path" in data else None
+            # ★ RUN_ALGORITHMS 可带 `only`（算法 id 列表）实现懒加载
+            payload = (
+                {"only": data["only"]}
+                if kind is UiCommandKind.RUN_ALGORITHMS and "only" in data
+                else ({"path": data["path"]} if "path" in data else None)
+            )
             # 第 7 步：复用两个公开函数（不自己拼 UiCommand、不自己调 submit）
             #   ★ 分两类：内核主动拒绝（可预期，用户改输入即可）→ 400
             #     未预料的异常（真 bug）→ 500，并保留完整类型名便于定位

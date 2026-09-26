@@ -255,6 +255,18 @@ def _run(reference_uri: str, practice_uri: str) -> int:
     #    供数据面重建后再次运行。
     app.run_algorithms(session_id)
 
+    # ④b 把已注册算法 id 交给界面。★ 懒加载之后「没勾的插件」不在
+    #      view 里，★ 而若勾选列表也从 view 推，★ 那就永远勾不上。
+    #      装配处是唯一合法知道 registry 的位置，★ 界面自己拿不到。
+    try:
+        from .cockpit.app import set_plugin_ids
+    except ImportError:                      # pragma: no cover - C4 不可用时上面已抛
+        set_plugin_ids = None
+    if set_plugin_ids is not None:
+        registry = getattr(app, "_registry", None)
+        if registry is not None:
+            set_plugin_ids([spec.algorithm_id for spec in registry.list()])
+
     # ⑤ 交出端口，启动界面，阻塞至其关闭。
     #    ★ 不传端口号：端口由 C4 自行在 8721–8784 探测（app._pick_port）。
     return launch_cockpit(port=app)
